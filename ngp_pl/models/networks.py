@@ -10,7 +10,7 @@ from .rendering import NEAR_DISTANCE
 
 
 class NGP(nn.Module):
-    def __init__(self, scale, num_levels):
+    def __init__(self, scale, num_levels=16):
         super().__init__()
 
         # scene bounding box
