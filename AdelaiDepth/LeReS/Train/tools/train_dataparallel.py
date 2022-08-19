@@ -34,7 +34,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--logdir", default="log_test3/", help="path to the log directory", type=str)
 
 ### Load pretrained model
-parser.add_argument("--ckpt", default="/orion/u/mikacuy/coordinate_mvs/AdelaiDepth/LeReS/Minist_Test/res101.pth", help="checkpoint", type=str)
+parser.add_argument("--ckpt", default="../../Minist_Test/res101.pth", help="checkpoint", type=str)
 
 parser.add_argument('--loss_mode', type=str, default='_ranking-edge_pairwise-normal-regress-edge_msgil-normal_meanstd-tanh_pairwise-normal-regress-plane_', help='losses to use')
 parser.add_argument('--epoch', default= 600, type=int)
@@ -534,7 +534,7 @@ for epoch in range(MAX_EPOCH):
     # save checkpoint
     if epoch % 8 == 0:
         print("Saving to model...")
-        save_ckpt(FLAGS, tmp_i, epoch, model, optimizer.optimizer, scheduler, total_raw)
+        save_ckpt(FLAGS, 0, epoch, model, optimizer.optimizer, scheduler, total_raw)
 
 
 

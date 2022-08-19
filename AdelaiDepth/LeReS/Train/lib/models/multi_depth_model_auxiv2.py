@@ -27,7 +27,7 @@ class RelDepthModel(nn.Module):
             self.losses_dict = {'total_loss': torch.tensor(0.0, dtype=torch.float).cuda()}
         return {'decoder': self.logit, 'auxi': self.auxi, 'losses': self.losses_dict}
 
-    def inference(self, data):
+    def inference(self, data, return_loss=False):
         # with torch.no_grad():
         #     out = self.forward(data, is_train=False)
         #     pred_depth = out['decoder']
@@ -40,9 +40,14 @@ class RelDepthModel(nn.Module):
         #             }
 
         self.inputs = data['rgb'].cuda()
-        depth, _ = self.depth_model(self.inputs)
+        depth, auxi = self.depth_model(self.inputs)
         pred_depth_out = depth
-        # pred_depth_out = depth - depth.min() + 0.01
+        pred_depth_out = depth - depth.min() + 0.01
+
+        if return_loss:
+            losses_dict = self.losses.criterion(depth, auxi, data)
+            return pred_depth_out, losses_dict
+
         return pred_depth_out
 
 #### To incorporate cIMLE
@@ -64,12 +69,16 @@ class RelDepthModel_cIMLE(nn.Module):
 
         if is_train:
             self.losses_dict = self.losses.criterion(self.logit, self.auxi, data)
+
+            ### per pixel loss not needed in training
+            del self.losses_dict[0]["ilnr_per_pixel"]
+
         else:
             self.losses_dict = {'total_loss': torch.tensor(0.0, dtype=torch.float).cuda()}
 
         return {'decoder': self.logit, 'auxi': self.auxi, 'losses': self.losses_dict}
 
-    def inference(self, data, z, rescaled=False):
+    def inference(self, data, z, rescaled=False, return_loss=False):
         # with torch.no_grad():
         #     out = self.forward(data, is_train=False)
         #     pred_depth = out['decoder']
@@ -90,6 +99,10 @@ class RelDepthModel_cIMLE(nn.Module):
 
         if rescaled:  
             pred_depth_out = depth - depth.min() + 0.01
+
+        if return_loss:
+            losses_dict = self.losses.criterion(depth, None, data)
+            return pred_depth_out, losses_dict
 
         return pred_depth_out
 
@@ -123,12 +136,15 @@ class RelDepthModel_cIMLE_decoder(nn.Module):
 
         if is_train:
             self.losses_dict = self.losses.criterion(self.logit, self.auxi, data)
+
+            ### per pixel loss not needed in training
+            del self.losses_dict[0]["ilnr_per_pixel"]
         else:
             self.losses_dict = {'total_loss': torch.tensor(0.0, dtype=torch.float).cuda()}
 
         return {'decoder': self.logit, 'auxi': self.auxi, 'losses': self.losses_dict}
 
-    def inference(self, data, z, rescaled=False):
+    def inference(self, data, z, rescaled=False, return_loss=False):
         # with torch.no_grad():
         #     out = self.forward(data, is_train=False)
         #     pred_depth = out['decoder']
@@ -149,6 +165,10 @@ class RelDepthModel_cIMLE_decoder(nn.Module):
 
         if rescaled:  
             pred_depth_out = depth - depth.min() + 0.01
+
+        if return_loss:
+            losses_dict = self.losses.criterion(depth, None, data)
+            return pred_depth_out, losses_dict
 
         return pred_depth_out
 
@@ -248,9 +268,8 @@ class ModelLoss(nn.Module):
         # gt_depth_high = gt_depth[mask_high_quality]
         # pred_depth_high = pred_depth[mask_high_quality]
 
-        gt_depth_mid = gt_depth[mask_mid_quality]
-        pred_depth_mid = pred_depth[mask_mid_quality]
-
+        gt_depth_mid = gt_depth[mask_mid_quality.to(device=pred_depth.device)]
+        pred_depth_mid = pred_depth[mask_mid_quality.to(device=pred_depth.device)]
 
         #gt_depth_filter = data['mask_highquality']]
         #pred_depth_filter = pred_depth[data['mask_highquality']]
@@ -265,8 +284,8 @@ class ModelLoss(nn.Module):
 
         B = gt_depth.shape[0]
         # with torch.cuda.device(0):
-        total_loss = torch.tensor(0.0).unsqueeze(0).repeat(B).cuda()
-        loss = {}
+        total_loss = torch.tensor(0.0).unsqueeze(0).repeat(B).to(device=pred_depth.device)
+        loss = {}  
 
         if '_pairwise-normal-regress-edge_' in cfg.TRAIN.LOSS_MODE.lower() or \
                 '_pairwise-normal-regress-plane_' in cfg.TRAIN.LOSS_MODE.lower():
@@ -305,12 +324,12 @@ class ModelLoss(nn.Module):
         ###
         # Scale-shift Invariant Loss
         if '_meanstd-tanh_' in cfg.TRAIN.LOSS_MODE.lower():
-            curr_loss = self.meanstd_tanh_loss(pred_depth_mid, gt_depth_mid)
+            curr_loss, all_out = self.meanstd_tanh_loss(pred_depth_mid, gt_depth_mid, return_per_pixel=True)
 
             loss['meanstd-tanh_loss'] = torch.sum(curr_loss)
-            # print("tanh")
-            # print(curr_loss)
-            # print(curr_loss.shape)
+
+            loss['ilnr_per_pixel'] = all_out
+
             total_loss += curr_loss
 
         if '_ranking-edge_' in cfg.TRAIN.LOSS_MODE.lower():
@@ -327,11 +346,12 @@ class ModelLoss(nn.Module):
             # print(curr_loss.shape)
             total_loss += curr_loss
 
+        loss['total_loss'] = torch.tensor(0.0).to(device=pred_depth.device)
+        for k in sorted(loss.keys()):
+            if k == "ilnr_per_pixel" or k == "total_loss":
+                continue
 
-        # print(total_loss.shape)
-        # print(sum(loss.values()))
-
-        loss['total_loss'] = sum(loss.values())
+            loss['total_loss'] += loss[k]
 
         return loss, total_loss
 
@@ -511,7 +531,7 @@ class DepthModel_cIMLE_v2(nn.Module):
 
         self.encoder_modules = get_func(backbone)()
 
-        if self.version == "v2" or self.version == "v3":
+        if self.version in ["v3", "v4","v5","v6"]:
             self.decoder_modules = network.Decoder_cIMLE(d_latent=d_latent, version=version)
         else:
             print("Unimplemented.")
@@ -527,7 +547,7 @@ class DepthModel_cIMLE_v2(nn.Module):
         
         if self.version == "v2":
             out_logit = self.decoder_modules(lateral_out, z, auxi=False)
-        elif self.version == "v3":
+        elif self.version in ["v3", "v4","v5","v6"]:
             out_logit = self.decoder_modules(lateral_out, z, x, auxi=False)
 
         
@@ -541,7 +561,7 @@ class DepthModel_cIMLE_v2(nn.Module):
 
         if self.version == "v2":
             return self.decoder_modules.get_adain_init_act(lateral_out, z)
-        elif self.version == "v3":
+        elif self.version in ["v3", "v4","v5","v6"]:
             return self.decoder_modules.get_adain_init_act(lateral_out, z, x)
 
 

@@ -386,6 +386,50 @@ class Decoder_cIMLE(nn.Module):
             self.style_mod3_meanshift = torch.zeros(self.midchannels[1])
             self.style_mod3_varshift = torch.zeros(self.midchannels[1]) 
 
+        elif version == "v4":
+            print("Decoder_cIMLE with AdaIn v4")
+            ## Noise1
+            self.d_latent = d_latent
+            self.style_mod0 = AdaIn_v2(d_latent, self.inchannels[3])
+            self.style_mod0_meanshift = torch.zeros(self.inchannels[3])
+            self.style_mod0_varshift = torch.zeros(self.inchannels[3])
+
+            ## Noise2
+            self.d_latent = d_latent
+            self.style_mod1 = AdaIn_v2(d_latent, self.midchannels[3])
+            self.style_mod1_meanshift = torch.zeros(self.midchannels[3])
+            self.style_mod1_varshift = torch.zeros(self.midchannels[3])            
+
+            ## Noise3
+            self.d_latent = d_latent
+            self.style_mod2 = AdaIn_v2(d_latent, self.midchannels[2])
+            self.style_mod2_meanshift = torch.zeros(self.midchannels[2])
+            self.style_mod2_varshift = torch.zeros(self.midchannels[2])
+
+
+        elif version == "v5":
+            print("Decoder_cIMLE with AdaIn v5")
+            ## Noise1
+            self.d_latent = d_latent
+            self.style_mod0 = AdaIn_v2(d_latent, self.inchannels[3])
+            self.style_mod0_meanshift = torch.zeros(self.inchannels[3])
+            self.style_mod0_varshift = torch.zeros(self.inchannels[3])
+
+            ## Noise2
+            self.d_latent = d_latent
+            self.style_mod1 = AdaIn_v2(d_latent, self.midchannels[3])
+            self.style_mod1_meanshift = torch.zeros(self.midchannels[3])
+            self.style_mod1_varshift = torch.zeros(self.midchannels[3])            
+
+
+        elif version == "v6":
+            print("Decoder_cIMLE with AdaIn v6")
+            ## Noise1
+            self.d_latent = d_latent
+            self.style_mod0 = AdaIn_v2(d_latent, self.inchannels[3])
+            self.style_mod0_meanshift = torch.zeros(self.inchannels[3])
+            self.style_mod0_varshift = torch.zeros(self.inchannels[3])
+
         else:
             print("Unimplemented AdaIn layer for Decoder_cIMLE.")
             exit()
@@ -420,7 +464,7 @@ class Decoder_cIMLE(nn.Module):
         ### AdaIn layer0
         if self.version == "v2":
             features[3] = self.style_mod0(features[3], z, self.style_mod0_meanshift, self.style_mod0_varshift)
-        elif self.version == "v3":
+        elif self.version in  ["v3", "v4","v5","v6"] :
             features[3] = self.style_mod0(features[3], z, input_image, self.style_mod0_meanshift, self.style_mod0_varshift)
 
         x_32x = self.conv(features[3])  # 1/32
@@ -428,7 +472,7 @@ class Decoder_cIMLE(nn.Module):
         ### AdaIn layer1
         if self.version == "v2":
             x_32x = self.style_mod1(x_32x, z, self.style_mod1_meanshift, self.style_mod1_varshift)
-        elif self.version == "v3":
+        elif self.version in  ["v3", "v4","v5"] :
             x_32x = self.style_mod1(x_32x, z, input_image, self.style_mod1_meanshift, self.style_mod1_varshift)
 
         x_32 = self.conv1(x_32x)
@@ -439,7 +483,7 @@ class Decoder_cIMLE(nn.Module):
         ### AdaIn layer2
         if self.version == "v2":
             x_8 = self.style_mod2(x_8, z, self.style_mod2_meanshift, self.style_mod2_varshift)
-        elif self.version == "v3":
+        elif self.version in  ["v3", "v4"] :
             x_8 = self.style_mod2(x_8, z, input_image, self.style_mod2_meanshift, self.style_mod2_varshift)
 
         #print('ffm2:', x.size())
@@ -483,7 +527,7 @@ class Decoder_cIMLE(nn.Module):
         ### AdaIn layer0
         if self.version == "v2":
             features[3] = self.style_mod0(features[3], z, self.style_mod0_meanshift, self.style_mod0_varshift)
-        elif self.version == "v3":
+        elif self.version in  ["v3", "v4","v5","v6"] :
             features[3] = self.style_mod0(features[3], z, input_image, self.style_mod0_meanshift, self.style_mod0_varshift)
 
         adain0 = features[3]
@@ -492,7 +536,7 @@ class Decoder_cIMLE(nn.Module):
         ### AdaIn layer1
         if self.version == "v2":
             x_32x = self.style_mod1(x_32x, z, self.style_mod1_meanshift, self.style_mod1_varshift)
-        elif self.version == "v3":
+        elif self.version in  ["v3", "v4","v5"] :
             x_32x = self.style_mod1(x_32x, z, input_image, self.style_mod1_meanshift, self.style_mod1_varshift)
 
         adain1 = x_32x
@@ -504,7 +548,7 @@ class Decoder_cIMLE(nn.Module):
         ### AdaIn layer2
         if self.version == "v2":
             x_8 = self.style_mod2(x_8, z, self.style_mod2_meanshift, self.style_mod2_varshift)
-        elif self.version == "v3":
+        elif self.version in  ["v3", "v4"] :
             x_8 = self.style_mod2(x_8, z, input_image, self.style_mod2_meanshift, self.style_mod2_varshift)
 
         adain2 = x_8

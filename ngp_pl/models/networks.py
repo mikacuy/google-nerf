@@ -36,21 +36,21 @@ class NGP(nn.Module):
                 n_input_dims=3,
                 n_output_dims=16,
                 encoding_config=
-                ####InstantNGP
-                {
-                    "otype": "HashGrid",
-                    "n_levels": L,
-                    "n_features_per_level": F_,
-                    "log2_hashmap_size": log2_T,
-                    "base_resolution": N_min,
-                    "per_level_scale": b,
-                },
-                ##### Normal NeRF
+                # ####InstantNGP
                 # {
-                #     "otype": "Frequency", # Component type.
-                #     "n_frequencies": 12   # Number of frequencies (sin & cos)
-                #                           # per encoded dimension.
-                # },               
+                #     "otype": "HashGrid",
+                #     "n_levels": L,
+                #     "n_features_per_level": F_,
+                #     "log2_hashmap_size": log2_T,
+                #     "base_resolution": N_min,
+                #     "per_level_scale": b,
+                # },
+                #### Normal NeRF
+                {
+                    "otype": "Frequency", # Component type.
+                    "n_frequencies": 12   # Number of frequencies (sin & cos)
+                                          # per encoded dimension.
+                },               
                 network_config={
                     "otype": "FullyFusedMLP",
                     "activation": "ReLU",

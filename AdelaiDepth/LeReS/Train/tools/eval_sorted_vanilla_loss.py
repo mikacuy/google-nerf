@@ -21,7 +21,7 @@ from utils import *
 import argparse
 from PIL import Image
 
-# np.random.seed(0)
+np.random.seed(0)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
@@ -295,12 +295,12 @@ def transform_shift_scale(depth, valid_threshold=-1e-8, max_threshold=1e8):
 dataset = MultipleDatasetDistributed(FLAGS)
 
 #### Evaluation ######
-zcache_dataloader = torch.utils.data.DataLoader(
-    dataset=dataset,
-    batch_size=1,
-    num_workers=0,
-    shuffle=False)
-print(len(zcache_dataloader))
+# zcache_dataloader = torch.utils.data.DataLoader(
+#     dataset=dataset,
+#     batch_size=1,
+#     num_workers=0,
+#     shuffle=False)
+print(len(dataset))
 print()
 
 mini_batch_size = 5
@@ -318,12 +318,29 @@ num_evaluated = 0
 
 model.eval()
 
+### Load numpy array of sorted indices
+vanilla_leres_dumpdir = "dump_leres_vanilla_losssorted/"
+fname_sorted_idx = FLAGS.phase_anno + "_sortedlosses_indices.npy"
+sorted_idx = np.load(os.path.join(vanilla_leres_dumpdir, fname_sorted_idx))
+
+fname_all_losses = FLAGS.phase_anno + "_alllosses.npy"
+all_losses = np.load(os.path.join(vanilla_leres_dumpdir, fname_all_losses))
+
+print(all_losses[sorted_idx[0]])
+print(all_losses[sorted_idx[-1]])
 
 with torch.no_grad():
-    for i, data in enumerate(zcache_dataloader):
+    for i in range(len(sorted_idx)):
 
-        # if i%50!=0:
-        #     continue
+        if i>20:
+            break
+
+        data = dataset[sorted_idx[i]]
+
+        ### Expand because dataloader was removed
+        for key in data.keys():
+            if (torch.is_tensor(data[key])):
+                data[key] = data[key].unsqueeze(0)
 
         batch_size = data['rgb'].shape[0]
         C = data['rgb'].shape[1]
@@ -338,14 +355,14 @@ with torch.no_grad():
         ### Iterate over the minibatch
         image_fname = []
 
-        rgb = torch.clone(data['rgb'][0]).permute(1, 2, 0).to("cpu").detach().numpy()
+        rgb = data['rgb'][0].permute(1, 2, 0).to("cpu").detach().numpy()
         rgb = 255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())
         rgb = np.array(rgb, np.int)
 
-        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):      
-            img_name = "image" + str(i)
-            cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
-            image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
+     
+        img_name = "image" + str(i)
+        cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
+        image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
 
 
         all_err_absRel = np.zeros((batch_size, mini_batch_size))
@@ -375,36 +392,33 @@ with torch.no_grad():
                 curr_pred_depth = curr_pred_depth.to("cpu").detach().numpy().squeeze() 
                 curr_pred_depth_scaled = curr_pred_depth_scaled.to("cpu").detach().numpy().squeeze() 
 
-                pred_depth_ori = curr_pred_depth
-                # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
+                pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
 
-                img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
+                img_name = "image" + str(sorted_idx[i]) + "_" + str(k) + "_" + str(s)
                 
-                if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
-                    # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), curr_pred_depth_scaled, cmap='rainbow')
-                    # cv2.imwrite(os.path.join(temp_fol, img_name+'-depth_raw.png'), (pred_depth_ori/pred_depth_ori.max() * 60000).astype(np.uint16))                   
+                # save depth
+                plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
+                # cv2.imwrite(os.path.join(temp_fol, img_name+'-depth_raw.png'), (pred_depth_ori/pred_depth_ori.max() * 60000).astype(np.uint16))                   
 
-                    image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
+                image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
-                    ### Output point cloud
-                    f = 512.0 ### Hardcoded for taskonomy
-                    reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
-                    # reconstruct_depth(curr_pred_depth_scaled, rgb, pc_scaled_fol, img_name, f)
-
+                ### Output point cloud
+                f = 512.0 ### Hardcoded for taskonomy
+                reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
+                # reconstruct_depth(curr_pred_depth_scaled, rgb, pc_scaled_fol, img_name, f)
 
             ### Quantitative results 
 
             ### Scale the output by mean and sd
+            data['gt_depth'] = torch.from_numpy(data['gt_depth'])
             gt_depth = transform_shift_scale(data['gt_depth'].cuda())
 
             curr_gt = gt_depth[0]
             curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
             curr_gt = cv2.resize(curr_gt, (pred_depth.shape[-2], pred_depth.shape[-1]), interpolation=cv2.INTER_LINEAR)
 
-            if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
-                img_name = "image" + str(i) + "_" + str(k) + "_gt"
-                reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
+            img_name = "image" + str(sorted_idx[i]) + "_" + str(k) + "_gt"
+            reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
 
             err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_scaled, curr_gt)
             if err_absRel <0 :
@@ -433,29 +447,28 @@ with torch.no_grad():
 
         #######################
 
-        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
-            ### Collate and output to a single image
-            height = H
-            width = W    
+        ### Collate and output to a single image
+        height = H
+        width = W    
 
-            #Output to a single image
-            new_im = Image.new('RGBA', (width*(1+NUM_SAMPLE), height))
+        #Output to a single image
+        new_im = Image.new('RGBA', (width*(1+NUM_SAMPLE), height))
 
-            images = []
-            for fname in image_fname:
-                images.append(Image.open(fname))
+        images = []
+        for fname in image_fname:
+            images.append(Image.open(fname))
 
-            x_offset = 0
-            for im in images:
-                new_im.paste(im, (x_offset,0))
-                x_offset += width
+        x_offset = 0
+        for im in images:
+            new_im.paste(im, (x_offset,0))
+            x_offset += width
 
-            output_image_filename = os.path.join(DUMP_DIR, str(i) +'_collate.png')
-            new_im.save(output_image_filename) 
+        output_image_filename = os.path.join(DUMP_DIR, str(sorted_idx[i]) +'_collate.png')
+        new_im.save(output_image_filename) 
         # print(output_image_filename)
 
         if i%100==0:
-            print("Finished "+str(i)+"/"+str(len(zcache_dataloader))+".")
+            print("Finished "+str(i)+"/"+str(len(sorted_idx))+".")
 
 
 

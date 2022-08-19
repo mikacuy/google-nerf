@@ -91,7 +91,8 @@ class MultiDataset(Dataset):
         if 'train' in self.opt.phase:
             data = self.online_aug(anno_index)
         else:
-            data = self.load_test_data(anno_index)
+            # data = self.load_test_data(anno_index)
+            data = self.load_test_data_v2(anno_index)
         return data
 
     def load_test_data(self, anno_index):
@@ -108,6 +109,7 @@ class MultiDataset(Dataset):
 
         rgb_resize = cv2.resize(rgb, (cfg.DATASET.CROP_SIZE[1], cfg.DATASET.CROP_SIZE[0]),
                               interpolation=cv2.INTER_LINEAR)
+
         # to torch, normalize
         rgb_torch = self.scale_torch(rgb_resize.copy())
         # normalize disp and depth
@@ -116,6 +118,96 @@ class MultiDataset(Dataset):
 
         data = {'rgb': rgb_torch, 'gt_depth': depth_normal}
         return data
+
+
+    def load_test_data_v2(self, anno_index):
+        """
+        Augment data for training online randomly. The invalid parts in the depth map are set to -1.0, while the parts
+        in depth bins are set to cfg.MODEL.DECODER_OUTPUT_C + 1.
+        :param anno_index: data index.
+        """
+        rgb_path = self.rgb_paths[anno_index]
+        depth_path = self.depth_paths[anno_index]
+
+        rgb = cv2.imread(rgb_path)[:, :, ::-1]  # bgr, H*W*C
+        
+
+        focal_length = self.focal_length_dict[
+            self.dataset_name.lower()] if self.dataset_name.lower() in self.focal_length_dict else 256.0
+
+        disp, depth, \
+        invalid_disp, invalid_depth, \
+        ins_planes_mask, sky_mask, \
+        ground_mask, depth_path = self.load_training_data(anno_index, rgb)
+
+        flip_flg, resize_size, crop_size, pad, _ = 0, (cfg.DATASET.CROP_SIZE[0], cfg.DATASET.CROP_SIZE[1]), 0, 0, 0  
+
+        rgb_resize = self.flip_reshape_crop_pad(rgb, flip_flg, resize_size, crop_size, pad, 0, crop=False, to_pad=False)
+        depth_resize = self.flip_reshape_crop_pad(depth, flip_flg, resize_size, crop_size, pad, -1, resize_method='nearest', crop=False, to_pad=False)
+        disp_resize = self.flip_reshape_crop_pad(disp, flip_flg, resize_size, crop_size, pad, -1, resize_method='nearest', crop=False, to_pad=False)
+
+        # resize sky_mask, and invalid_regions
+        sky_mask_resize = self.flip_reshape_crop_pad(sky_mask.astype(np.uint8),
+                                                     flip_flg,
+                                                     resize_size,
+                                                     crop_size,
+                                                     pad,
+                                                     0,
+                                                     resize_method='nearest', crop=False, to_pad=False)
+        invalid_disp_resize = self.flip_reshape_crop_pad(invalid_disp.astype(np.uint8),
+                                                         flip_flg,
+                                                         resize_size,
+                                                         crop_size,
+                                                         pad,
+                                                         0,
+                                                         resize_method='nearest', crop=False, to_pad=False)
+        invalid_depth_resize = self.flip_reshape_crop_pad(invalid_depth.astype(np.uint8),
+                                                          flip_flg,
+                                                          resize_size,
+                                                          crop_size,
+                                                          pad,
+                                                          0,
+                                                          resize_method='nearest', crop=False, to_pad=False)
+        # resize ins planes
+        ins_planes_mask[ground_mask] = int(np.unique(ins_planes_mask).max() + 1)
+        ins_planes_mask_resize = self.flip_reshape_crop_pad(ins_planes_mask.astype(np.uint8),
+                                                            flip_flg,
+                                                            resize_size,
+                                                            crop_size,
+                                                            pad,
+                                                            0,
+                                                            resize_method='nearest', crop=False, to_pad=False)
+
+        # normalize disp and depth
+        depth_resize = depth_resize / (depth_resize.max() + 1e-8) * 10
+        disp_resize = disp_resize / (disp_resize.max() + 1e-8) * 10
+
+        # invalid regions are set to -1, sky regions are set to 0 in disp and 10 in depth
+        disp_resize[invalid_disp_resize.astype(np.bool) | (disp_resize > 1e7) | (disp_resize < 0)] = -1
+        depth_resize[invalid_depth_resize.astype(np.bool) | (depth_resize > 1e7) | (depth_resize < 0)] = -1
+        disp_resize[sky_mask_resize.astype(np.bool)] = 0  # 0
+        depth_resize[sky_mask_resize.astype(np.bool)] = 20
+
+        # to torch, normalize
+        rgb_torch = self.scale_torch(rgb_resize.copy())
+        depth_torch = self.scale_torch(depth_resize)
+        disp_torch = self.scale_torch(disp_resize)
+        ins_planes = torch.from_numpy(ins_planes_mask_resize)
+        focal_length = torch.tensor(focal_length)
+
+        if ('taskonomy' in self.dataset_name.lower()) or ('3d-ken-burns' in self.dataset_name.lower()):
+            quality_flg = np.array(3)
+        elif ('diml' in self.dataset_name.lower()):
+            quality_flg = np.array(2)
+        else:
+            quality_flg = np.array(1)
+
+        data = {'rgb': rgb_torch, 'depth': depth_torch, 'disp': disp_torch,
+                'A_paths': rgb_path, 'B_paths': depth_path, 'quality_flg': quality_flg,
+                'planes': ins_planes, 'focal_length': focal_length, 'gt_depth': depth_torch}
+        return data
+
+
 
     def online_aug(self, anno_index):
         """
@@ -252,7 +344,7 @@ class MultiDataset(Dataset):
         pad = [pad_height, 0, pad_width, 0] if 'train' in self.opt.phase else [0, 0, 0, 0]
         return flip_flg, resize_size, crop_size, pad, resize_ratio
 
-    def flip_reshape_crop_pad(self, img, flip, resize_size, crop_size, pad, pad_value=0, resize_method='bilinear'):
+    def flip_reshape_crop_pad(self, img, flip, resize_size, crop_size, pad, pad_value=0, resize_method='bilinear', crop=True, to_pad=True):
         """
         Flip, pad, reshape, and crop the image.
         :param img: input image, [C, H, W]
@@ -274,17 +366,22 @@ class MultiDataset(Dataset):
         else:
             raise ValueError
 
-        # Crop the resized image
-        img_crop = img_resize[crop_size[1]:crop_size[1] + crop_size[3], crop_size[0]:crop_size[0] + crop_size[2]]
-
-        # Pad the raw image
-        if len(img.shape) == 3:
-            img_pad = np.pad(img_crop, ((pad[0], pad[1]), (pad[2], pad[3]), (0, 0)), 'constant',
-                             constant_values=(pad_value, pad_value))
+        if crop:
+            # Crop the resized image
+            img_out = img_resize[crop_size[1]:crop_size[1] + crop_size[3], crop_size[0]:crop_size[0] + crop_size[2]]
         else:
-            img_pad = np.pad(img_crop, ((pad[0], pad[1]), (pad[2], pad[3])), 'constant',
-                             constant_values=(pad_value, pad_value))
-        return img_pad
+            img_out = img_resize
+
+        if to_pad:
+            # Pad the raw image
+            if len(img.shape) == 3:
+                img_out = np.pad(img_out, ((pad[0], pad[1]), (pad[2], pad[3]), (0, 0)), 'constant',
+                                 constant_values=(pad_value, pad_value))
+            else:
+                img_out = np.pad(img_out, ((pad[0], pad[1]), (pad[2], pad[3])), 'constant',
+                                 constant_values=(pad_value, pad_value))
+        return img_out
+
 
     def depth_to_bins(self, depth):
         """

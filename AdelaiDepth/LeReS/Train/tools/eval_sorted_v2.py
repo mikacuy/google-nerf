@@ -21,13 +21,13 @@ from utils import *
 import argparse
 from PIL import Image
 
-# np.random.seed(0)
+np.random.seed(0)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch80_step30375.pth", help="checkpoint", type=str)
 
-parser.add_argument('--dump_dir', default= "dump_lerescimle_0726_lrfixed_001/", type=str)
+parser.add_argument('--dump_dir', default= "dump_lerescimle_0726_lrfixed_001_newvisu/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
@@ -35,12 +35,12 @@ parser.add_argument('--phase_anno', type=str, default='train', help='Annotations
 parser.add_argument('--dataset_list', default=["taskonomy"], nargs='+', help='The names of multiple datasets')
 parser.add_argument('--dataset', default='multi', help='Dataset loader name')
 parser.add_argument('--dataroot', default='/orion/downloads/coordinate_mvs/', help='Root dir for dataset')
-
+parser.add_argument('--loss_mode', type=str, default='_ranking-edge_pairwise-normal-regress-edge_msgil-normal_meanstd-tanh_pairwise-normal-regress-plane_', help='losses to use')
 
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
 parser.add_argument('--num_samples', default= 5, type=int)
-parser.add_argument('--rescaled', default=False, type=bool)
+parser.add_argument('--rescaled', default=True, type=bool)
 
 parser.add_argument('--ada_version', default= "v2", type=str)
 parser.add_argument('--cimle_version', default= "enc", type=str)
@@ -135,12 +135,7 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
         gt = gt[~mask_invalid]
         pred = pred[~mask_invalid]
 
-    # print(gt)
-    # print(pred)
-    # print()
-
     mask = (gt > 1e-8)
-    # mask = (gt > 1e-8) & (pred > 1e-8)
     gt = gt[mask]
     pred = pred[mask]
     n_pxl = gt.size
@@ -149,19 +144,10 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
 
     err_absRel = -1.
     err_squaRel = -1.
-    # err_rms = -1.
-    # err_logRms = -1.
-    err_silog = -1.
-    # err_silog2 = -1.
-    err_delta1 = -1.
-    # err_delta2 = -1.
-    # err_delta3 = -1.
-    err_whdr = -1.
 
-    # invalid evaluation image
-    # print(scale)
-    # print(gt)
-    # print(pred)
+    err_silog = -1.
+    err_delta1 = -1.
+    err_whdr = -1.
 
     if gt_scale.size < 10:
         print('Valid pixel size:', gt_scale.size, 'Invalid evaluation!!!!')
@@ -178,27 +164,10 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
     squa_rel_sum = np.sum(s_rel)
     err_squaRel = np.float64(squa_rel_sum) / float(n_pxl)
 
-    # #Root Mean Square error
-    # square = (gt_scale - pred_scale) ** 2
-    # rms_squa_sum = np.sum(square)
-    # err_rms = np.float64(rms_squa_sum) / float(n_pxl)
-
-    # #Log Root Mean Square error
-    # log_square = (np.log(gt_scale) - np.log(pred_scale)) **2
-    # log_rms_sum = np.sum(log_square)
-    # err_logRms = np.float64(log_rms_sum) / float(n_pxl)
-
     # Scale invariant error
     diff_log = np.log(pred_scale) - np.log(gt_scale)
     diff_log_sum = np.sum(diff_log)
     err_silog = np.float64(diff_log_sum)/ float(n_pxl)
-    # diff_log_2 = diff_log ** 2
-    # diff_log_2_sum = np.sum(diff_log_2)
-    # err_silog2 = np.float64(diff_log_2_sum)/ float(n_pxl)
-
-    # # Mean log10 error
-    # log10_sum = np.sum(np.abs(np.log10(gt) - np.log10(pred)))
-    # smoothed_criteria['err_log10'].AddValue(np.float64(log10_sum), n_pxl)
 
     #Delta
     gt_pred = gt_scale / pred_scale
@@ -210,10 +179,6 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
 
     delta_1_sum = np.sum(ratio_max < 1.25)
     err_delta1 = np.float64(delta_1_sum)/ float(n_pxl)
-    # delta_2_sum = np.sum(ratio_max < 1.25**2)
-    # err_delta2 = np.float64(delta_2_sum)/ float(n_pxl)
-    # delta_3_sum = np.sum(ratio_max < 1.25**3)
-    # err_delta3 = np.float64(delta_3_sum)/ float(n_pxl)
 
     # WHDR error
     whdr_err_sum, eval_num = weighted_human_disagreement_rate(gt_scale, pred_scale)
@@ -288,19 +253,27 @@ def transform_shift_scale(depth, valid_threshold=-1e-8, max_threshold=1e8):
     
     return gt_trans
 
+def recover_metric_depth(pred, gt):
+    if type(pred).__module__ == torch.__name__:
+        pred = pred.cpu().numpy()
+    if type(gt).__module__ == torch.__name__:
+        gt = gt.cpu().numpy()
+    gt = gt.squeeze()
+    pred = pred.squeeze()
+    mask = (gt > 1e-8) & (pred > 1e-8)
+
+    gt_mask = gt[mask]
+    pred_mask = pred[mask]
+    a, b = np.polyfit(pred_mask, gt_mask, deg=1)
+    pred_metric = a * pred + b
+    return pred_metric
+
 ##############################
 
 
 ### Dataset
 dataset = MultipleDatasetDistributed(FLAGS)
-
-#### Evaluation ######
-zcache_dataloader = torch.utils.data.DataLoader(
-    dataset=dataset,
-    batch_size=1,
-    num_workers=0,
-    shuffle=False)
-print(len(zcache_dataloader))
+print(len(dataset))
 print()
 
 mini_batch_size = 5
@@ -318,12 +291,33 @@ num_evaluated = 0
 
 model.eval()
 
+### Load numpy array of sorted indices
+vanilla_leres_dumpdir = "dump_leres_vanilla_losssorted/"
+fname_sorted_idx = FLAGS.phase_anno + "_sortedlosses_indices.npy"
+sorted_idx = np.load(os.path.join(vanilla_leres_dumpdir, fname_sorted_idx))
+
+fname_all_losses = FLAGS.phase_anno + "_alllosses.npy"
+all_losses = np.load(os.path.join(vanilla_leres_dumpdir, fname_all_losses))
+
+print(all_losses[sorted_idx[0]])
+print(all_losses[sorted_idx[-1]])
 
 with torch.no_grad():
-    for i, data in enumerate(zcache_dataloader):
+    for i in range(len(sorted_idx)):
 
-        # if i%50!=0:
-        #     continue
+        if i>20:
+            break
+
+        data = dataset[sorted_idx[i]]
+        # data = dataset[sorted_idx[-i-1]]
+
+        ### Expand because dataloader was removed
+        for key in data.keys():
+            if (torch.is_tensor(data[key])):
+                data[key] = data[key].unsqueeze(0)
+            if key == "quality_flg":
+                data[key] = torch.from_numpy(data[key]).unsqueeze(0)
+
 
         batch_size = data['rgb'].shape[0]
         C = data['rgb'].shape[1]
@@ -334,18 +328,47 @@ with torch.no_grad():
         num_images = data['rgb'].shape[0]
         data['rgb'] = data['rgb'].unsqueeze(1).repeat(1,mini_batch_size, 1, 1, 1)
         data['rgb'] = data['rgb'].view(-1, C, H, W)
+        data['depth'] = data['depth'].unsqueeze(1).repeat(1,mini_batch_size, 1, 1, 1)
+        data['depth'] = data['depth'].view(-1, 1, H, W)            
+        data['quality_flg'] = data['quality_flg'].unsqueeze(1).repeat(1,mini_batch_size)
+        data['quality_flg'] = data['quality_flg'].view(-1)
+        data['focal_length'] = data['focal_length'].unsqueeze(1).repeat(1,mini_batch_size)
+        data['focal_length'] = data['focal_length'].view(-1)
+        data['planes'] = data['planes'].unsqueeze(1).repeat(1,mini_batch_size,1,1)
+        data['planes'] = data['planes'].view(-1, H, W)
+
 
         ### Iterate over the minibatch
         image_fname = []
 
-        rgb = torch.clone(data['rgb'][0]).permute(1, 2, 0).to("cpu").detach().numpy()
-        rgb = 255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())
-        rgb = np.array(rgb, np.int)
+        rgb = cv2.imread(data['A_paths'])
+        rgb = cv2.resize(rgb, (448, 448))
+     
+        img_name = "image" + str(i)
+        raw_img_name = os.path.join(temp_fol, img_name+"-raw.png")
+        cv2.imwrite(raw_img_name, rgb)
 
-        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):      
-            img_name = "image" + str(i)
-            cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
-            image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
+        ### Hardcoded focal length for taskonomy
+        f = 512.0 ### Hardcoded for taskonomy
+
+        gt_depth = data['depth'][0]
+        # print(gt_depth)
+        # print(gt_depth.shape)
+        # print()
+
+        curr_gt = transform_shift_scale(gt_depth.cuda())
+        curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
+        curr_gt = cv2.resize(curr_gt, (448, 448))
+
+        # print(curr_gt)
+        # print(curr_gt.shape)
+        # exit()
+
+        depth_name = os.path.join(temp_fol, img_name+'gtdepth.png')
+        cv2.imwrite(depth_name, (curr_gt/10. * 60000).astype(np.uint16))
+
+        img_name = "image" + str(i) + "_gtdepth"
+        reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
 
 
         all_err_absRel = np.zeros((batch_size, mini_batch_size))
@@ -360,102 +383,150 @@ with torch.no_grad():
             z = torch.normal(0.0, 1.0, size=(num_images, mini_batch_size, D_LATENT))
             z = z.view(-1, D_LATENT).cuda()
 
-            pred_depth = model.inference(data, z, rescaled=RESCALED)
+            ##########
+            pred_depth, losses = model.inference(data, z, rescaled=RESCALED, return_loss=True)
+            loss_dict, total_loss = losses
+            total_loss = total_loss.to("cpu").detach().numpy()
 
+            per_pixel_ilnr = loss_dict["ilnr_per_pixel"].to("cpu").detach().numpy()
+            ##########
 
-            ### Scale the output by mean and sd
-            pred_depth_scaled = transform_shift_scale(torch.clone(pred_depth))
+            all_depthmetric_names = []
+            all_depthscaled_names = []
+            all_loss_names = []
 
             for s in range(mini_batch_size):
                 curr_pred_depth = pred_depth[s]
-                curr_pred_depth_scaled = pred_depth_scaled[s]
 
-                # print(curr_pred_depth==curr_pred_depth_scaled)
-
+                curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, gt_depth[0]) ### scaled and shifted by least squares fitting
                 curr_pred_depth = curr_pred_depth.to("cpu").detach().numpy().squeeze() 
-                curr_pred_depth_scaled = curr_pred_depth_scaled.to("cpu").detach().numpy().squeeze() 
 
-                pred_depth_ori = curr_pred_depth
-                # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
+                pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
+                curr_pred_depth_metric = cv2.resize(curr_pred_depth_metric, (H, W))
 
-                img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
-                
-                if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
-                    # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), curr_pred_depth_scaled, cmap='rainbow')
-                    # cv2.imwrite(os.path.join(temp_fol, img_name+'-depth_raw.png'), (pred_depth_ori/pred_depth_ori.max() * 60000).astype(np.uint16))                   
+                name_depthscaled = "image" + str(i) + "_" + str(k) + "_" + str(s) + "depthscaled.png"
+                plt.imsave(os.path.join(temp_fol, name_depthscaled), pred_depth_ori, cmap='rainbow')
 
-                    image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
+                name_depthmetric = "image" + str(i) + "_" + str(k) + "_" + str(s) + "depthmetric.png"
+                cv2.imwrite(os.path.join(temp_fol, name_depthmetric), (curr_pred_depth_metric * 6000).astype(np.uint16))
 
-                    ### Output point cloud
-                    f = 512.0 ### Hardcoded for taskonomy
-                    reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
-                    # reconstruct_depth(curr_pred_depth_scaled, rgb, pc_scaled_fol, img_name, f)
+                ### Per Pixel ILNR vis
+                curr_ilnr = per_pixel_ilnr[s].squeeze()
+                curr_ilnr = cv2.resize(curr_ilnr, (H, W)) 
+
+                name_depthloss = "image" + str(i) + "_" + str(k) + "_" + str(s) + "depthloss.png"                               
+                plt.imsave(os.path.join(temp_fol, name_depthloss), curr_ilnr, cmap='rainbow', vmin=0, vmax=10)
+ 
+
+                img_name = "image_pred" + str(sorted_idx[i]) + "_" + str(k) + "_" + str(s)
+                image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
+
+                ### Output point cloud
+                f = 512.0 ### Hardcoded for taskonomy
+                reconstruct_depth(curr_pred_depth_metric, rgb, pc_fol, img_name, f)
 
 
-            ### Quantitative results 
+                all_depthmetric_names.append(name_depthmetric)
+                all_depthscaled_names.append(name_depthscaled)
+                all_loss_names.append(name_depthloss)
 
-            ### Scale the output by mean and sd
-            gt_depth = transform_shift_scale(data['gt_depth'].cuda())
 
-            curr_gt = gt_depth[0]
-            curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
-            curr_gt = cv2.resize(curr_gt, (pred_depth.shape[-2], pred_depth.shape[-1]), interpolation=cv2.INTER_LINEAR)
+        #     #### Fix this !!!
+        #     err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_scaled, curr_gt)
+        #     if err_absRel <0 :
+        #         ## Error skip
+        #         all_err_absRel[:, k*mini_batch_size + s] = 1000000.
+        #     else:
+        #         all_err_absRel[:, k*mini_batch_size + s] = err_absRel
+        #         all_err_squaRel[:, k*mini_batch_size + s] = err_squaRel
+        #         all_err_silog[:, k*mini_batch_size + s] = err_silog
+        #         all_err_delta1[:, k*mini_batch_size + s] = err_delta1
+        #         all_err_whdr[:, k*mini_batch_size + s] = err_whdr
+        #     #######
 
-            if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
-                img_name = "image" + str(i) + "_" + str(k) + "_gt"
-                reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
+        # ### Quantitative Results
+        # # print(all_err_absRel)
+        # idx_to_take = np.argmin(all_err_absRel, axis=-1)[0]
+        # # print(idx_to_take)
 
-            err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_scaled, curr_gt)
-            if err_absRel <0 :
-                ## Error skip
-                all_err_absRel[:, k*mini_batch_size + s] = 1000000.
-            else:
-                all_err_absRel[:, k*mini_batch_size + s] = err_absRel
-                all_err_squaRel[:, k*mini_batch_size + s] = err_squaRel
-                all_err_silog[:, k*mini_batch_size + s] = err_silog
-                all_err_delta1[:, k*mini_batch_size + s] = err_delta1
-                all_err_whdr[:, k*mini_batch_size + s] = err_whdr
-            #######
-
-        ### Quantitative Results
-        # print(all_err_absRel)
-        idx_to_take = np.argmin(all_err_absRel, axis=-1)[0]
-        # print(idx_to_take)
-
-        if all_err_absRel[0][idx_to_take] > 0:
-            total_err_absRel += all_err_absRel[0][idx_to_take]
-            total_err_squaRel += all_err_squaRel[0][idx_to_take]
-            total_err_silog += all_err_silog[0][idx_to_take]
-            total_err_delta1 += all_err_delta1[0][idx_to_take]
-            total_err_whdr += all_err_whdr[0][idx_to_take]
-            num_evaluated += 1
+        # if all_err_absRel[0][idx_to_take] > 0:
+        #     total_err_absRel += all_err_absRel[0][idx_to_take]
+        #     total_err_squaRel += all_err_squaRel[0][idx_to_take]
+        #     total_err_silog += all_err_silog[0][idx_to_take]
+        #     total_err_delta1 += all_err_delta1[0][idx_to_take]
+        #     total_err_whdr += all_err_whdr[0][idx_to_take]
+        #     num_evaluated += 1
 
         #######################
 
-        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
-            ### Collate and output to a single image
-            height = H
-            width = W    
+        ### Collate and output to a single image
+        height = H
+        width = W    
 
-            #Output to a single image
-            new_im = Image.new('RGBA', (width*(1+NUM_SAMPLE), height))
+        #Output to a single image
+        new_im = Image.new('RGB', (width*(1+NUM_SAMPLE), height))
 
-            images = []
-            for fname in image_fname:
-                images.append(Image.open(fname))
+        image_fname = []
+        image_fname.append(raw_img_name)
+        for fname in all_depthscaled_names:
+            image_fname.append(os.path.join(temp_fol,fname))
 
-            x_offset = 0
-            for im in images:
-                new_im.paste(im, (x_offset,0))
-                x_offset += width
+        images = []
+        for fname in image_fname:
+            images.append(Image.open(fname))        
 
-            output_image_filename = os.path.join(DUMP_DIR, str(i) +'_collate.png')
-            new_im.save(output_image_filename) 
-        # print(output_image_filename)
+        x_offset = 0
+        for im in images:
+            new_im.paste(im, (x_offset,0))
+            x_offset += width
+
+        output_image_filename = os.path.join(DUMP_DIR, str(i) +'_deptha_scaled.png')
+        new_im.save(output_image_filename) 
+
+        ######################
+
+        new_im = Image.new('L', (width*(1+NUM_SAMPLE), height))
+        image_fname = []
+        image_fname.append(depth_name)
+        for fname in all_depthmetric_names:
+            image_fname.append(os.path.join(temp_fol,fname))
+
+        images = []
+        for fname in image_fname:
+            np_image = np.array(Image.open(fname)).astype("uint16")
+            cvuint8 = cv2.convertScaleAbs(np_image, alpha=(255.0/65535.0))
+            images.append(Image.fromarray(cvuint8))
+
+        x_offset = 0
+        for im in images:
+            new_im.paste(im, (x_offset,0))
+            x_offset += width
+
+        output_image_filename = os.path.join(DUMP_DIR, str(i) +'_depthb_alignedgt.png')
+        new_im.save(output_image_filename) 
+
+        ######################
+
+        new_im = Image.new('RGBA', (width*(NUM_SAMPLE), height))
+        image_fname = []
+        for fname in all_loss_names:
+            image_fname.append(os.path.join(temp_fol,fname))
+
+        images = []
+        for fname in image_fname:
+            images.append(Image.open(fname))
+
+        x_offset = 0
+        for im in images:
+            new_im.paste(im, (x_offset,0))
+            x_offset += width
+
+
+        output_image_filename = os.path.join(DUMP_DIR, str(i) +'_ilnrerror.png')
+        new_im.save(output_image_filename) 
 
         if i%100==0:
-            print("Finished "+str(i)+"/"+str(len(zcache_dataloader))+".")
+            print("Finished "+str(i)+"/"+str(len(sorted_idx))+".")
 
 
 
