@@ -17,7 +17,7 @@ DATA_SPLIT = FLAGS.data_split
 NUM_SUBSET = FLAGS.num_subset
 DATA_DIR = FLAGS.dataroot
 
-fname = os.path.join("/orion/downloads/coordinate_mvs/", DATASET_NAME, 'annotations', DATA_SPLIT + '_annotations.json')
+fname = os.path.join(DATA_DIR, DATASET_NAME, 'annotations', DATA_SPLIT + '_annotations.json')
 
 with open(fname, 'r') as load_f:
     all_annos = json.load(load_f)
