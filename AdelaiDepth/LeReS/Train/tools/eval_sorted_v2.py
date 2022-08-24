@@ -1,3 +1,8 @@
+'''
+Mikaela Uy
+Usable eval script as of Aug 23, 2022
+Evaluates on images sorted by LeReS losses
+'''
 import math
 import os, sys
 
@@ -299,17 +304,14 @@ sorted_idx = np.load(os.path.join(vanilla_leres_dumpdir, fname_sorted_idx))
 fname_all_losses = FLAGS.phase_anno + "_alllosses.npy"
 all_losses = np.load(os.path.join(vanilla_leres_dumpdir, fname_all_losses))
 
-print(all_losses[sorted_idx[0]])
-print(all_losses[sorted_idx[-1]])
-
 with torch.no_grad():
     for i in range(len(sorted_idx)):
 
         if i>20:
             break
 
-        data = dataset[sorted_idx[i]]
-        # data = dataset[sorted_idx[-i-1]]
+        # data = dataset[sorted_idx[i]]    ## worst samples
+        data = dataset[sorted_idx[-i-1]]    ## best samples
 
         ### Expand because dataloader was removed
         for key in data.keys():
@@ -398,7 +400,7 @@ with torch.no_grad():
             for s in range(mini_batch_size):
                 curr_pred_depth = pred_depth[s]
 
-                curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, gt_depth[0]) ### scaled and shifted by least squares fitting
+                curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, curr_gt) ### scaled and shifted by least squares fitting
                 curr_pred_depth = curr_pred_depth.to("cpu").detach().numpy().squeeze() 
 
                 pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
@@ -408,7 +410,7 @@ with torch.no_grad():
                 plt.imsave(os.path.join(temp_fol, name_depthscaled), pred_depth_ori, cmap='rainbow')
 
                 name_depthmetric = "image" + str(i) + "_" + str(k) + "_" + str(s) + "depthmetric.png"
-                cv2.imwrite(os.path.join(temp_fol, name_depthmetric), (curr_pred_depth_metric * 6000).astype(np.uint16))
+                cv2.imwrite(os.path.join(temp_fol, name_depthmetric), (curr_pred_depth_metric/10. * 60000).astype(np.uint16))
 
                 ### Per Pixel ILNR vis
                 curr_ilnr = per_pixel_ilnr[s].squeeze()

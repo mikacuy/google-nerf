@@ -68,6 +68,9 @@ parser.add_argument('--use_scheduler', default= False, type=bool)
 parser.add_argument('--ada_version', default= "v2", type=str)
 parser.add_argument('--cimle_version', default= "enc", type=str)
 
+parser.add_argument("--precache_depthss_dir", default="precache_taskonomy_v1_depth_scaleshift/", help="path to the precache depthdir directory (run python precache_taskonomy_v1_depth_scaleshift.py", type=str)
+
+
 FLAGS = parser.parse_args()
 LOG_DIR = FLAGS.logdir
 CKPT = FLAGS.ckpt
@@ -153,6 +156,22 @@ class LRUCache:
         return m
 ##############################################
 
+####### For initializing each training sample depth shift and scale
+def recover_metric_depth(pred, gt):
+    if type(pred).__module__ == torch.__name__:
+        pred = pred.cpu().numpy()
+    if type(gt).__module__ == torch.__name__:
+        gt = gt.cpu().numpy()
+    gt = gt.squeeze()
+    pred = pred.squeeze()
+    mask = (gt > 1e-8) & (pred > 1e-8)
+
+    gt_mask = gt[mask]
+    pred_mask = pred[mask]
+    a, b = np.polyfit(pred_mask, gt_mask, deg=1)
+    pred_metric = a * pred + b
+    return pred_metric
+#################################################################
 
 def reduce_loss_dict(loss_dict):
     """
@@ -258,25 +277,7 @@ print("Val:")
 print(len(val_dataset))
 print("====================")
 
-### Set up learning rate and optimizer
-cfg.TRAIN.LR_SCHEDULER_MULTISTEPS = np.array(FLAGS.lr_scheduler_multiepochs) * math.ceil(len(train_dataset)/ (world_size * FLAGS.batchsize))
 
-### For joint training
-optimizer = ModelOptimizer_AdaIn(model, BASE_LR, MLP_LR2, fixed_backbone=False)
-scheduler = make_lr_scheduler(cfg=cfg, optimizer=optimizer.optimizer)
-
-### If we want to pretrain the MLP first
-if PRETRAIN_MLP:
-    pretrain_optimizer = ModelOptimizer_AdaIn(model, BASE_LR, MLP_LR, fixed_backbone=True)
-    pretrain_scheduler = make_lr_scheduler(cfg=cfg, optimizer=pretrain_optimizer.optimizer)
-
-
-total_iters = math.ceil(len(train_dataset)/ (world_size * FLAGS.batchsize)) * FLAGS.epoch
-cfg.TRAIN.MAX_ITER = total_iters
-cfg.TRAIN.GPU_NUM = world_size
-print_configs(cfg)
-
-training_stats = TrainingStats(FLAGS, cfg.TRAIN.LOG_INTERVAL, tblogger if FLAGS.use_tfboard else None)
 
 ### Dataloader unshuffled to cache z-codes
 # zcache_dataloader = torch.utils.data.DataLoader(
@@ -297,6 +298,48 @@ total_num_train = len(train_dataset)
 print(total_num_train)
 print()
 
+
+
+### Set up learning rate and optimizer
+cfg.TRAIN.LR_SCHEDULER_MULTISTEPS = np.array(FLAGS.lr_scheduler_multiepochs) * math.ceil(len(train_dataset)/ (world_size * FLAGS.batchsize))
+
+### For joint training
+optimizer = ModelOptimizer_AdaIn(model, BASE_LR, MLP_LR2, fixed_backbone=False)
+scheduler = make_lr_scheduler(cfg=cfg, optimizer=optimizer.optimizer)
+
+##########################################################
+### Initialize scale and shift for prediction
+precache_dir = FLAGS.precache_depthss_dir
+
+all_scales = np.load(os.path.join(precache_dir, "train_depth_scales.npy"))
+all_shifts = np.load(os.path.join(precache_dir, "train_depth_shifts.npy"))
+
+TRAIN_SCALES = torch.autograd.Variable(torch.from_numpy(all_scales).float().cuda(), requires_grad=True)
+TRAIN_SHIFTS = torch.autograd.Variable(torch.from_numpy(all_shifts).float().cuda(), requires_grad=True)
+
+print("Loaded pre-initialized scales and shifts")
+print(TRAIN_SCALES.shape)
+print(TRAIN_SHIFTS.shape)
+
+### Add to optimizer parameters
+optimizer.optimizer.add_param_group({"params": TRAIN_SCALES, "lr": 10, 'weight_decay': 0.0005})
+optimizer.optimizer.add_param_group({"params": TRAIN_SHIFTS, "lr": 0.1, 'weight_decay': 0.0005})
+##########################################################
+
+
+### If we want to pretrain the MLP first
+if PRETRAIN_MLP:
+    pretrain_optimizer = ModelOptimizer_AdaIn(model, BASE_LR, MLP_LR, fixed_backbone=True)
+    pretrain_scheduler = make_lr_scheduler(cfg=cfg, optimizer=pretrain_optimizer.optimizer)
+
+
+total_iters = math.ceil(len(train_dataset)/ (world_size * FLAGS.batchsize)) * FLAGS.epoch
+cfg.TRAIN.MAX_ITER = total_iters
+cfg.TRAIN.GPU_NUM = world_size
+print_configs(cfg)
+
+training_stats = TrainingStats(FLAGS, cfg.TRAIN.LOG_INTERVAL, tblogger if FLAGS.use_tfboard else None)
+
 ### Minibatch to handle larger sample size
 mini_batch_size = 10
 num_sets = int(NUM_SAMPLE/mini_batch_size)
@@ -307,7 +350,7 @@ tmp_i = 0
 
 for epoch in range(MAX_EPOCH):
 
-    ### Init Adain network layers
+    ## Init Adain network layers
     if epoch == 0 :
         model.eval()
         print("Initializing AdaIn layers...")
@@ -366,42 +409,11 @@ for epoch in range(MAX_EPOCH):
                     ### Get activations
                     adain0, adain1, adain2, adain3 = model.module.get_adain_init_act(data, z)
 
-
                     ### Take the mean
                     adain0 = torch.mean(adain0.view(adain0.shape[0], adain0.shape[1], -1), axis=-1)
                     adain1 = torch.mean(adain1.view(adain1.shape[0], adain1.shape[1], -1), axis=-1)
                     adain2 = torch.mean(adain2.view(adain2.shape[0], adain2.shape[1], -1), axis=-1)
                     adain3 = torch.mean(adain3.view(adain3.shape[0], adain3.shape[1], -1), axis=-1)
-
-                    # ### Debug ###
-                    # adain0_var = torch.var(adain0, axis=0)
-                    # adain1_var = torch.var(adain1, axis=0)
-                    # adain2_var = torch.var(adain2, axis=0)
-                    # adain3_var = torch.var(adain3, axis=0)
-
-
-                    # print(adain0)
-                    # print(adain1)
-                    # print(adain2)
-                    # print(adain3)
-                    # print()
-                    # print(adain0_var)
-                    # print(adain1_var)
-                    # print(adain2_var)
-                    # print(adain3_var)
-                    # print()
-                    # print(adain0.shape)
-                    # print(adain1.shape)
-                    # print(adain2.shape)
-                    # print(adain3.shape)
-                    # print()
-                    # print(adain0_var.shape)
-                    # print(adain1_var.shape)
-                    # print(adain2_var.shape)
-                    # print(adain3_var.shape)
-
-                    # exit()
-                    # #########
 
                     all_ada0[j][i*FLAGS.batchsize : i*FLAGS.batchsize + num_images] = adain0
                     all_ada1[j][i*FLAGS.batchsize : i*FLAGS.batchsize + num_images] = adain1
@@ -445,6 +457,7 @@ for epoch in range(MAX_EPOCH):
             print("AdaIn weights init done.")
             print("========================")
 
+
     if epoch == 0 or epoch%REFRESH_Z  == 0:
         ### Resample z and take the best one
 
@@ -463,13 +476,20 @@ for epoch in range(MAX_EPOCH):
         print(selected_z_losses.shape)
         print()
 
+        cache_comb_dataset = ZippedDataset(train_dataset, torch.utils.data.TensorDataset(torch.arange(total_num_train)) )
+        cache_dataloader = torch.utils.data.DataLoader(
+            dataset=LRUCache(cache_comb_dataset, n=FLAGS.num_lru),
+            # batch_size=FLAGS.batchsize,
+            batch_size=FLAGS.batchsize*8,
+            num_workers=FLAGS.thread,
+            shuffle=False)
         
         with torch.no_grad():
             for j in range(NUM_SAMPLE):
                 
                 start = datetime.datetime.now()
 
-                for i, data in enumerate(zcache_dataloader):
+                for i, (data, (cur_data_idx,)) in enumerate(cache_dataloader):
 
                     batch_size = data['rgb'].shape[0]
                     C = data['rgb'].shape[1]
@@ -481,8 +501,51 @@ for epoch in range(MAX_EPOCH):
 
                     z = torch.normal(0.0, 1.0, size=(num_images, D_LATENT))
 
-                    out = model(data, z)
+
+                    curr_scales = TRAIN_SCALES[cur_data_idx]
+                    curr_shifts = TRAIN_SHIFTS[cur_data_idx]
+
+                    curr_scales = torch.gather(TRAIN_SCALES, 0, cur_data_idx.to(device=TRAIN_SCALES.device))
+                    curr_shifts = torch.gather(TRAIN_SHIFTS, 0, cur_data_idx.to(device=TRAIN_SHIFTS.device))
+
+                    out = model(data, z, transform_pred=True, scale=curr_scales, shift=curr_shifts)
+
                     losses_dict, total_raw = out['losses']
+
+                    # ###### Debugging getting magnitude of gradient
+                    # print(data['rgb'].shape[0])
+                    # print(total_raw)
+
+                    # optimizer.optimizer.zero_grad()
+                    # loss_all = torch.mean(losses_dict['total_loss'])
+                    # print(loss_all)
+                    # curr_scales.retain_grad()
+                    # curr_shifts.retain_grad()
+                    # loss_all.backward()
+
+                    # print()
+                    # print("========Scales========")
+                    # print("Initial values:")
+                    # print(curr_scales)
+                    # print("Grads:")
+                    # print(curr_scales.grad)
+                    # print("Desired learning rate:")
+                    # x = 0.01*torch.abs(curr_scales)/torch.abs(curr_scales.grad)
+                    # x = torch.mean(x)
+                    # print(x)
+                    # print()
+                    # print()
+                    # print("========Shifts========")
+                    # print("Initial values:")
+                    # print(curr_shifts)
+                    # print("Grads:")
+                    # print(curr_shifts.grad)
+                    # print("Desired learning rate:")
+                    # x = 0.01*torch.abs(curr_shifts)/torch.abs(curr_shifts.grad)
+                    # x = torch.mean(x)
+                    # print(x)
+                    # exit()
+                    # ##############################################
 
                     total_raw = total_raw.to(selected_z_losses.device)
 
@@ -518,7 +581,7 @@ for epoch in range(MAX_EPOCH):
 
     ### Create dataset with selected z
     print("Creating combined dataloader")
-    comb_dataset = ZippedDataset(train_dataset, torch.utils.data.TensorDataset(torch.from_numpy(selected_z_np)))
+    comb_dataset = ZippedDataset(train_dataset, torch.utils.data.TensorDataset(torch.from_numpy(selected_z_np)), torch.utils.data.TensorDataset(torch.arange(total_num_train)) )
     # train_dataloader = torch.utils.data.DataLoader(
     #     dataset=comb_dataset,
     #     batch_size=FLAGS.batchsize,
@@ -535,9 +598,17 @@ for epoch in range(MAX_EPOCH):
     print(len(train_dataloader))
     print("Start training")
     ### Iterate over shuffled dataset and train
-    for i, (data, (cur_batch_z,)) in enumerate(train_dataloader):
+    for i, (data, (cur_batch_z,), (cur_data_idx,)) in enumerate(train_dataloader):
 
-        out = model(data, cur_batch_z)
+        ### Get shift and scale
+        curr_scales = TRAIN_SCALES[cur_data_idx]
+        curr_shifts = TRAIN_SHIFTS[cur_data_idx]
+
+        curr_scales = torch.gather(TRAIN_SCALES, 0, cur_data_idx.to(device=TRAIN_SCALES.device))
+        curr_shifts = torch.gather(TRAIN_SHIFTS, 0, cur_data_idx.to(device=TRAIN_SHIFTS.device))
+
+
+        out = model(data, cur_batch_z, transform_pred=True, scale=curr_scales, shift=curr_shifts)
         losses_dict, total_raw = out['losses']
 
         if PRETRAIN_MLP and epoch < PRETRAIN_EPOCHS:
@@ -547,7 +618,6 @@ for epoch in range(MAX_EPOCH):
                 pretrain_scheduler.step()
         else:
             optimizer.optim(losses_dict)
-
             if USE_SCHEDULER:
                 scheduler.step()
 

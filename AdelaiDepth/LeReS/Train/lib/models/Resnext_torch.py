@@ -299,7 +299,7 @@ class AdaIn(nn.Module):
                 nn.LeakyReLU(),
                 nn.Linear(128, out_channels * 2))
 
-    def forward(self, x, latent, mean_shift=0.0, var_shift=0.0):
+    def forward(self, x, latent, mean_shift=0.0, var_shift=0.0, return_scale=False):
         style = self.mlp(latent)  # style => [batch_size, n_channels*2]
 
 
@@ -324,6 +324,10 @@ class AdaIn(nn.Module):
         # print(x.shape)
 
         x = x * (var) + mean
+
+        if return_scale:
+            return x, var
+
         return x  
 
 #############################
@@ -502,6 +506,33 @@ class ResNet_cIMLE(nn.Module):
         adain3 = x
 
         return adain0, adain1, adain2, adain3
+
+    # def get_adain_init_act(self, x, z):
+
+    #     ### Debugging function used to find the statistics of the scales
+    #     ### Do not use for training
+
+    #     x = self.conv1(x)
+    #     x, var0 = self.style_mod0(x, z, self.style_mod0_meanshift, self.style_mod0_varshift, return_scale=True)
+    #     adain0 = var0
+        
+    #     x = self.bn1(x)
+    #     x = self.relu(x)
+    #     x = self.maxpool(x)
+
+    #     x = self.layer1(x)
+    #     x, var1 = self.style_mod1(x, z, self.style_mod1_meanshift, self.style_mod1_varshift, return_scale=True)
+    #     adain1 = var1
+
+    #     x = self.layer2(x)     
+    #     x, var2 = self.style_mod2(x, z, self.style_mod2_meanshift, self.style_mod2_varshift, return_scale=True)
+    #     adain2 = var2
+
+    #     x = self.layer3(x)      
+    #     x, var3 = self.style_mod3(x, z, self.style_mod3_meanshift, self.style_mod3_varshift, return_scale=True)
+    #     adain3 = var3
+
+    #     return adain0, adain1, adain2, adain3
 
 
 class AdaIn_v2(nn.Module):

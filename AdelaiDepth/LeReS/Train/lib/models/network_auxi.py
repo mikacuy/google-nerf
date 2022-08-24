@@ -246,7 +246,7 @@ class AdaIn(nn.Module):
                 nn.LeakyReLU(),
                 nn.Linear(128, out_channels * 2))
 
-    def forward(self, x, latent, mean_shift=0.0, var_shift=0.0):
+    def forward(self, x, latent, mean_shift=0.0, var_shift=0.0, scale=1.0):
         style = self.mlp(latent)  # style => [batch_size, n_channels*2]
 
 
@@ -260,7 +260,7 @@ class AdaIn(nn.Module):
         mean = style[:, 1] - mean_shift.cuda()
         var = style[:, 0] + 1. - var_shift.cuda()
 
-        x = x * (var) + mean
+        x = x * (var*scale) + mean
         return x 
 
 class AdaIn_v2(nn.Module):
@@ -287,7 +287,7 @@ class AdaIn_v2(nn.Module):
                 nn.LeakyReLU(),
                 nn.Linear(128, out_channels * 2))
 
-    def forward(self, x, latent, input_img, mean_shift=0.0, var_shift=0.0):
+    def forward(self, x, latent, input_img, mean_shift=0.0, var_shift=0.0, shift_scale=2.0, mean_scale=2.0):
         ## x: input feature
         ## latent: random code
         ## input_img: conditioned image
@@ -312,7 +312,8 @@ class AdaIn_v2(nn.Module):
         mean = style[:, 1] - mean_shift.cuda()
         var = style[:, 0] + 1. - var_shift.cuda()
 
-        x = x * (var) + mean
+        x = x * (var*shift_scale) + mean*mean_scale
+
         return x  
 
 
@@ -437,7 +438,7 @@ class Decoder_cIMLE(nn.Module):
         
         #self.outconv = nn.Conv2d(in_channels=self.inchannels[0], out_channels=self.outchannels, kernel_size=3, padding=1, stride=1, bias=True)
         self.outconv = AO(inchannels=self.midchannels[0], outchannels=self.outchannels, upfactor=2)
-        self._init_params()
+        # self._init_params()
         
     def _init_params(self):
         for m in self.modules():
@@ -522,16 +523,64 @@ class Decoder_cIMLE(nn.Module):
 
         return
 
+    # def get_adain_init_act(self, features, z, input_image=None):
+
+    #     ### AdaIn layer0
+    #     if self.version == "v2":
+    #         features[3] = self.style_mod0(features[3], z, self.style_mod0_meanshift, self.style_mod0_varshift)
+    #     elif self.version in  ["v3", "v4","v5","v6"] :
+    #         features[3] = self.style_mod0(features[3], z, input_image, self.style_mod0_meanshift, self.style_mod0_varshift)
+
+    #     adain0 = features[3]
+    #     x_32x = self.conv(features[3])  # 1/32
+
+    #     ### AdaIn layer1
+    #     if self.version == "v2":
+    #         x_32x = self.style_mod1(x_32x, z, self.style_mod1_meanshift, self.style_mod1_varshift)
+    #     elif self.version in  ["v3", "v4","v5"] :
+    #         x_32x = self.style_mod1(x_32x, z, input_image, self.style_mod1_meanshift, self.style_mod1_varshift)
+
+    #     adain1 = x_32x
+    #     x_32 = self.conv1(x_32x)
+    #     x_16 = self.upsample(x_32)  # 1/16
+
+    #     x_8 = self.ffm2(features[2], x_16)  # 1/8
+
+    #     ### AdaIn layer2
+    #     if self.version == "v2":
+    #         x_8 = self.style_mod2(x_8, z, self.style_mod2_meanshift, self.style_mod2_varshift)
+    #     elif self.version in  ["v3", "v4"] :
+    #         x_8 = self.style_mod2(x_8, z, input_image, self.style_mod2_meanshift, self.style_mod2_varshift)
+
+    #     adain2 = x_8
+    #     #print('ffm2:', x.size())
+    #     x_4 = self.ffm1(features[1], x_8)  # 1/4
+
+    #     ### AdaIn layer2
+    #     if self.version == "v2":
+    #         x_4 = self.style_mod3(x_4, z, self.style_mod3_meanshift, self.style_mod3_varshift)
+    #     elif self.version == "v3":
+    #         x_4 = self.style_mod3(x_4, z, input_image, self.style_mod3_meanshift, self.style_mod3_varshift)
+
+    #     adain3 = x_4
+
+    #     return adain0, adain1, adain2, adain3
+
+
     def get_adain_init_act(self, features, z, input_image=None):
-
+        
         ### AdaIn layer0
-        if self.version == "v2":
-            features[3] = self.style_mod0(features[3], z, self.style_mod0_meanshift, self.style_mod0_varshift)
-        elif self.version in  ["v3", "v4","v5","v6"] :
-            features[3] = self.style_mod0(features[3], z, input_image, self.style_mod0_meanshift, self.style_mod0_varshift)
+        feat3 = features[3]
+        feat2 = features[2]
+        feat1 = features[1]
 
-        adain0 = features[3]
-        x_32x = self.conv(features[3])  # 1/32
+        if self.version == "v2":
+            x = self.style_mod0(feat3, z, self.style_mod0_meanshift, self.style_mod0_varshift)
+        elif self.version in  ["v3", "v4","v5","v6"] :
+            x = self.style_mod0(feat3, z, input_image, self.style_mod0_meanshift, self.style_mod0_varshift)
+
+        adain0 = x
+        x_32x = self.conv(x)  # 1/32
 
         ### AdaIn layer1
         if self.version == "v2":
@@ -543,7 +592,7 @@ class Decoder_cIMLE(nn.Module):
         x_32 = self.conv1(x_32x)
         x_16 = self.upsample(x_32)  # 1/16
 
-        x_8 = self.ffm2(features[2], x_16)  # 1/8
+        x_8 = self.ffm2(feat2, x_16)  # 1/8
 
         ### AdaIn layer2
         if self.version == "v2":
@@ -553,7 +602,7 @@ class Decoder_cIMLE(nn.Module):
 
         adain2 = x_8
         #print('ffm2:', x.size())
-        x_4 = self.ffm1(features[1], x_8)  # 1/4
+        x_4 = self.ffm1(feat1, x_8)  # 1/4
 
         ### AdaIn layer2
         if self.version == "v2":
@@ -564,7 +613,6 @@ class Decoder_cIMLE(nn.Module):
         adain3 = x_4
 
         return adain0, adain1, adain2, adain3
-
 
 
 class DepthNet(nn.Module):

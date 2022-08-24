@@ -330,18 +330,18 @@ for epoch in range(MAX_EPOCH):
                 ### Get activations
                 adain0, adain1, adain2, adain3 = model.get_adain_init_act(data, z)
 
-                ### Take the mean
+                ## Take the mean
                 adain0 = torch.mean(adain0.view(adain0.shape[0], adain0.shape[1], -1), axis=-1)
                 adain1 = torch.mean(adain1.view(adain1.shape[0], adain1.shape[1], -1), axis=-1)
                 adain2 = torch.mean(adain2.view(adain2.shape[0], adain2.shape[1], -1), axis=-1)
                 adain3 = torch.mean(adain3.view(adain3.shape[0], adain3.shape[1], -1), axis=-1)
-
 
                 ### Debugging ###
                 # print(adain0.shape)
                 # print(adain1.shape)
                 # print(adain2.shape)
                 # print(adain3.shape)
+                # exit()
 
                 # if i<5:
                 # adain0_var = torch.var(adain0, axis=0)
@@ -370,10 +370,10 @@ for epoch in range(MAX_EPOCH):
                 #     exit()
                 # ################
 
-                adain0 = torch.mean(adain0, axis=0)
-                adain1 = torch.mean(adain1, axis=0)
-                adain2 = torch.mean(adain2, axis=0)
-                adain3 = torch.mean(adain3, axis=0)
+                adain0 = torch.mean(adain0.squeeze(), axis=0)
+                adain1 = torch.mean(adain1.squeeze(), axis=0)
+                adain2 = torch.mean(adain2.squeeze(), axis=0)
+                adain3 = torch.mean(adain3.squeeze(), axis=0)
 
                 all_ada0[i] = adain0
                 all_ada1[i] = adain1
@@ -390,6 +390,79 @@ for epoch in range(MAX_EPOCH):
             var1 = torch.var(all_ada1, axis=0)
             var2 = torch.var(all_ada2, axis=0)
             var3 = torch.var(all_ada3, axis=0)
+
+            # min0 = torch.min(all_ada0, axis=0)
+            # min1 = torch.min(all_ada1, axis=0)
+            # min2 = torch.min(all_ada2, axis=0)
+            # min3 = torch.min(all_ada3, axis=0)
+
+            # max0 = torch.max(all_ada0, axis=0)
+            # max1 = torch.max(all_ada1, axis=0)
+            # max2 = torch.max(all_ada2, axis=0)
+            # max3 = torch.max(all_ada3, axis=0)
+
+            # print("Mean scales:")
+            # # print(mean0)
+            # # print(mean1)
+            # # print(mean2)
+            # # print(mean3)
+            # # print()
+            # print(mean0.mean())
+            # print(mean1.mean())
+            # print(mean2.mean())
+            # print(mean3.mean())
+
+            # print()
+            # print()
+
+            # print("Variance scales:")
+            # # print(var0)
+            # # print(var1)
+            # # print(var2)
+            # # print(var3)
+            # # print()
+            # print(var0.mean())
+            # print(var1.mean())
+            # print(var2.mean())
+            # print(var3.mean())
+
+            # print()
+            # print()
+
+            # min0 = torch.min(all_ada0, axis=0)[0]
+            # min1 = torch.min(all_ada1, axis=0)[0]
+            # min2 = torch.min(all_ada2, axis=0)[0]
+            # min3 = torch.min(all_ada3, axis=0)[0]
+
+            # max0 = torch.max(all_ada0, axis=0)[0]
+            # max1 = torch.max(all_ada1, axis=0)[0]
+            # max2 = torch.max(all_ada2, axis=0)[0]
+            # max3 = torch.max(all_ada3, axis=0)[0]
+
+            # print("Min scales:")
+            # # print(min0)
+            # # print(min1)
+            # # print(min2)
+            # # print(min3)
+            # print(min0.mean())
+            # print(min1.mean())
+            # print(min2.mean())
+            # print(min3.mean())  
+
+            # print()
+            # print()
+
+            # print("Max scales:")
+            # # print(max0)
+            # # print(max1)
+            # # print(max2)
+            # # print(max3)
+            # print(max0.mean())
+            # print(max1.mean())
+            # print(max2.mean())
+            # print(max3.mean())
+            # exit()
+
 
             ### Set mean and variance
             model.set_mean_var_shifts(mean0, var0, mean1, var1, mean2, var2, mean3, var3)

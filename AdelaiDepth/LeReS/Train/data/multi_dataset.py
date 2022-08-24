@@ -89,7 +89,8 @@ class MultiDataset(Dataset):
 
     def __getitem__(self, anno_index):
         if 'train' in self.opt.phase:
-            data = self.online_aug(anno_index)
+            # data = self.online_aug(anno_index)
+            data = self.load_test_data_v2(anno_index)
         else:
             # data = self.load_test_data(anno_index)
             data = self.load_test_data_v2(anno_index)

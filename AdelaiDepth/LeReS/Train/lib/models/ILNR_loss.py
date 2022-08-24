@@ -41,7 +41,7 @@ class MEADSTD_TANH_NORM_Loss(nn.Module):
 
         return data_mean, data_std_dev
 
-    def forward(self, pred, gt, return_per_pixel = False):
+    def forward(self, pred, gt):
         """
         Calculate loss.
         """
@@ -59,50 +59,52 @@ class MEADSTD_TANH_NORM_Loss(nn.Module):
         gt_trans = (gt_maskbatch - gt_mean[:, None, None, None]) / (gt_std[:, None, None, None] + 1e-8)
 
         B, C, H, W = gt_maskbatch.shape
-        # loss = torch.tensor(0.0).unsqueeze(0).repeat(B).to(pred.device)
-        # loss_tanh = torch.tensor(0.0).unsqueeze(0).repeat(B).to(pred.device)
-        # for i in range(B):
-        #     mask_i = mask_maskbatch[i, ...]
-        #     pred_depth_i = pred_maskbatch[i, ...][mask_i]
-        #     gt_trans_i = gt_trans[i, ...][mask_i]
+        loss = torch.tensor(0.0).unsqueeze(0).repeat(B).to(pred.device)
+        loss_tanh = torch.tensor(0.0).unsqueeze(0).repeat(B).to(pred.device)
+        for i in range(B):
+            mask_i = mask_maskbatch[i, ...]
+            pred_depth_i = pred_maskbatch[i, ...][mask_i]
+            gt_trans_i = gt_trans[i, ...][mask_i]
 
-        #     depth_diff = torch.abs(gt_trans_i - pred_depth_i)
+            depth_diff = torch.abs(gt_trans_i - pred_depth_i)
 
-        #     loss[i] = torch.mean(depth_diff)
+            loss[i] = torch.mean(depth_diff)
 
-        #     tanh_norm_gt = torch.tanh(0.01*gt_trans_i)
-        #     tanh_norm_pred = torch.tanh(0.01*pred_depth_i)
-        #     loss_tanh[i] = torch.mean(torch.abs(tanh_norm_gt - tanh_norm_pred))
+            tanh_norm_gt = torch.tanh(0.01*gt_trans_i)
+            tanh_norm_pred = torch.tanh(0.01*pred_depth_i)
+            loss_tanh[i] = torch.mean(torch.abs(tanh_norm_gt - tanh_norm_pred))
 
-        # loss_out = loss + loss_tanh
+        loss_out = loss + loss_tanh
+
+        return loss_out.float()
 
         # print(loss_out)
 
-        ### Reduce mask mean implementation
-        mask_maskbatch = mask_maskbatch.view(B, -1)
-        all_pred = pred_maskbatch.view(B, -1)
-        all_gt = gt_trans.view(B, -1)
-        all_depth_diff = torch.abs(all_gt - all_pred)
+        # ### Reduce mask mean implementation
+        # mask_maskbatch = mask_maskbatch.view(B, -1)
+        # all_pred = pred_maskbatch.view(B, -1)
+        # all_gt = gt_trans.view(B, -1)
+        # all_depth_diff = torch.abs(all_gt - all_pred)
 
-        loss_depth_diff = reduce_mean_masked_instance(all_depth_diff, mask_maskbatch)
+        # loss_depth_diff = reduce_mean_masked_instance(all_depth_diff, mask_maskbatch)
 
-        all_tanh_norm_gt = torch.tanh(0.01*all_gt)
-        all_tanh_norm_pred = torch.tanh(0.01*all_pred)
-        all_tanh_loss = torch.abs(all_tanh_norm_gt - all_tanh_norm_pred)
-        loss_tanh = reduce_mean_masked_instance(all_tanh_loss, mask_maskbatch)
+        # all_tanh_norm_gt = torch.tanh(0.01*all_gt)
+        # all_tanh_norm_pred = torch.tanh(0.01*all_pred)
+        # all_tanh_loss = torch.abs(all_tanh_norm_gt - all_tanh_norm_pred)
+        # loss_tanh = reduce_mean_masked_instance(all_tanh_loss, mask_maskbatch)
 
-        loss_out= torch.mean(loss_depth_diff+loss_tanh)
+        # loss_out= torch.mean(loss_depth_diff+loss_tanh)
 
-        if return_per_pixel:
-            ### For pixel loss map
-            all_out = all_depth_diff + all_tanh_loss
-            ## mask out values for invalid pixel depths
-            all_out = torch.where(mask_maskbatch, all_out, torch.zeros_like(all_out))
-            all_out = all_out.view(B, C, H, W)
+        # if return_per_pixel:
+        #     ### For pixel loss map
+        #     all_out = all_depth_diff + all_tanh_loss
+        #     ## mask out values for invalid pixel depths
+        #     all_out = torch.where(mask_maskbatch, all_out, torch.zeros_like(all_out))
+        #     all_out = all_out.view(B, C, H, W)
             
-            return loss_out.float(), all_out
-        else:
-            return loss_out.float(), None
+        #     return loss_out.float(), all_out
+        # else:
+        #     return loss_out.float(), None
 
 if __name__ == '__main__':
     ilnr_loss = MEADSTD_TANH_NORM_Loss()

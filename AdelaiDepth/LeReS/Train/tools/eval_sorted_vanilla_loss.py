@@ -410,7 +410,7 @@ with torch.no_grad():
             ### Quantitative results 
 
             ### Scale the output by mean and sd
-            data['gt_depth'] = torch.from_numpy(data['gt_depth'])
+            # data['gt_depth'] = torch.from_numpy(data['gt_depth'])
             gt_depth = transform_shift_scale(data['gt_depth'].cuda())
 
             curr_gt = gt_depth[0]

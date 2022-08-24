@@ -25,9 +25,13 @@ from PIL import Image
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
-parser.add_argument("--ckpt", default="epoch152_step57375.pth", help="checkpoint", type=str)
+# parser.add_argument("--logdir", default="log_0805_base001_mlp0001/", help="path to the log directory", type=str)
 
-parser.add_argument('--dump_dir', default= "dump_0823_debug/", type=str)
+# parser.add_argument("--ckpt", default="epoch152_step57375.pth", help="checkpoint", type=str)
+# parser.add_argument("--ckpt", default="epoch80_step30375.pth", help="checkpoint", type=str)
+parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
+
+parser.add_argument('--dump_dir', default= "dump_0823_debug_working_e104_test/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
@@ -322,9 +326,6 @@ model.eval()
 with torch.no_grad():
     for i, data in enumerate(zcache_dataloader):
 
-        # if i%50!=0:
-        #     continue
-
         batch_size = data['rgb'].shape[0]
         C = data['rgb'].shape[1]
         H = data['rgb'].shape[2]
@@ -374,7 +375,6 @@ with torch.no_grad():
 
                 curr_pred_depth = curr_pred_depth.to("cpu").detach().numpy().squeeze() 
                 curr_pred_depth_scaled = curr_pred_depth_scaled.to("cpu").detach().numpy().squeeze() 
-
                 pred_depth_ori = curr_pred_depth
                 # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
 
@@ -382,7 +382,7 @@ with torch.no_grad():
                 
                 if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
                     # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), curr_pred_depth_scaled, cmap='rainbow')
+                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
                     # cv2.imwrite(os.path.join(temp_fol, img_name+'-depth_raw.png'), (pred_depth_ori/pred_depth_ori.max() * 60000).astype(np.uint16))                   
 
                     image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))

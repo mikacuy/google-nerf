@@ -21,7 +21,7 @@ def reconstruct_3D(depth, f):
     v = v.transpose(1, 0)
 
     if f > 1e5:
-        print('Infinit focal length!!!')
+        print('Infinite focal length!!!')
         x = u - cu
         y = v - cv
         z = depth / depth.max() * x.max()
@@ -101,6 +101,23 @@ def reconstruct_depth(depth, rgb, dir, pcd_name, focal):
     pcd = reconstruct_3D(depth, f=focal)
     rgb_n = np.reshape(rgb, (-1, 3))
     save_point_cloud(pcd, rgb_n, os.path.join(dir, pcd_name + '.ply'))
+
+def backup_files(log_dir, train_fname):
+    ### For training file backups
+    os.system('cp %s %s' % (train_fname, log_dir)) # bkp of model def
+    os.system('cp -r lib/ %s' % (log_dir)) # bkp of train procedure
+    os.system('cp -r data/ %s' % (log_dir)) # bkp of data utils
+    os.system('cp %s %s' % ("tools/parse_arg_base.py", log_dir)) # bkp of model def
+    os.system('cp %s %s' % ("tools/parse_arg_train.py", log_dir)) # bkp of model def
+    os.system('cp %s %s' % ("tools/parse_arg_val.py", log_dir)) # bkp of model def
+    os.system('cp %s %s' % ("tools/utils.py", log_dir)) # bkp of model def
+
+
+
+
+
+
+
 
 
     

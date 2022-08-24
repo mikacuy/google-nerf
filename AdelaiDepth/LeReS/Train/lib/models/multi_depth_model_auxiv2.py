@@ -57,7 +57,7 @@ class RelDepthModel_cIMLE(nn.Module):
         self.depth_model = DepthModel_cIMLE(d_latent=d_latent, version=version)
         self.losses = ModelLoss()
 
-    def forward(self, data, z, is_train=True):
+    def forward(self, data, z, is_train=True, transform_pred=False, scale=1.0, shift=0.0):
         # Input data is a_real, predicted data is b_fake, groundtruth is b_real
 
         data['rgb'] = data['rgb'].cuda()
@@ -70,15 +70,12 @@ class RelDepthModel_cIMLE(nn.Module):
         if is_train:
             self.losses_dict = self.losses.criterion(self.logit, self.auxi, data)
 
-            ### per pixel loss not needed in training
-            del self.losses_dict[0]["ilnr_per_pixel"]
-
         else:
             self.losses_dict = {'total_loss': torch.tensor(0.0, dtype=torch.float).cuda()}
 
         return {'decoder': self.logit, 'auxi': self.auxi, 'losses': self.losses_dict}
 
-    def inference(self, data, z, rescaled=False, return_loss=False):
+    def inference(self, data, z, rescaled=False):
         # with torch.no_grad():
         #     out = self.forward(data, is_train=False)
         #     pred_depth = out['decoder']
@@ -100,10 +97,6 @@ class RelDepthModel_cIMLE(nn.Module):
         if rescaled:  
             pred_depth_out = depth - depth.min() + 0.01
 
-        if return_loss:
-            losses_dict = self.losses.criterion(depth, None, data)
-            return pred_depth_out, losses_dict
-
         return pred_depth_out
 
     def set_mean_var_shifts(self, mean0, var0, mean1, var1, mean2, var2, mean3, var3):
@@ -124,7 +117,7 @@ class RelDepthModel_cIMLE_decoder(nn.Module):
         self.depth_model = DepthModel_cIMLE_v2(d_latent=d_latent, version=version)
         self.losses = ModelLoss()
 
-    def forward(self, data, z, is_train=True):
+    def forward(self, data, z, is_train=True, transform_pred=False, scale=1.0, shift=0.0):
         # Input data is a_real, predicted data is b_fake, groundtruth is b_real
 
         data['rgb'] = data['rgb'].cuda()
@@ -135,7 +128,10 @@ class RelDepthModel_cIMLE_decoder(nn.Module):
         self.auxi = None
 
         if is_train:
-            self.losses_dict = self.losses.criterion(self.logit, self.auxi, data)
+            if transform_pred:
+                self.losses_dict = self.losses.criterion(self.logit, self.auxi, data, transform_pred=True, scale=scale, shift=shift)
+            else:
+                self.losses_dict = self.losses.criterion(self.logit, self.auxi, data)
 
             ### per pixel loss not needed in training
             del self.losses_dict[0]["ilnr_per_pixel"]
@@ -216,8 +212,7 @@ class ModelLoss(nn.Module):
 
     def criterion(self, pred_logit, auxi, data):
         
-        with torch.cuda.device(pred_logit.device):
-            loss1, total_raw = self.decoder_loss(pred_logit, data)
+        loss1, total_raw = self.decoder_loss(pred_logit, data)
 
         if auxi is not None:
             loss2 = self.auxi_loss(auxi, data)
@@ -254,7 +249,7 @@ class ModelLoss(nn.Module):
         loss['total_loss'] = total_loss * cfg.TRAIN.LOSS_AUXI_WEIGHT
         return loss
 
-    def decoder_loss(self, pred_logit, data):
+    def decoder_loss(self, pred_logit, data, transform_pred=False, scale=1.0, shift=0.0):
         pred_depth = pred_logit
 
         gt_depth = data['depth'].to(device=pred_depth.device)
@@ -324,11 +319,9 @@ class ModelLoss(nn.Module):
         ###
         # Scale-shift Invariant Loss
         if '_meanstd-tanh_' in cfg.TRAIN.LOSS_MODE.lower():
-            curr_loss, all_out = self.meanstd_tanh_loss(pred_depth_mid, gt_depth_mid, return_per_pixel=True)
 
+            curr_loss = self.meanstd_tanh_loss(pred_depth_mid, gt_depth_mid)
             loss['meanstd-tanh_loss'] = torch.sum(curr_loss)
-
-            loss['ilnr_per_pixel'] = all_out
 
             total_loss += curr_loss
 
@@ -346,12 +339,7 @@ class ModelLoss(nn.Module):
             # print(curr_loss.shape)
             total_loss += curr_loss
 
-        loss['total_loss'] = torch.tensor(0.0).to(device=pred_depth.device)
-        for k in sorted(loss.keys()):
-            if k == "ilnr_per_pixel" or k == "total_loss":
-                continue
-
-            loss['total_loss'] += loss[k]
+        loss['total_loss'] = sum(loss.values())
 
         return loss, total_loss
 
@@ -531,10 +519,10 @@ class DepthModel_cIMLE_v2(nn.Module):
 
         self.encoder_modules = get_func(backbone)()
 
-        if self.version in ["v3", "v4","v5","v6"]:
+        if self.version in ["v2", "v3","v4","v5","v6"]:
             self.decoder_modules = network.Decoder_cIMLE(d_latent=d_latent, version=version)
         else:
-            print("Unimplemented.")
+            print("Unimplemented in DepthModel_cIMLE_v2.")
             exit()
 
         # self.auxi_modules = network.AuxiNetV2()

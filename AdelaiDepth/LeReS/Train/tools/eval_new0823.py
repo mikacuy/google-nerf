@@ -1,3 +1,8 @@
+'''
+Mikaela Uy
+Usable eval script as of Aug 23, 2022
+Vanilla evaluation script
+'''
 import math
 import os, sys
 
@@ -481,25 +486,6 @@ log_string("Mean WHDR = "+str(mean_err_whdr))
 log_string("")           
 
 print("Done.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
