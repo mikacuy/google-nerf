@@ -6,15 +6,6 @@ Vanilla evaluation script
 import math
 import os, sys
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(BASE_DIR, "../"))
-from data.load_dataset_distributed import MultipleDataLoaderDistributed, MultipleDatasetDistributed
-from lib.models.multi_depth_model_auxiv2 import *
-from lib.configs.config import cfg, merge_cfg_from_file, print_configs
-from lib.utils.net_tools import save_ckpt, load_ckpt
-from tools.parse_arg_base import print_options
-from lib.configs.config import cfg, merge_cfg_from_file, print_configs
-
 ## for dataloaders
 import torch.utils.data
 
@@ -29,10 +20,14 @@ from PIL import Image
 # np.random.seed(0)
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
-parser.add_argument("--ckpt", default="epoch152_step57375.pth", help="checkpoint", type=str)
 
-parser.add_argument('--dump_dir', default= "dump_0823_debug/", type=str)
+### Currently the best model
+parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
+parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
+
+# parser.add_argument("--logdir", default="log_0823_encv2_noaug_run2/", help="path to the log directory", type=str)
+# parser.add_argument("--ckpt", default="epoch64_step0.pth", help="checkpoint", type=str)
+parser.add_argument('--dump_dir', default= "dump_0823_debug2/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
@@ -41,7 +36,6 @@ parser.add_argument('--dataset_list', default=["taskonomy"], nargs='+', help='Th
 parser.add_argument('--dataset', default='multi', help='Dataset loader name')
 parser.add_argument('--dataroot', default='/orion/downloads/coordinate_mvs/', help='Root dir for dataset')
 
-
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
 parser.add_argument('--num_samples', default= 5, type=int)
@@ -49,15 +43,46 @@ parser.add_argument('--rescaled', default=False, type=bool)
 
 parser.add_argument('--ada_version', default= "v2", type=str)
 parser.add_argument('--cimle_version', default= "enc", type=str)
-
+parser.add_argument('--import_from_logdir', default=False, type=bool)
+parser.add_argument('--visu_all', default=False, type=bool)
+parser.add_argument('--seed_num', default= 0, type=int)
 
 FLAGS = parser.parse_args()
 LOG_DIR = FLAGS.logdir
 CKPT = FLAGS.ckpt
+IMPORT_FROM_LOGDIR = FLAGS.import_from_logdir
+VISU_ALL = FLAGS.visu_all
+
+SEED_NUM = FLAGS.seed_num
+torch.manual_seed(SEED_NUM)
+np.random.seed(SEED_NUM)
+random.seed(SEED_NUM)
+
+#### Import from LOG_DIR files or from global files
+if IMPORT_FROM_LOGDIR:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    sys.path.append(os.path.join(BASE_DIR, "../", LOG_DIR))
+    from data.load_dataset_distributed import MultipleDataLoaderDistributed, MultipleDatasetDistributed
+    from lib.models.multi_depth_model_auxiv2 import *
+    from lib.configs.config import cfg, merge_cfg_from_file, print_configs
+    from lib.utils.net_tools import save_ckpt, load_ckpt
+    from tools.parse_arg_base import print_options
+    from lib.configs.config import cfg, merge_cfg_from_file, print_configs
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    sys.path.append(os.path.join(BASE_DIR, "../"))
+    from data.load_dataset_distributed import MultipleDataLoaderDistributed, MultipleDatasetDistributed
+    from lib.models.multi_depth_model_auxiv2 import *
+    from lib.configs.config import cfg, merge_cfg_from_file, print_configs
+    from lib.utils.net_tools import save_ckpt, load_ckpt
+    from tools.parse_arg_base import print_options
+    from lib.configs.config import cfg, merge_cfg_from_file, print_configs
 
 ADA_VERSION = FLAGS.ada_version
 CIMLE_VERSION = FLAGS.cimle_version
-
+print(CIMLE_VERSION)
+print(ADA_VERSION)
+print("===================")
 
 DUMP_DIR = FLAGS.dump_dir
 if not os.path.exists(DUMP_DIR): os.mkdir(DUMP_DIR)
@@ -140,12 +165,8 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
         gt = gt[~mask_invalid]
         pred = pred[~mask_invalid]
 
-    # print(gt)
-    # print(pred)
-    # print()
 
     mask = (gt > 1e-8)
-    # mask = (gt > 1e-8) & (pred > 1e-8)
     gt = gt[mask]
     pred = pred[mask]
     n_pxl = gt.size
@@ -154,19 +175,10 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
 
     err_absRel = -1.
     err_squaRel = -1.
-    # err_rms = -1.
-    # err_logRms = -1.
     err_silog = -1.
-    # err_silog2 = -1.
     err_delta1 = -1.
-    # err_delta2 = -1.
-    # err_delta3 = -1.
     err_whdr = -1.
 
-    # invalid evaluation image
-    # print(scale)
-    # print(gt)
-    # print(pred)
 
     if gt_scale.size < 10:
         print('Valid pixel size:', gt_scale.size, 'Invalid evaluation!!!!')
@@ -183,27 +195,10 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
     squa_rel_sum = np.sum(s_rel)
     err_squaRel = np.float64(squa_rel_sum) / float(n_pxl)
 
-    # #Root Mean Square error
-    # square = (gt_scale - pred_scale) ** 2
-    # rms_squa_sum = np.sum(square)
-    # err_rms = np.float64(rms_squa_sum) / float(n_pxl)
-
-    # #Log Root Mean Square error
-    # log_square = (np.log(gt_scale) - np.log(pred_scale)) **2
-    # log_rms_sum = np.sum(log_square)
-    # err_logRms = np.float64(log_rms_sum) / float(n_pxl)
-
     # Scale invariant error
     diff_log = np.log(pred_scale) - np.log(gt_scale)
     diff_log_sum = np.sum(diff_log)
     err_silog = np.float64(diff_log_sum)/ float(n_pxl)
-    # diff_log_2 = diff_log ** 2
-    # diff_log_2_sum = np.sum(diff_log_2)
-    # err_silog2 = np.float64(diff_log_2_sum)/ float(n_pxl)
-
-    # # Mean log10 error
-    # log10_sum = np.sum(np.abs(np.log10(gt) - np.log10(pred)))
-    # smoothed_criteria['err_log10'].AddValue(np.float64(log10_sum), n_pxl)
 
     #Delta
     gt_pred = gt_scale / pred_scale
@@ -215,10 +210,6 @@ def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
 
     delta_1_sum = np.sum(ratio_max < 1.25)
     err_delta1 = np.float64(delta_1_sum)/ float(n_pxl)
-    # delta_2_sum = np.sum(ratio_max < 1.25**2)
-    # err_delta2 = np.float64(delta_2_sum)/ float(n_pxl)
-    # delta_3_sum = np.sum(ratio_max < 1.25**3)
-    # err_delta3 = np.float64(delta_3_sum)/ float(n_pxl)
 
     # WHDR error
     whdr_err_sum, eval_num = weighted_human_disagreement_rate(gt_scale, pred_scale)
@@ -293,6 +284,22 @@ def transform_shift_scale(depth, valid_threshold=-1e-8, max_threshold=1e8):
     
     return gt_trans
 
+### Tranform pred to fit the ground truth
+def recover_metric_depth(pred, gt):
+    if type(pred).__module__ == torch.__name__:
+        pred = pred.cpu().numpy()
+    if type(gt).__module__ == torch.__name__:
+        gt = gt.cpu().numpy()
+    gt = gt.squeeze()
+    pred = pred.squeeze()
+    mask = (gt > 1e-8) & (pred > 1e-8)
+
+    gt_mask = gt[mask]
+    pred_mask = pred[mask]
+    a, b = np.polyfit(pred_mask, gt_mask, deg=1)
+    pred_metric = a * pred + b
+    return pred_metric
+
 ##############################
 
 
@@ -323,12 +330,12 @@ num_evaluated = 0
 
 model.eval()
 
+### Focal length for taskonomy
+f = 512.0 ### Hardcoded for taskonomy   
+
 
 with torch.no_grad():
     for i, data in enumerate(zcache_dataloader):
-
-        # if i%50!=0:
-        #     continue
 
         batch_size = data['rgb'].shape[0]
         C = data['rgb'].shape[1]
@@ -347,11 +354,19 @@ with torch.no_grad():
         rgb = 255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())
         rgb = np.array(rgb, np.int)
 
-        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):      
+        ### Ground truth depth
+        # gt_depth = transform_shift_scale(data['gt_depth'].cuda())
+        gt_depth = data['gt_depth'].cuda()
+        curr_gt = gt_depth[0]
+        curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
+        curr_gt = cv2.resize(curr_gt, (448, 448), interpolation=cv2.INTER_LINEAR)
+
+        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:      
             img_name = "image" + str(i)
             cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
             image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
-
+            img_name = "image" + str(i) + "_gt"
+            reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
 
         all_err_absRel = np.zeros((batch_size, mini_batch_size))
         all_err_squaRel = np.zeros((batch_size, mini_batch_size))
@@ -367,55 +382,27 @@ with torch.no_grad():
 
             pred_depth = model.inference(data, z, rescaled=RESCALED)
 
-
-            ### Scale the output by mean and sd
-            pred_depth_scaled = transform_shift_scale(torch.clone(pred_depth))
-
             for s in range(mini_batch_size):
                 curr_pred_depth = pred_depth[s]
-                curr_pred_depth_scaled = pred_depth_scaled[s]
-
-                # print(curr_pred_depth==curr_pred_depth_scaled)
-
                 curr_pred_depth = curr_pred_depth.to("cpu").detach().numpy().squeeze() 
-                curr_pred_depth_scaled = curr_pred_depth_scaled.to("cpu").detach().numpy().squeeze() 
 
                 pred_depth_ori = curr_pred_depth
                 # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
 
                 img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
                 
-                if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
+                if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:
                     # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), curr_pred_depth_scaled, cmap='rainbow')
-                    # cv2.imwrite(os.path.join(temp_fol, img_name+'-depth_raw.png'), (pred_depth_ori/pred_depth_ori.max() * 60000).astype(np.uint16))                   
-
+                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
                     image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
                     ### Output point cloud
-                    f = 512.0 ### Hardcoded for taskonomy
                     reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
-                    # reconstruct_depth(curr_pred_depth_scaled, rgb, pc_scaled_fol, img_name, f)
 
+                ### Align prediction and compute qualitative results
+                curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, curr_gt)
+                err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_metric, curr_gt)
 
-            ### Quantitative results 
-
-            ### Scale the output by mean and sd
-            gt_depth = transform_shift_scale(data['gt_depth'].cuda())
-
-            curr_gt = gt_depth[0]
-            curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
-            curr_gt = cv2.resize(curr_gt, (pred_depth.shape[-2], pred_depth.shape[-1]), interpolation=cv2.INTER_LINEAR)
-
-            if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
-                img_name = "image" + str(i) + "_" + str(k) + "_gt"
-                reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
-
-            err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_scaled, curr_gt)
-            if err_absRel <0 :
-                ## Error skip
-                all_err_absRel[:, k*mini_batch_size + s] = 1000000.
-            else:
                 all_err_absRel[:, k*mini_batch_size + s] = err_absRel
                 all_err_squaRel[:, k*mini_batch_size + s] = err_squaRel
                 all_err_silog[:, k*mini_batch_size + s] = err_silog
@@ -424,9 +411,7 @@ with torch.no_grad():
             #######
 
         ### Quantitative Results
-        # print(all_err_absRel)
         idx_to_take = np.argmin(all_err_absRel, axis=-1)[0]
-        # print(idx_to_take)
 
         if all_err_absRel[0][idx_to_take] > 0:
             total_err_absRel += all_err_absRel[0][idx_to_take]
@@ -438,7 +423,7 @@ with torch.no_grad():
 
         #######################
 
-        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train"):
+        if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:
             ### Collate and output to a single image
             height = H
             width = W    
@@ -461,8 +446,6 @@ with torch.no_grad():
 
         if i%100==0:
             print("Finished "+str(i)+"/"+str(len(zcache_dataloader))+".")
-
-
 
 mean_err_absRel = total_err_absRel/float(num_evaluated)
 mean_err_squaRel = total_err_squaRel/float(num_evaluated)
