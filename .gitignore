@@ -34,3 +34,7 @@ AdelaiDepth/LeReS/Minist_Test/dump*
 *slurm_*
 jax-resnet/*
 imle_code/*
+dense_depth_priors_nerf/slurm_output*
+dense_depth_priors_nerf/runs/*
+dense_depth_priors_nerf/log*
+dense_depth_priors_nerf/depth_priors_network_weights/*

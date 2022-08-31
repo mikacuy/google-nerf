@@ -16,8 +16,8 @@ from utils import *
 
 import argparse
 from PIL import Image
+import random
 
-# np.random.seed(0)
 
 parser = argparse.ArgumentParser()
 
@@ -117,9 +117,6 @@ if CIMLE_VERSION == "enc":
 else:
     model = RelDepthModel_cIMLE_decoder(d_latent=D_LATENT, version=ADA_VERSION)
 
-print(CIMLE_VERSION)
-print(ADA_VERSION)
-print("===================")
 model.cuda()
 
 ### Load model
@@ -148,6 +145,10 @@ if os.path.isfile(CKPT_FILE):
 else:
 	print("Error: Model does not exist.")
 	exit()
+
+mean0, var0, mean1, var1, mean2, var2, mean3, var3 = load_mean_var_adain(os.path.join(LOG_DIR, "mean_var_adain.npy"), torch.device("cuda"))
+model.set_mean_var_shifts(mean0, var0, mean1, var1, mean2, var2, mean3, var3)
+print("Initialized adain mean and var.")
 
 ### Quantitative Metrics ####
 def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
@@ -359,7 +360,7 @@ with torch.no_grad():
         gt_depth = data['gt_depth'].cuda()
         curr_gt = gt_depth[0]
         curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
-        curr_gt = cv2.resize(curr_gt, (448, 448), interpolation=cv2.INTER_LINEAR)
+        curr_gt = cv2.resize(curr_gt, (448, 448), interpolation=cv2.INTER_NEAREST)
 
         if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:      
             img_name = "image" + str(i)

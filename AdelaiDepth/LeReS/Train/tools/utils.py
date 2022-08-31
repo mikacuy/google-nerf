@@ -114,6 +114,46 @@ def backup_files(log_dir, train_fname):
 
 
 
+def load_mean_var_adain(fname, device):
+    input_dict = np.load(fname, allow_pickle=True)
+
+    mean0 = input_dict.item().get('mean0')
+    mean1 = input_dict.item().get('mean1')
+    mean2 = input_dict.item().get('mean2')
+    mean3 = input_dict.item().get('mean3')
+
+    var0 = input_dict.item().get('var0')
+    var1 = input_dict.item().get('var1')
+    var2 = input_dict.item().get('var2')
+    var3 = input_dict.item().get('var3')
+
+    mean0 = torch.from_numpy(mean0).to(device=device)
+    mean1 = torch.from_numpy(mean1).to(device=device)
+    mean2 = torch.from_numpy(mean2).to(device=device)
+    mean3 = torch.from_numpy(mean3).to(device=device)
+    var0 = torch.from_numpy(var0).to(device=device)
+    var1 = torch.from_numpy(var1).to(device=device)
+    var2 = torch.from_numpy(var2).to(device=device)
+    var3 = torch.from_numpy(var3).to(device=device)
+
+    return mean0, var0, mean1, var1, mean2, var2, mean3, var3
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

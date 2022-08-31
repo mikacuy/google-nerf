@@ -20,7 +20,7 @@ from lib.utils.training_stats import TrainingStats
 from lib.utils.evaluate_depth_error import validate_rel_depth_err, recover_metric_depth
 from lib.utils.lr_scheduler_custom import make_lr_scheduler
 from lib.utils.logging import setup_distributed_logger, SmoothedValue
-from utils import backup_files
+from utils import backup_files, load_mean_var_adain
 
 ## for dataloaders
 import torch.utils.data
@@ -70,6 +70,7 @@ parser.add_argument('--cimle_version', default= "enc", type=str)
 parser.add_argument('--seed_num', default= 0, type=int)
 parser.add_argument('--debug_mode', default= False, type=bool)
 parser.add_argument('--check_init', default= False, type=bool)
+parser.add_argument('--only_output_adain_init', default= False, type=bool)
 
 FLAGS = parser.parse_args()
 LOG_DIR = FLAGS.logdir
@@ -96,6 +97,7 @@ print("Using default scheduler "+str(USE_SCHEDULER))
 SEED_NUM = FLAGS.seed_num
 DEBUG_MODE = FLAGS.debug_mode
 CHECK_INIT = FLAGS.check_init
+ONLY_OUTPUT_ADAIN_INIT = FLAGS.only_output_adain_init
 
 ##############################################
 ###### Dataset utils for cIMLE implementation
@@ -156,11 +158,12 @@ if log_output_dir:
             raise
 
 ###### Backup files into the logdir
-LOG_FOUT = open(os.path.join(LOG_DIR, 'log_train.txt'), 'w')
-LOG_FOUT.write(str(FLAGS)+'\n')
+if not ONLY_OUTPUT_ADAIN_INIT:
+    LOG_FOUT = open(os.path.join(LOG_DIR, 'log_train.txt'), 'w')
+    LOG_FOUT.write(str(FLAGS)+'\n')
 
-curr_fname = sys.argv[0]
-backup_files(LOG_DIR, curr_fname)
+    curr_fname = sys.argv[0]
+    backup_files(LOG_DIR, curr_fname)
 #################################
 
 ### Set random seed torch and numpy ###
@@ -391,11 +394,32 @@ for epoch in range(MAX_EPOCH):
             var2 = torch.var(all_ada2, axis=0)
             var3 = torch.var(all_ada3, axis=0)
 
+            ### Save mean and variance to dictionary
+            mean0 = mean0.to("cpu").detach().numpy().squeeze() 
+            mean1 = mean1.to("cpu").detach().numpy().squeeze() 
+            mean2 = mean2.to("cpu").detach().numpy().squeeze() 
+            mean3 = mean3.to("cpu").detach().numpy().squeeze() 
+            var0 = var0.to("cpu").detach().numpy().squeeze() 
+            var1 = var1.to("cpu").detach().numpy().squeeze() 
+            var2 = var2.to("cpu").detach().numpy().squeeze() 
+            var3 = var3.to("cpu").detach().numpy().squeeze()
+
+            output_dict = {"mean0":mean0, "mean1":mean1, "mean2":mean2, "mean3":mean3,\
+                            "var0":var0, "var1":var1, "var2":var2, "var3":var3}
+
+            np.save(os.path.join(LOG_DIR, "mean_var_adain.npy"), output_dict)
+
+            #########################
+
             ### Set mean and variance
+            mean0, var0, mean1, var1, mean2, var2, mean3, var3 = load_mean_var_adain(os.path.join(LOG_DIR, "mean_var_adain.npy"), z.device)
             model.set_mean_var_shifts(mean0, var0, mean1, var1, mean2, var2, mean3, var3)
 
             print("AdaIn weights init done.")
             print("========================")
+
+            if ONLY_OUTPUT_ADAIN_INIT:
+                exit()
 
         model.train()
 

@@ -33,7 +33,7 @@ parser.add_argument('--dump_dir', default= "dump_scannet_lerescimle_0726_lrfixed
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
-parser.add_argument('--scenename', default='scene0000_00', help='Dataset loader name')
+parser.add_argument('--scenename', default='scene0653_00', help='Dataset loader name')
 parser.add_argument('--dataroot', default='/orion/group/scannet_v2/mika_processed/', help='Root dir for dataset')
 
 

@@ -128,13 +128,8 @@ class RelDepthModel_cIMLE_decoder(nn.Module):
         self.auxi = None
 
         if is_train:
-            if transform_pred:
-                self.losses_dict = self.losses.criterion(self.logit, self.auxi, data, transform_pred=True, scale=scale, shift=shift)
-            else:
-                self.losses_dict = self.losses.criterion(self.logit, self.auxi, data)
+            self.losses_dict = self.losses.criterion(self.logit, self.auxi, data)
 
-            ### per pixel loss not needed in training
-            del self.losses_dict[0]["ilnr_per_pixel"]
         else:
             self.losses_dict = {'total_loss': torch.tensor(0.0, dtype=torch.float).cuda()}
 
