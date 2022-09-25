@@ -40,17 +40,18 @@ parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", ty
 # parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
 # parser.add_argument("--ckpt", default="epoch9_step0.pth", help="checkpoint", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0710_train/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0758_train/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0781_train/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0708_train/", type=str)
-parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0738_train/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0710_train_unscaled/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0758_train_unscaled/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0781_train_unscaled/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0708_train_unscaled/", type=str)
+parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0738_train_unscaled/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
 # ### Scannet sample scene
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/mika_processed/scene0653_00/', help='Root dir for dataset')
+
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
@@ -318,6 +319,10 @@ def recover_metric_depth(pred, gt):
         pred = pred.cpu().numpy()
     if type(gt).__module__ == torch.__name__:
         gt = gt.cpu().numpy()
+
+    # gt = np.expand_dims(all_pred_depths, axis=0)
+    # pred = np.expand_dims(all_pred_depths, axis=0)
+
     gt = gt.squeeze()
     pred = pred.squeeze()
     
@@ -360,37 +365,6 @@ def remap_color_to_depth(depth_img):
     depth = np.apply_along_axis(lambda bgr: color_to_gray_map[tuple(bgr)], 2, depth_img)
     return depth    
 ##############################
-
-
-### Dataset
-
-################################
-### Old not using the dataloader
-################################
-# if not IS_NSVF:
-#     image_dir = os.path.join(FLAGS.dataroot, FLAGS.scenename, "rgb")
-#     depth_dir = os.path.join(FLAGS.dataroot, FLAGS.scenename, "depth")
-# else:
-#     image_dir = os.path.join(FLAGS.dataroot, FLAGS.scenename, "leres_cimle_v1", "rgb")
-#     depth_dir = os.path.join(FLAGS.dataroot, FLAGS.scenename, "leres_cimle_v1", "depth")
-
-
-# imgs_list = os.listdir(image_dir)
-# imgs_list.sort()
-
-# depth_list = os.listdir(depth_dir)
-# depth_list.sort()
-
-# imgs_path = [os.path.join(image_dir, i) for i in imgs_list]
-# print(len(imgs_path))
-
-# depth_path = [os.path.join(depth_dir, i) for i in depth_list]
-# print(len(imgs_path))
-
-# if len(imgs_path) !=  len(depth_path):
-#     print("ERROR. Number of images and depth maps don't match.")
-#     exit()
-################################
 
 ### Dataloader
 # datapath = os.path.join(FLAGS.dataroot, FLAGS.scenename)
@@ -436,38 +410,6 @@ if not IS_NSVF:
 else:
     ### Check this for other models
     f = 1111.111
-
-# with torch.no_grad():
-#     for i in range(len(imgs_path)):
-        # curr_img_path = imgs_path[i]
-        # curr_depth_path = depth_path[i]
-        
-        # ## Load iamge
-        # rgb = cv2.imread(curr_img_path)
-        # rgb_c = rgb.copy()
-        # gt_depth = None
-        # A_resize = cv2.resize(rgb_c, (448, 448), interpolation=cv2.INTER_LINEAR)
-        # img_torch = scale_torch(A_resize)[None, :, :, :]
-
-        # ## Load depth
-        # depth_img = np.array(imageio.imread(curr_depth_path))
-
-        # if not IS_NSVF:
-        #     ## Scannet depth
-        #     depth_img = depth_img.astype(float)/1000.
-        #     depth_img = (depth_img / depth_img.max() * 60000).astype(np.uint16)
-        # else:
-        #     depth_img = remap_color_to_depth(depth_img)
-        #     depth_img = depth_img.astype(float)
-        #     depth_img = (depth_img / depth_img.max() * 60000).astype(np.uint16)
-
-        # data['gt_depth'] = depth_img
-        # curr_gt = cv2.resize(depth_img, (448, 448), interpolation=cv2.INTER_NEAREST)
-        # gt_mask = curr_gt < 1e-8
-
-
-        # data = {}
-        # data['rgb'] = img_torch
 
 with torch.no_grad():
     for i, data in enumerate(zcache_dataloader):
@@ -529,6 +471,9 @@ with torch.no_grad():
         all_err_delta1 = np.zeros((batch_size, mini_batch_size*num_sets))
         all_err_whdr = np.zeros((batch_size, mini_batch_size*num_sets))
 
+
+        all_pred_depths = []
+
         for k in range(num_sets):
 
             ## Hard coded d_latent
@@ -554,53 +499,45 @@ with torch.no_grad():
                     ### Output point cloud
                     reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
 
-                ### Align prediction and compute qualitative results
-                curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, curr_gt)
+                all_pred_depths.append(curr_pred_depth)
+            #######
 
-                ## Raw depth
-                curr_pred_depth_raw = recover_metric_depth(curr_pred_depth, depth_img)
-                curr_pred_depth_raw = cv2.resize(curr_pred_depth_raw, orig_shape) ### check this resize function 
+        ### Find scale and fit
+        all_pred_depths = np.stack(all_pred_depths)
+        depth_img = np.repeat(np.expand_dims(depth_img, axis=0), NUM_SAMPLE, axis=0)
 
-                # print(curr_pred_depth_raw)
-                # print(curr_pred_depth_raw.shape)
-                # print()
+        # prev_shape = all_pred_depths.shape
 
-                ### Save output hypothesis ###
+        # all_pred_depths = all_pred_depths.flatten()
+        # depth_img = depth_img.flatten()
+
+        curr_pred_depth_raw = all_pred_depths
+
+        # curr_pred_depth_raw = curr_pred_depth_raw.reshape(prev_shape)
+        # depth_img = depth_img.reshape(prev_shape)
+
+        print("===============")
+        print("i")
+        ### Output to file
+        for k in range(num_sets):
+            for s in range(mini_batch_size):
+
+                curr_depth = curr_pred_depth_raw[k*mini_batch_size+s]
+                ### Resize --> check the opencv function
+                curr_depth = cv2.resize(curr_depth, orig_shape) ### check this resize function 
+
                 curr_rbg_name = data['A_paths'][0]
-                # print(curr_rbg_name)
                 fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
 
                 outfname = os.path.join(hypothesis_outdir, fname)
-                np.save(outfname, np.array(curr_pred_depth_raw))
+                np.save(outfname, np.array(curr_depth))                
 
-                # ## Check output --> debug
-                # depth = np.load(outfname).astype(np.float64)
-                # print(depth)
-                # print(depth.shape)
-                # print(outfname)
-                ##############################
-
-                err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_metric, curr_gt)
-
-                all_err_absRel[:, k*mini_batch_size + s] = err_absRel
-                all_err_squaRel[:, k*mini_batch_size + s] = err_squaRel
-                all_err_silog[:, k*mini_batch_size + s] = err_silog
-                all_err_delta1[:, k*mini_batch_size + s] = err_delta1
-                all_err_whdr[:, k*mini_batch_size + s] = err_whdr
-            #######
-
-        ### Quantitative Results
-        idx_to_take = np.argmin(all_err_absRel, axis=-1)[0]
-
-        if all_err_absRel[0][idx_to_take] > 0:
-            total_err_absRel += all_err_absRel[0][idx_to_take]
-            total_err_squaRel += all_err_squaRel[0][idx_to_take]
-            total_err_silog += all_err_silog[0][idx_to_take]
-            total_err_delta1 += all_err_delta1[0][idx_to_take]
-            total_err_whdr += all_err_whdr[0][idx_to_take]
-            num_evaluated += 1
-
-        #######################
+                ## Check output --> debug
+                depth = np.load(outfname).astype(np.float64)
+                print(depth)
+                print(depth.shape)
+                print(outfname)
+                print()
 
         if i%10==0  or VISU_ALL:
             ### Collate and output to a single image
@@ -634,30 +571,6 @@ with torch.no_grad():
         if i%100==0:
             print("Finished "+str(i)+"/"+str(len(zcache_dataloader)
                 )+".")
-
-mean_err_absRel = total_err_absRel/float(num_evaluated)
-mean_err_squaRel = total_err_squaRel/float(num_evaluated)
-mean_err_silog = total_err_silog/float(num_evaluated)
-mean_err_delta1 = total_err_delta1/float(num_evaluated)
-mean_err_whdr = total_err_whdr/float(num_evaluated)
-
-log_string("=" * 20)
-log_string("")
-log_string("Num evaluated= "+str(num_evaluated))
-log_string("")
-log_string("Mean Err AbsRel= "+str(mean_err_absRel))
-log_string("")             
-log_string("Mean Err SquareRel = "+str(mean_err_squaRel))
-log_string("")     
-log_string("Mean Err SiLog= "+str(mean_err_silog))
-log_string("")                
-log_string("Mean Scale Err = "+str(mean_err_delta1))
-log_string("") 
-log_string("Mean WHDR = "+str(mean_err_whdr))
-log_string("")           
-
-print("Done.")
-
 
 
 

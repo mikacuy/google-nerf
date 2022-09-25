@@ -19,7 +19,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, sample_pdf_v2, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, compute_space_carving_loss
 from data import create_random_subsets, load_scene_mika, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
@@ -234,7 +234,7 @@ def render_hyp(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
     ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
 
-#### range from [mean-3*sd, mean+3*sd]
+
 def precompute_depth_sampling(depth):
     depth_min = (depth[:, 0] - 3. * depth[:, 1])
     depth_max = depth[:, 0] + 3. * depth[:, 1]
@@ -587,6 +587,63 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, pytest=False):
 
     return rgb_map, disp_map, acc_map, weights, depth_map
 
+def get_pmf(raw, z_vals, rays_d, raw_noise_std=0, pytest=False):
+    """Transforms model's predictions to semantically meaningful values.
+    Args:
+        raw: [num_rays, num_samples along ray, 4]. Prediction from model.
+        z_vals: [num_rays, num_samples along ray]. Integration time.
+        rays_d: [num_rays, 3]. Direction of each ray.
+    Returns:
+        pmf: [num_rays, num_samples]. Weights assigned to each sampled color.
+    """
+    raw2T = lambda raw, dists, act_fn=F.relu: torch.exp(-act_fn(raw)*dists)
+    raw2tau = lambda raw, act_fn=F.relu: act_fn(raw)
+
+    noise = 0.
+    if raw_noise_std > 0.:
+        noise = torch.randn(raw[...,3].shape) * raw_noise_std
+
+        # Overwrite randomly sampled data if pytest
+        if pytest:
+            np.random.seed(0)
+            noise = np.random.rand(*list(raw[...,3].shape)) * raw_noise_std
+            noise = torch.Tensor(noise)
+
+    dists = z_vals[...,1:] - z_vals[...,:-1]
+    dists = torch.cat([dists, torch.full_like(dists[...,:1], 1e10, device=device)], -1)  # [N_rays, N_samples]
+    dists = dists * torch.norm(rays_d[...,None,:], dim=-1)
+    
+    T = raw2T(raw[...,3] + noise, dists)  # [N_rays, N_samples]
+    tau = raw2tau(raw[...,3] + noise)
+
+    cumprod_term = torch.cumprod(torch.cat([torch.ones((T.shape[0], 1), device=device), T + 1e-10], -1), -1)[:, :-1]
+    # cumprod_term = torch.cumprod(T, -1)
+
+    pmf = (tau) * cumprod_term
+    
+    print("sigma(s)")
+    print(tau)
+    print()
+    print("T(s)")
+    print(T)
+    print()
+    print("Transparency(s) = cumprod(T(0,s))")
+    print(cumprod_term)    
+
+    print()    
+    print(tau.shape)
+    print(cumprod_term.shape)
+    print()
+    print("PMF: sigma(s)*Transparency(s)")
+    print(pmf)
+    print("Sum along axis.")
+    print(pmf.sum(axis=-1))
+    print(pmf.sum(axis=-1).shape)    
+    exit()
+
+    return pmf
+
+
 def sample_3sigma(low_3sigma, high_3sigma, N, det, near, far):
     t_vals = torch.linspace(0., 1., steps=N, device=device)
     step_size = (high_3sigma - low_3sigma) / (N - 1)
@@ -692,7 +749,6 @@ def render_rays(ray_batch,
 
     # sample and render rays for dense depth priors for nerf
     N_samples_half = N_samples // 2
-
     if precomputed_z_samples is not None:
         # compute a lower bound for the sampling standard deviation as the maximal distance between samples
         lower_bound = precomputed_z_samples[-1] - precomputed_z_samples[-2]
@@ -737,11 +793,6 @@ def render_rays(ray_batch,
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
-    # ## Try without fine network and just use coarse network
-    # z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-    # z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_samples, det=(perturb==0.), pytest=pytest)
-    # pred_depth_hyp = z_samples
-
     if N_importance > 0:
 
         rgb_map_0, disp_map_0, acc_map_0, depth_map_0, z_vals_0, weights_0 = rgb_map, disp_map, acc_map, depth_map, z_vals, weights
@@ -758,49 +809,31 @@ def render_rays(ray_batch,
         z_samples = z_samples.detach()
 
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+
+
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
 
         run_fn = network_fn if network_fine is None else network_fine
 
         raw = network_query_fn(pts, viewdirs, embedded_cam, run_fn)
 
-        # ### P_depth from coarse network
-        # pred_depth_hyp = z_samples_depth
-
-        ####### Scratch ########
-        # print(raw.shape)
-
-        ### pts for depth output --> just take the points from importance sampling
-        ### output predicted depths at those points
-        # print("Getting depth estimates from nerf network.")
-        # pts_depth = rays_o[...,None,:] + rays_d[...,None,:] * z_samples_depth[...,:,None]
-        # print(pts_depth)
-        # print(pts_depth.shape)
-
-        # print(pred_depth_hyp.shape)
-        # exit()
-
-        # print(pts_depth.shape)
-        # raw_depth = network_query_fn(pts_depth, viewdirs, embedded_cam, run_fn)
-        # print(raw_depth.shape)
-
-        # z_samples, _ = torch.sort(z_samples_depth, -1)
-        # print(z_samples)
-        # print(z_samples.shape)
-        # exit()
-        # pred_depth_hyp = raw2depth_hypotheses(raw_depth, z_samples, rays_d)    
-
-        # print(pred_depth_hyp.shape)
-        # exit()
-        ##########################
-
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
-        ### P_depth from fine network
-        z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+        pmf = get_pmf(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
+        print(pmf)
+        print(pmf.sum(axis=-1))
+        print(pmf.sum(axis=-1).shape)
+        print(pmf.shape)
+        print(z_vals.shape)
+        print()
+        print(weights)
+        print(weights.sum(axis=-1))
+        print(weights.sum(axis=-1).shape)
+        print(weights.shape)        
+        exit()
 
         if not is_joint:
-            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
+            z_samples = sample_pdf_v2(z_vals, pmf, N_importance, det=(perturb==0.), pytest=pytest)
         else:
             z_samples = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
@@ -981,10 +1014,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     if len(i_test) == 0:
         print("Error: There is no test set")
         exit()
-    # if len(i_val) == 0:
-    #     print("Warning: There is no validation set, test set is used instead")
-    #     i_val = i_test
-    #     i_relevant_for_training = np.concatenate((i_relevant_for_training, i_val), 0)
 
     # keep test data on cpu until needed
     test_images = images[i_test]
@@ -1009,20 +1038,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         scene_sample_params, args)
     del gt_depths_train, gt_valid_depths_train
 
-    # print(depths.shape)
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
-    # print(all_depth_hypothesis.shape)
-
-    # print(valid_depths[0])
-    # print(depths[0][:,:,0])
-    # print()
-    # print(all_depth_hypothesis[0][0].squeeze())
-    # print(all_depth_hypothesis[0][10].squeeze())
-
-    # print(near)
-    # print(far)
-    # print("=========================")
-
 
     # create nerf model
     render_kwargs_train, render_kwargs_test, start, nerf_grad_vars, optimizer, nerf_grad_names = create_nerf(args, scene_sample_params)
@@ -1046,9 +1062,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             new_lrate = args.lrate * (decay_rate ** portion)
             update_learning_rate(optimizer, new_lrate)
         
-        # make batch
-        # batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
-        #     intrinsics, args)
 
         batch_rays, target_s, target_d, target_vd, img_i, target_h = get_ray_batch_from_one_image_hypothesis(H, W, i_train, images, depths, valid_depths, poses, \
             intrinsics, all_depth_hypothesis, args)
@@ -1087,11 +1100,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         found_nan = False
         for k in range(len(nerf_grad_vars)):
-            # print(nerf_grad_names[i])
-            # print(nerf_grad_vars[i].grad)
-            # print()
             if (torch.isnan(nerf_grad_vars[k].grad).any()):
-                ## Nan loss
                 found_nan = True
                 break
 
@@ -1140,32 +1149,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
                 torchvision.utils.make_grid(images_train["depths"], nrow=1), \
                 torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
-            # # compute validation metrics and visualize 8 validation images
-            # mean_metrics_val, images_val = render_images_with_metrics(8, i_val, images, depths, valid_depths, \
-            #     poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-            # tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
-            # tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
-            # tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
-            # tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
-            # if mean_metrics_val.has("depth_rmse"):
-            #     tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
-            # if 'rgbs0' in images_val:
-            #     tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
-            #     tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
-            # if 'rgbs0' in images_val:
-            #     tb.add_image('val_image',  torch.cat((
-            #         torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
-            # else:
-            #     tb.add_image('val_image',  torch.cat((
-            #         torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
 
         # test at the last iteration
         if (i + 1) == N_iters:

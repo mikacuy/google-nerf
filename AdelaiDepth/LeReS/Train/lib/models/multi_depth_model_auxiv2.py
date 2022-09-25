@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn.functional
 
@@ -471,8 +472,6 @@ class DepthModel_cIMLE(nn.Module):
     def __init__(self, d_latent=512, version="v2"):
         super(DepthModel_cIMLE, self).__init__()
         backbone = network.__name__.split('.')[-1] + '.' + cfg.MODEL.ENCODER
-
-        # print(backbone)
 
         self.encoder_modules = get_func(backbone)(cIMLE=True, d_latent=d_latent, version=version)
         self.decoder_modules = network.Decoder()

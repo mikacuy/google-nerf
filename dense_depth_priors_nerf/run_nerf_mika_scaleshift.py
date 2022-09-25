@@ -19,7 +19,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, compute_space_carving_loss
 from data import create_random_subsets, load_scene_mika, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
@@ -234,7 +234,7 @@ def render_hyp(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
     ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
 
-#### range from [mean-3*sd, mean+3*sd]
+
 def precompute_depth_sampling(depth):
     depth_min = (depth[:, 0] - 3. * depth[:, 1])
     depth_max = depth[:, 0] + 3. * depth[:, 1]
@@ -471,7 +471,7 @@ def create_nerf(args, scene_render_params):
     ckpt = load_checkpoint(args)
     if ckpt is not None:
         start = ckpt['global_step']
-        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        # optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
         # Load model
         model.load_state_dict(ckpt['network_fn_state_dict'])
@@ -644,8 +644,7 @@ def render_rays(ray_batch,
                 network_fine=None,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False,
-                is_joint=False):
+                pytest=False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -692,7 +691,6 @@ def render_rays(ray_batch,
 
     # sample and render rays for dense depth priors for nerf
     N_samples_half = N_samples // 2
-
     if precomputed_z_samples is not None:
         # compute a lower bound for the sampling standard deviation as the maximal distance between samples
         lower_bound = precomputed_z_samples[-1] - precomputed_z_samples[-2]
@@ -798,12 +796,7 @@ def render_rays(ray_batch,
 
         ### P_depth from fine network
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-
-        if not is_joint:
-            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-        else:
-            z_samples = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-
+        z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
         pred_depth_hyp = z_samples
 
 
@@ -848,9 +841,9 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
         batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     return batch_rays, target_s, target_d, target_vd, img_i
 
-def get_ray_batch_from_one_image_hypothesis(H, W, i_train, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args):
+def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args):
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W), indexing='ij'), -1)  # (H, W, 2)
-    img_i = np.random.choice(i_train)
+    # img_i = np.random.choice(i_train)
     
     target = images[img_i]
     target_depth = depths[img_i]
@@ -1009,24 +1002,26 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         scene_sample_params, args)
     del gt_depths_train, gt_valid_depths_train
 
-    # print(depths.shape)
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
-    # print(all_depth_hypothesis.shape)
-
-    # print(valid_depths[0])
-    # print(depths[0][:,:,0])
-    # print()
-    # print(all_depth_hypothesis[0][0].squeeze())
-    # print(all_depth_hypothesis[0][10].squeeze())
-
-    # print(near)
-    # print(far)
-    # print("=========================")
-
 
     # create nerf model
     render_kwargs_train, render_kwargs_test, start, nerf_grad_vars, optimizer, nerf_grad_names = create_nerf(args, scene_sample_params)
     
+    ##### Initialize depth scale and shift
+    DEPTH_SCALES = torch.autograd.Variable(torch.ones((images.shape[0], 1), dtype=torch.float, device=images.device)*args.scale_init, requires_grad=True)
+    DEPTH_SHIFTS = torch.autograd.Variable(torch.ones((images.shape[0], 1), dtype=torch.float, device=images.device)*args.shift_init, requires_grad=True)    
+    print(DEPTH_SCALES)
+    print()
+    print(DEPTH_SHIFTS)
+    print()
+    print(DEPTH_SCALES.shape)
+    print(DEPTH_SHIFTS.shape)
+
+    optimizer_ss = torch.optim.Adam(params=(DEPTH_SCALES, DEPTH_SHIFTS,), lr=args.scaleshift_lr)
+    
+    print("Done with scale and shift init.")
+    ################################
+
     # create camera embedding function
     embedcam_fn = None
     if args.input_ch_cam > 0:
@@ -1050,26 +1045,35 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         # batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
         #     intrinsics, args)
 
-        batch_rays, target_s, target_d, target_vd, img_i, target_h = get_ray_batch_from_one_image_hypothesis(H, W, i_train, images, depths, valid_depths, poses, \
+        ### Scale the hypotheses by scale and shift
+        img_i = np.random.choice(i_train)
+
+        curr_scale = DEPTH_SCALES[img_i]
+        curr_shift = DEPTH_SHIFTS[img_i]
+
+        ## Scale and shift
+        batch_rays, target_s, target_d, target_vd, img_i, target_h = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
             intrinsics, all_depth_hypothesis, args)
+
+        target_h = target_h*curr_scale + curr_shift        
 
         if args.input_ch_cam > 0:
             render_kwargs_train['embedded_cam'] = embedcam_fn(torch.tensor(img_i, device=device))
         target_d = target_d.squeeze(-1)
 
         # render
-        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, **render_kwargs_train)
-        
+        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, **render_kwargs_train)
 
         # compute loss and optimize
         optimizer.zero_grad()
+        optimizer_ss.zero_grad()
         img_loss = img2mse(rgb, target_s)
         psnr = mse2psnr(img_loss)
         
         loss = img_loss
 
         if args.space_carving_weight>0. and i>args.warm_start_nerf:
-            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint)
+            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h)
             loss = loss + args.space_carving_weight * space_carving_loss
         else:
             space_carving_loss = torch.mean(torch.zeros([target_h.shape[0]]).to(target_h.device))
@@ -1083,27 +1087,13 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             loss = loss + img_loss0
 
         loss.backward()
-        nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
+        nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)     
+        optimizer.step()
 
-        found_nan = False
-        for k in range(len(nerf_grad_vars)):
-            # print(nerf_grad_names[i])
-            # print(nerf_grad_vars[i].grad)
-            # print()
-            if (torch.isnan(nerf_grad_vars[k].grad).any()):
-                ## Nan loss
-                found_nan = True
-                break
+        ### Don't optimize scale shift for the last 100k epochs, check whether the appearance will crisp
+        if i < 400000:
+            optimizer_ss.step()      
 
-        if not found_nan:
-            # print("NaN sample.")
-            nn.utils.clip_grad_value_(nerf_grad_vars, 0.01)        
-            optimizer.step()
-        else:
-            # pass
-            print("NaN sample.")
-
-                
         # write logs
         if i%args.i_weights==0:
             path = os.path.join(args.ckpt_dir, args.expname, '{:06d}.tar'.format(i))
@@ -1276,8 +1266,9 @@ def config_parser():
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
-    ### u sampling is joint or not
-    parser.add_argument('--is_joint', default= False, type=bool)
+    parser.add_argument('--scaleshift_lr', default= 0.001, type=float)
+    parser.add_argument('--scale_init', default= 0.5, type=float)
+    parser.add_argument('--shift_init', default= 0.0, type=float)
 
     return parser
 

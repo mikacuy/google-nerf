@@ -147,6 +147,7 @@ def render(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
     ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
 
+### range from [mean-3*sd, mean+3*sd]
 def precompute_depth_sampling(depth):
     depth_min = (depth[:, 0] - 3. * depth[:, 1])
     depth_max = depth[:, 0] + 3. * depth[:, 1]
@@ -1026,6 +1027,7 @@ def run_nerf():
         args.task = tmp_task
         args.data_dir = tmp_data_dir
         args.ckpt_dir = tmp_ckpt_dir
+        args.train_jsonfile = 'transforms_train.json'
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 

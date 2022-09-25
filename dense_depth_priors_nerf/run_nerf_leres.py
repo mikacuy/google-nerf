@@ -19,12 +19,18 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, compute_space_carving_loss
-from data import create_random_subsets, load_scene_mika, convert_depth_completion_scaling_to_m, \
+from data import create_random_subsets, load_scene_leres, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
+
+
+### For LeReS+cIMLE
+from leres_utils.multi_depth_model_auxiv2 import *
+from leres_utils.net_tools import save_ckpt, load_ckpt, load_mean_var_adain, strip_prefix_if_present
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
@@ -234,7 +240,7 @@ def render_hyp(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
     ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
 
-#### range from [mean-3*sd, mean+3*sd]
+
 def precompute_depth_sampling(depth):
     depth_min = (depth[:, 0] - 3. * depth[:, 1])
     depth_max = depth[:, 0] + 3. * depth[:, 1]
@@ -644,8 +650,7 @@ def render_rays(ray_batch,
                 network_fine=None,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False,
-                is_joint=False):
+                pytest=False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -692,7 +697,6 @@ def render_rays(ray_batch,
 
     # sample and render rays for dense depth priors for nerf
     N_samples_half = N_samples // 2
-
     if precomputed_z_samples is not None:
         # compute a lower bound for the sampling standard deviation as the maximal distance between samples
         lower_bound = precomputed_z_samples[-1] - precomputed_z_samples[-2]
@@ -798,12 +802,7 @@ def render_rays(ray_batch,
 
         ### P_depth from fine network
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-
-        if not is_joint:
-            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-        else:
-            z_samples = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-
+        z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
         pred_depth_hyp = z_samples
 
 
@@ -875,6 +874,36 @@ def get_ray_batch_from_one_image_hypothesis(H, W, i_train, images, depths, valid
     else:
         batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     return batch_rays, target_s, target_d, target_vd, img_i, target_h
+
+
+def get_ray_batch_from_one_image_joint_leres(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args):
+    coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W), indexing='ij'), -1)  # (H, W, 2)
+
+    target = images[img_i]
+    target_depth = depths[img_i]
+    target_valid_depth = valid_depths[img_i]
+    pose = poses[img_i]
+    intrinsic = intrinsics[img_i, :]
+
+    target_hypothesis = all_hypothesis
+
+    rays_o, rays_d = get_rays(H, W, intrinsic, pose)  # (H, W, 3), (H, W, 3)
+    select_coords = select_coordinates(coords, args.N_rand)
+    rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+    rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+    target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
+    target_d = target_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1) or (N_rand, 2)
+    target_vd = target_valid_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1)
+    target_h = target_hypothesis[:, select_coords[:, 0], select_coords[:, 1]]
+
+    if args.depth_loss_weight > 0.:
+        depth_range = precompute_depth_sampling(target_d)
+        batch_rays = torch.stack([rays_o, rays_d, depth_range], 0)  # (3, N_rand, 3)
+    else:
+        batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
+
+    return batch_rays, target_s, target_d, target_vd, img_i, target_h
+
 
 def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, invalidate_large_std_threshold=-1.):
     device = images.device
@@ -959,7 +988,7 @@ def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_tr
 
     return depths, valid_depths
 
-def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis):
+def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_leres_imgs, all_leres_depths):
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
@@ -1000,7 +1029,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
     poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
-    all_depth_hypothesis = torch.Tensor(all_depth_hypothesis).to(device)
+
+
+    all_leres_imgs = all_leres_imgs.to(device)
+    all_leres_depths = all_leres_depths.to(device)
 
     # complete and check depth
     gt_depths_train = torch.Tensor(gt_depths[i_train]).to(device) # only used to evaluate error of completed depth
@@ -1009,24 +1041,55 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         scene_sample_params, args)
     del gt_depths_train, gt_valid_depths_train
 
-    # print(depths.shape)
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
-    # print(all_depth_hypothesis.shape)
-
-    # print(valid_depths[0])
-    # print(depths[0][:,:,0])
-    # print()
-    # print(all_depth_hypothesis[0][0].squeeze())
-    # print(all_depth_hypothesis[0][10].squeeze())
-
-    # print(near)
-    # print(far)
-    # print("=========================")
-
 
     # create nerf model
     render_kwargs_train, render_kwargs_test, start, nerf_grad_vars, optimizer, nerf_grad_names = create_nerf(args, scene_sample_params)
     
+
+    ### Create model and optimizer for LeReS+cIMLE
+
+    ## Encoder v2 version of LeReS+cIMLE
+    leres_model = RelDepthModel_cIMLE(d_latent=args.leres_dlatent, version="v2")
+
+    ### Load model
+    model_dict = leres_model.state_dict()
+    CKPT_FILE = os.path.join(args.leres_logdir, "ckpt", args.leres_ckpt)
+    print("Loading pretrained LeReS model " + CKPT_FILE)
+
+    if os.path.isfile(CKPT_FILE):
+        print("loading checkpoint %s" % CKPT_FILE)
+        checkpoint = torch.load(CKPT_FILE)
+
+        ### Need to check if data parallel
+        checkpoint['model_state_dict'] = strip_prefix_if_present(checkpoint['model_state_dict'], "module.")
+        depth_keys = {k: v for k, v in checkpoint['model_state_dict'].items() if k in model_dict} ## <--- some missing keys in the loaded model from the given model
+        print(len(depth_keys))
+
+        if (len(depth_keys) != len(checkpoint['model_state_dict'].keys())):
+            print("Error in loading pretrained model.")
+            exit()
+
+        # Overwrite entries in the existing state dict
+        model_dict.update(depth_keys)        
+
+        # Load the new state dict
+        leres_model.load_state_dict(model_dict)
+        print("Model loaded.")
+
+    else:
+        print("ERROR: Pretrained LeReS not loaded.")
+        exit()
+
+    mean0, var0, mean1, var1, mean2, var2, mean3, var3 = load_mean_var_adain(os.path.join(args.leres_logdir, "mean_var_adain.npy"), all_leres_imgs.device)
+    leres_model.set_mean_var_shifts(mean0, var0, mean1, var1, mean2, var2, mean3, var3)
+    print("Initialized adain mean and var.")
+
+    leres_optimizer = ModelOptimizer_AdaIn(leres_model, args.leres_baselr, args.leres_mlplr, fixed_backbone=False)
+    leres_model.train()
+    ##############################################
+
+
     # create camera embedding function
     embedcam_fn = None
     if args.input_ch_cam > 0:
@@ -1046,19 +1109,61 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             new_lrate = args.lrate * (decay_rate ** portion)
             update_learning_rate(optimizer, new_lrate)
         
-        # make batch
-        # batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
-        #     intrinsics, args)
+        img_i = np.random.choice(i_train)
 
-        batch_rays, target_s, target_d, target_vd, img_i, target_h = get_ray_batch_from_one_image_hypothesis(H, W, i_train, images, depths, valid_depths, poses, \
-            intrinsics, all_depth_hypothesis, args)
+        ### Get LeReS + cIMLe depth map hypothesis here
+        leres_img = all_leres_imgs[img_i]
+
+        leres_C = leres_img.shape[0]
+        leres_H = leres_img.shape[1]
+        leres_W = leres_img.shape[2]        
+        leres_img = leres_img.unsqueeze(1).repeat(args.num_hypothesis, 1, 1, 1)
+        leres_img = leres_img.view(-1, leres_C, leres_H, leres_W)
+
+        leres_depth = all_leres_depths[img_i]
+
+        leres_depth = leres_depth.repeat(args.num_hypothesis, 1, 1)
+        z = torch.normal(0.0, 1.0, size=(args.num_hypothesis, args.leres_dlatent))
+
+        out = leres_model(leres_img, z)
+        pred_depth = out["decoder"].squeeze()      
+
+        mask = (leres_depth < 0.11) ## near plane clip
+        mask = mask.view(args.num_hypothesis, -1)
+
+        pred_depth = pred_depth.view(args.num_hypothesis, -1).unsqueeze(-1)
+        ## add translation term
+        pred_depth = torch.cat([pred_depth, torch.ones(pred_depth.shape)], axis=-1)
+
+        leres_depth = leres_depth.view(args.num_hypothesis, -1).unsqueeze(-1)
+
+        ### Mask out zero depths in least squares fitting
+        leres_depth[mask, :] = 0
+
+        ### Detach from the graph --> causes memory error
+        pred_depth_temp = pred_depth.detach()
+        pred_depth_temp[mask, :] = 0
+
+        X = torch.linalg.lstsq(pred_depth_temp, leres_depth).solution
+
+        leres_depth = leres_depth.view(args.num_hypothesis, leres_H, leres_W)
+        all_hypothesis = torch.bmm(pred_depth, X).view(args.num_hypothesis, leres_H, leres_W)
+        
+        ### Resize the leres output to the original size 
+        all_hypothesis = F.interpolate(all_hypothesis.unsqueeze(1), size=(H, W), mode='nearest').squeeze()
+        ################################################
+
+        batch_rays, target_s, target_d, target_vd, img_i, target_h = get_ray_batch_from_one_image_joint_leres(H, W, img_i, images, depths, valid_depths, poses, intrinsics, \
+            all_hypothesis, args)
+
+        target_h = target_h.unsqueeze(-1)
 
         if args.input_ch_cam > 0:
             render_kwargs_train['embedded_cam'] = embedcam_fn(torch.tensor(img_i, device=device))
         target_d = target_d.squeeze(-1)
 
         # render
-        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, **render_kwargs_train)
+        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, **render_kwargs_train)
         
 
         # compute loss and optimize
@@ -1069,7 +1174,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         loss = img_loss
 
         if args.space_carving_weight>0. and i>args.warm_start_nerf:
-            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint)
+            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h)
             loss = loss + args.space_carving_weight * space_carving_loss
         else:
             space_carving_loss = torch.mean(torch.zeros([target_h.shape[0]]).to(target_h.device))
@@ -1099,6 +1204,9 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             # print("NaN sample.")
             nn.utils.clip_grad_value_(nerf_grad_vars, 0.01)        
             optimizer.step()
+
+            ## LeReS model
+            leres_optimizer.optim()
         else:
             # pass
             print("NaN sample.")
@@ -1250,7 +1358,7 @@ def config_parser():
                         help='frequency of console printout and metric logging')
     parser.add_argument("--i_img",     type=int, default=20000,
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=100000,
+    parser.add_argument("--i_weights", type=int, default=25000,
                         help='frequency of weight ckpt saving')
     parser.add_argument("--ckpt_dir", type=str, default="",
                         help='checkpoint directory')
@@ -1269,15 +1377,20 @@ def config_parser():
 
     parser.add_argument("--cimle_dir", type=str, default="dump_0826_pretrained_dd_scene0710_train/",
                         help='dump_dir name for cimle depth hypotheses')
-    parser.add_argument("--num_hypothesis", type=int, default=20, 
+    parser.add_argument("--num_hypothesis", type=int, default=10, 
                         help='number of cimle hypothesis')
     parser.add_argument("--space_carving_weight", type=float, default=0.004,
                         help='weight of the depth loss, values <=0 do not apply depth loss')
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
-    ### u sampling is joint or not
-    parser.add_argument('--is_joint', default= False, type=bool)
+
+    ## For LeReS+cIMLE joint training
+    parser.add_argument("--leres_logdir", default="/orion/u/mikacuy/coordinate_mvs/AdelaiDepth/LeReS/Train/log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
+    parser.add_argument("--leres_ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
+    parser.add_argument('--leres_dlatent', default= 32, type=int)
+    parser.add_argument('--leres_baselr', default= 0.00001, type=float)
+    parser.add_argument('--leres_mlplr', default= 0.00001, type=float)
 
     return parser
 
@@ -1320,7 +1433,7 @@ def run_nerf():
     # Load data
     scene_data_dir = os.path.join(args.data_dir, args.scene_id)
     images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-    gt_depths, gt_valid_depths, all_depth_hypothesis = load_scene_mika(scene_data_dir, args.cimle_dir, args.num_hypothesis, 'transforms_train.json')
+    gt_depths, gt_valid_depths, all_leres_imgs, all_leres_depths = load_scene_leres(scene_data_dir, args.cimle_dir, args.num_hypothesis, args.train_jsonfile)
 
     # print(all_depth_hypothesis)
     # print(all_depth_hypothesis.shape)
@@ -1359,7 +1472,7 @@ def run_nerf():
     lpips_alex = LPIPS()
 
     if args.task == "train":
-        train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis)
+        train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_leres_imgs, all_leres_depths)
         exit()
 
     # create nerf model for testing

@@ -19,7 +19,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, compute_space_carving_loss
 from data import create_random_subsets, load_scene_mika, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
@@ -234,7 +234,7 @@ def render_hyp(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
     ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
 
-#### range from [mean-3*sd, mean+3*sd]
+
 def precompute_depth_sampling(depth):
     depth_min = (depth[:, 0] - 3. * depth[:, 1])
     depth_max = depth[:, 0] + 3. * depth[:, 1]
@@ -644,8 +644,7 @@ def render_rays(ray_batch,
                 network_fine=None,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False,
-                is_joint=False):
+                pytest=False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -692,7 +691,6 @@ def render_rays(ray_batch,
 
     # sample and render rays for dense depth priors for nerf
     N_samples_half = N_samples // 2
-
     if precomputed_z_samples is not None:
         # compute a lower bound for the sampling standard deviation as the maximal distance between samples
         lower_bound = precomputed_z_samples[-1] - precomputed_z_samples[-2]
@@ -798,12 +796,7 @@ def render_rays(ray_batch,
 
         ### P_depth from fine network
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-
-        if not is_joint:
-            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-        else:
-            z_samples = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
-
+        z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
         pred_depth_hyp = z_samples
 
 
@@ -1058,7 +1051,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         target_d = target_d.squeeze(-1)
 
         # render
-        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, **render_kwargs_train)
+        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, **render_kwargs_train)
         
 
         # compute loss and optimize
@@ -1066,10 +1059,17 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         img_loss = img2mse(rgb, target_s)
         psnr = mse2psnr(img_loss)
         
+        if i < args.i_space_carving_only:
+            img_loss = torch.mean(torch.zeros(1).to(img_loss.device))
+            
+        elif i == args.i_space_carving_only:
+            ## Reset optimizer
+            optimizer = torch.optim.Adam(params=nerf_grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+
         loss = img_loss
 
         if args.space_carving_weight>0. and i>args.warm_start_nerf:
-            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint)
+            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h)
             loss = loss + args.space_carving_weight * space_carving_loss
         else:
             space_carving_loss = torch.mean(torch.zeros([target_h.shape[0]]).to(target_h.device))
@@ -1256,6 +1256,11 @@ def config_parser():
                         help='checkpoint directory')
 
     # data options
+
+    parser.add_argument("--i_space_carving_only",   type=int, default=100000, 
+                        help='frequency of console printout and metric logging')
+
+
     parser.add_argument("--scene_id", type=str, default="scene0710_00",
                         help='scene identifier')
     parser.add_argument("--depth_prior_network_path", type=str, default="",
@@ -1275,9 +1280,6 @@ def config_parser():
                         help='weight of the depth loss, values <=0 do not apply depth loss')
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
-
-    ### u sampling is joint or not
-    parser.add_argument('--is_joint', default= False, type=bool)
 
     return parser
 
