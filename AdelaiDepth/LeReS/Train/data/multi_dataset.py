@@ -31,10 +31,15 @@ class MultiDataset(Dataset):
         #                              opt.phase_anno + '_annotations.json')        
 
         ## Taking the subset
+        #self.dir_anno = os.path.join(opt.dataroot,
+        #                             dataset_name,
+        #                             'annotations',
+        #                             opt.phase_anno + '_annotations_subset.json')    
+        
         self.dir_anno = os.path.join(opt.dataroot,
                                      dataset_name,
                                      'annotations',
-                                     opt.phase_anno + '_annotations_subset.json')        
+                                     opt.phase_anno + '_annotations_bigsubset.json')    
 
         self.dir_teacher_list = None
         self.rgb_paths, self.depth_paths, self.disp_paths, self.sem_masks, self.ins_paths, self.all_annos, self.curriculum_list = self.getData()
