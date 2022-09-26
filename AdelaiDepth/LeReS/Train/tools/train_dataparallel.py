@@ -68,6 +68,9 @@ parser.add_argument('--use_scheduler', default= False, type=bool)
 parser.add_argument('--ada_version', default= "v2", type=str)
 parser.add_argument('--cimle_version', default= "enc", type=str)
 
+parser.add_argument('--seed_num', default= 0, type=int)
+
+
 FLAGS = parser.parse_args()
 LOG_DIR = FLAGS.logdir
 CKPT = FLAGS.ckpt
@@ -89,6 +92,8 @@ CIMLE_VERSION = FLAGS.cimle_version
 
 USE_SCHEDULER = FLAGS.use_scheduler
 print("Using default scheduler "+str(USE_SCHEDULER))
+
+SEED_NUM = FLAGS.seed_num
 
 ##############################################
 ###### Dataset utils for cIMLE implementation
@@ -190,6 +195,12 @@ if log_output_dir:
     except OSError as e:
         if e.errno != errno.EEXIST:
             raise
+
+### Set random seed torch and numpy ###
+torch.manual_seed(SEED_NUM)
+np.random.seed(SEED_NUM)
+random.seed(SEED_NUM)
+#######################################
 
 ### Disabled distributed training
 local_rank = 0
@@ -433,8 +444,22 @@ for epoch in range(MAX_EPOCH):
             var2 = torch.var(var2, axis=0)
             var3 = torch.var(var3, axis=0)
 
+            ### Save mean and variance to dictionary
+            mean0_save = mean0.to("cpu").detach().numpy().squeeze() 
+            mean1_save = mean1.to("cpu").detach().numpy().squeeze() 
+            mean2_save = mean2.to("cpu").detach().numpy().squeeze() 
+            mean3_save = mean3.to("cpu").detach().numpy().squeeze() 
+            var0_save = var0.to("cpu").detach().numpy().squeeze() 
+            var1_save = var1.to("cpu").detach().numpy().squeeze() 
+            var2_save = var2.to("cpu").detach().numpy().squeeze() 
+            var3_save = var3.to("cpu").detach().numpy().squeeze()
 
-            ### Set mean and variance
+            output_dict = {"mean0":mean0_save, "mean1":mean1_save, "mean2":mean2_save, "mean3":mean3_save,\
+                            "var0":var0_save, "var1":var1_save, "var2":var2_save, "var3":var3_save}
+
+            np.save(os.path.join(LOG_DIR, "mean_var_adain.npy"), output_dict)
+
+            #########################
             model.module.set_mean_var_shifts(mean0, var0, mean1, var1, mean2, var2, mean3, var3)
 
             now = datetime.datetime.now()
