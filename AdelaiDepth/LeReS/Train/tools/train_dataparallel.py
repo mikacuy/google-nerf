@@ -28,6 +28,9 @@ import torch.utils.data
 import argparse
 import copy
 
+import numpy as np
+import random
+
 np.random.seed(0)
 
 parser = argparse.ArgumentParser()
