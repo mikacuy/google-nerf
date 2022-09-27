@@ -17,6 +17,7 @@ from lib.utils.training_stats import TrainingStats
 from lib.utils.evaluate_depth_error import validate_rel_depth_err, recover_metric_depth
 from lib.utils.lr_scheduler_custom import make_lr_scheduler
 from lib.utils.logging import setup_distributed_logger, SmoothedValue
+from utils import backup_files, load_mean_var_adain
 
 import datetime
 
@@ -37,7 +38,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--logdir", default="log_test3/", help="path to the log directory", type=str)
 
 ### Load pretrained model
-parser.add_argument("--ckpt", default="../../Minist_Test/res101.pth", help="checkpoint", type=str)
+parser.add_argument("--ckpt", default="../Minist_Test/res101.pth", help="checkpoint", type=str)
 
 parser.add_argument('--loss_mode', type=str, default='_ranking-edge_pairwise-normal-regress-edge_msgil-normal_meanstd-tanh_pairwise-normal-regress-plane_', help='losses to use')
 parser.add_argument('--epoch', default= 600, type=int)
@@ -199,6 +200,13 @@ if log_output_dir:
         if e.errno != errno.EEXIST:
             raise
 
+LOG_FOUT = open(os.path.join(LOG_DIR, 'log_train.txt'), 'w')
+LOG_FOUT.write(str(FLAGS)+'\n')
+
+curr_fname = sys.argv[0]
+backup_files(LOG_DIR, curr_fname)
+
+
 ### Set random seed torch and numpy ###
 torch.manual_seed(SEED_NUM)
 np.random.seed(SEED_NUM)
@@ -230,17 +238,18 @@ print("===================")
 
 print("Let's use", torch.cuda.device_count(), "GPUs!")
 print()
-model = nn.DataParallel(model.cuda(), list(range(torch.cuda.device_count())))
 
 ### Load model
 model_dict = model.state_dict()
 CKPT_FILE = CKPT
+print("Loading pretrained LeReS model " + CKPT)
 
 if os.path.isfile(CKPT_FILE):
     print("loading checkpoint %s" % CKPT_FILE)
     checkpoint = torch.load(CKPT_FILE)
 
     ### Need to check if data parallel
+    checkpoint['depth_model'] = strip_prefix_if_present(checkpoint['depth_model'], "module.")
     depth_keys = {k: v for k, v in checkpoint['depth_model'].items() if k in model_dict} ## <--- some missing keys in the loaded model from the given model
     print(len(depth_keys))
 
@@ -254,6 +263,12 @@ if os.path.isfile(CKPT_FILE):
     # Load the new state dict
     model.load_state_dict(model_dict)
     print("Model loaded.")
+
+else:
+    print("ERROR: Pretrained LeReS not loaded.")
+    exit()
+
+model = nn.DataParallel(model.cuda(), list(range(torch.cuda.device_count())))
 
 ### Dataset
 train_dataset = MultipleDatasetDistributed(FLAGS)
@@ -557,7 +572,7 @@ for epoch in range(MAX_EPOCH):
         dataset=LRUCache(comb_dataset, n=FLAGS.num_lru),
         batch_size=FLAGS.batchsize,
         num_workers=FLAGS.thread,
-        shuffle=True, pin_memory=True)
+        shuffle=False, pin_memory=True)
 
     print(len(comb_dataset))
     print(len(train_dataloader))
