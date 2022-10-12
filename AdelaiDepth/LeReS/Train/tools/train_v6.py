@@ -531,7 +531,7 @@ for epoch in range(MAX_EPOCH):
         print("Finished caching z-codes...")
         print(selected_z_np.shape)
 
-    else:
+    elif DEBUG_MODE:
         ### Caching takes time, debug by setting this flag.
         selected_z_np = np.zeros((len(zcache_dataloader),D_LATENT), dtype=np.float32)
 
@@ -556,6 +556,7 @@ for epoch in range(MAX_EPOCH):
 
         if PRETRAIN_MLP and epoch < PRETRAIN_EPOCHS:
             pretrain_optimizer.optim(losses_dict)
+
 
             if USE_SCHEDULER:
                 pretrain_scheduler.step()

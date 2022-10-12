@@ -34,7 +34,10 @@ parser = argparse.ArgumentParser()
 # parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
 # parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
 
-parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
+# parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
+# parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
+
+parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
 # parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
@@ -44,7 +47,20 @@ parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", ty
 # parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0758_train_unifiedscale/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0781_train_unifiedscale/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0708_train_unifiedscale/", type=str)
-parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0738_train_unifiedscale/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0738_train_unifiedscale/", type=str)
+
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unifiedscale_rotated/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unifiedscale_rotated/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unifiedscale_rotated/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unifiedscale_rotated/", type=str)
+
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
@@ -523,8 +539,11 @@ with torch.no_grad():
             for s in range(mini_batch_size):
 
                 curr_depth = curr_pred_depth_raw[k*mini_batch_size+s]
+
                 ### Resize --> check the opencv function
-                curr_depth = cv2.resize(curr_depth, orig_shape) ### check this resize function 
+
+                # curr_depth = cv2.resize(curr_depth, orig_shape) ### buggy version 
+                curr_depth = cv2.resize(curr_depth, (orig_shape[1], orig_shape[0])) ### check this resize function 
 
                 curr_rbg_name = data['A_paths'][0]
                 fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"

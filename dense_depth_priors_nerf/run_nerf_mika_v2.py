@@ -1,3 +1,6 @@
+'''
+Experimenting on using PMF, this code doesn't work...
+'''
 import os
 import shutil
 import subprocess
@@ -1050,7 +1053,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     # optimize nerf
     print('Begin')
-    N_iters = 500000 + 1
+    N_iters = args.end_decay_lrate + 1
     global_step = start
     start = start + 1
     for i in trange(start, N_iters):

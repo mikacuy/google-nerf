@@ -1,3 +1,8 @@
+'''
+Mikaela Uy
+mikacuy@stanford.edu
+0928: update on learning rate scheduler 
+'''
 import os
 import shutil
 import subprocess
@@ -19,11 +24,11 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
+from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, compute_space_carving_loss
 from data import create_random_subsets, load_scene_mika, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
-from train_utils import MeanTracker, update_learning_rate
+from train_utils import MeanTracker, update_learning_rate, get_learning_rate
 from metric import compute_rmse
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -348,7 +353,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                     os.makedirs(result_dir, exist_ok=True)
                     np.savetxt(os.path.join(result_dir, str(img_idx) + ".txt"), render_kwargs_test["embedded_cam"].cpu().numpy())
             else:
-                render_kwargs_test["embedded_cam"] = embedcam_fn(torch.tensor(img_idx, device=device))
+                render_kwargs_test["embedded_cam"] = embedcam_fn[img_idx]
         
         with torch.no_grad():
             rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
@@ -644,7 +649,8 @@ def render_rays(ray_batch,
                 network_fine=None,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False):
+                pytest=False,
+                is_joint=False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -735,12 +741,43 @@ def render_rays(ray_batch,
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
     rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
-    # ## Try without fine network and just use coarse network
-    # z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-    # z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_samples, det=(perturb==0.), pytest=pytest)
-    # pred_depth_hyp = z_samples
 
-    if N_importance > 0:
+    ### Try without coarse and fine network, but just one network and use additional samples from the distribution of the nerf
+    if N_importance == 0:
+
+        ### P_depth from base network
+        z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+
+        if not is_joint:
+            z_vals_2 = sample_pdf(z_vals_mid, weights[...,1:-1], N_samples, det=(perturb==0.), pytest=pytest)
+        else:
+            z_vals_2 = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_samples, det=(perturb==0.), pytest=pytest)
+        #########################
+
+        ### Forward the rendering network with the additional samples
+        pts_2 = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_2[...,:,None]
+        raw_2 = network_query_fn(pts_2, viewdirs, embedded_cam, network_fn)
+        z_vals = torch.cat((z_vals, z_vals_2), -1)
+        raw = torch.cat((raw, raw_2), 1)
+        z_vals, indices = z_vals.sort()
+
+        ### Concatenated output
+        raw = torch.gather(raw, 1, indices.unsqueeze(-1).expand_as(raw))
+        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
+
+
+        ## Second tier P_depth
+        z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
+
+        if not is_joint:
+            z_vals_output = sample_pdf(z_vals_mid, weights[...,1:-1], N_samples, det=(perturb==0.), pytest=pytest)
+        else:
+            z_vals_output = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_samples, det=(perturb==0.), pytest=pytest)
+
+        pred_depth_hyp = torch.cat((z_vals_2, z_vals_output), -1)
+
+
+    elif N_importance > 0:
 
         rgb_map_0, disp_map_0, acc_map_0, depth_map_0, z_vals_0, weights_0 = rgb_map, disp_map, acc_map, depth_map, z_vals, weights
 
@@ -796,7 +833,12 @@ def render_rays(ray_batch,
 
         ### P_depth from fine network
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
-        z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
+
+        if not is_joint:
+            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
+        else:
+            z_samples = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
+
         pred_depth_hyp = z_samples
 
 
@@ -956,7 +998,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
-    tb = SummaryWriter(log_dir=os.path.join("runs_0929", args.expname))
+    tb = SummaryWriter(log_dir=os.path.join("runs_prior_corrected", args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
     i_train, i_val, i_test, i_video = i_split
@@ -1025,25 +1067,22 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     # create camera embedding function
     embedcam_fn = None
     if args.input_ch_cam > 0:
-        embedcam_fn = torch.nn.Embedding(len(i_train), args.input_ch_cam)
+        embedcam_fn = torch.autograd.Variable(torch.randn((len(i_train), args.input_ch_cam), dtype=torch.float, device=images.device), requires_grad=True)
+
+        ## Set optimizer for this embedding
+        if args.opt_ch_cam:
+            optimizer_latent = torch.optim.Adam(params=(embedcam_fn,), lr=args.ch_cam_lr)
 
     # optimize nerf
     print('Begin')
     N_iters = args.num_iterations + 1
     global_step = start
     start = start + 1
-    for i in trange(start, N_iters):
 
-        # update learning rate
-        if i > args.start_decay_lrate and i <= args.end_decay_lrate:
-            portion = (i - args.start_decay_lrate) / (args.end_decay_lrate - args.start_decay_lrate)
-            decay_rate = 0.1
-            new_lrate = args.lrate * (decay_rate ** portion)
-            update_learning_rate(optimizer, new_lrate)
-        
-        # make batch
-        # batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
-        #     intrinsics, args)
+    init_learning_rate = args.lrate
+    old_learning_rate = init_learning_rate
+
+    for i in trange(start, N_iters):
 
         ### Scale the hypotheses by scale and shift
         img_i = np.random.choice(i_train)
@@ -1058,11 +1097,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         target_h = target_h*curr_scale + curr_shift        
 
         if args.input_ch_cam > 0:
-            render_kwargs_train['embedded_cam'] = embedcam_fn(torch.tensor(img_i, device=device))
+            render_kwargs_train['embedded_cam'] = embedcam_fn[img_i]
+
         target_d = target_d.squeeze(-1)
 
         # render
-        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, **render_kwargs_train)
+        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint, **render_kwargs_train)
 
         # compute loss and optimize
         optimizer.zero_grad()
@@ -1073,7 +1113,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         loss = img_loss
 
         if args.space_carving_weight>0. and i>args.warm_start_nerf:
-            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h)
+            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint)
             loss = loss + args.space_carving_weight * space_carving_loss
         else:
             space_carving_loss = torch.mean(torch.zeros([target_h.shape[0]]).to(target_h.device))
@@ -1087,12 +1127,23 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             loss = loss + img_loss0
 
         loss.backward()
-        # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)     
+        # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
+
+        ### Update learning rate
+        learning_rate = get_learning_rate(init_learning_rate, i, args.decay_step, args.decay_rate, staircase=True)
+        if old_learning_rate != learning_rate:
+            update_learning_rate(optimizer, learning_rate)
+            old_learning_rate = learning_rate
+
         optimizer.step()
 
         ### Don't optimize scale shift for the last 100k epochs, check whether the appearance will crisp
         if i < args.freeze_ss:
-            optimizer_ss.step()      
+            optimizer_ss.step()
+
+        ### Update camera embeddings
+        if args.input_ch_cam > 0 and args.opt_ch_cam:
+            optimizer_latent.step() 
 
         # write logs
         if i%args.i_weights==0:
@@ -1103,6 +1154,13 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 'optimizer_state_dict': optimizer.state_dict(),}
             if render_kwargs_train['network_fine'] is not None:
                 save_dict['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+
+            if args.input_ch_cam > 0:
+                save_dict['embedded_cam'] = embedcam_fn
+
+            save_dict['depth_shifts'] = DEPTH_SHIFTS
+            save_dict['depth_scales'] = DEPTH_SCALES
+
             torch.save(save_dict, path)
             print('Saved checkpoints at', path)
         
@@ -1192,13 +1250,14 @@ def config_parser():
     parser.add_argument("--N_rand", type=int, default=32*32,
                         help='batch size (number of random rays per gradient step)')
 
+
+    ### Learning rate updates
+    parser.add_argument('--num_iterations', type=int, default=500000, help='Number of epochs')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
-    parser.add_argument("--start_decay_lrate", type=int, default=400000, 
-                        help='start iteration for learning rate decay')
-    parser.add_argument("--end_decay_lrate", type=int, default=500000, 
-                        help='end iteration for learning rate decay')
-    parser.add_argument('--num_iterations', type=int, default=800000, help='Number of epochs')
+    parser.add_argument('--decay_step', type=int, default=400000, help='Decay step for lr decay [default: 200000]')
+    parser.add_argument('--decay_rate', type=float, default=0.1, help='Decay rate for lr decay [default: 0.7]')
+
 
     parser.add_argument("--chunk", type=int, default=1024*32, 
                         help='number of rays processed in parallel, decrease if running out of memory')
@@ -1231,8 +1290,13 @@ def config_parser():
                         help='log2 of max freq for positional encoding (3D location)')
     parser.add_argument("--multires_views", type=int, default=0,
                         help='log2 of max freq for positional encoding (2D direction)')
+
     parser.add_argument("--input_ch_cam", type=int, default=4,
                         help='number of channels for camera index embedding')
+    parser.add_argument("--opt_ch_cam", action='store_true', default=False,
+                        help='optimize camera embedding')    
+    parser.add_argument('--ch_cam_lr', default= 0.0001, type=float)
+
     parser.add_argument("--raw_noise_std", type=float, default=0., 
                         help='std dev of noise added to regularize sigma_a output, 1e0 recommended')
     parser.add_argument("--lindisp", action='store_true', default=False,
@@ -1269,11 +1333,15 @@ def config_parser():
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
-    parser.add_argument('--scaleshift_lr', default= 0.001, type=float)
+    parser.add_argument('--scaleshift_lr', default= 0.000001, type=float)
     parser.add_argument('--scale_init', default= 0.5, type=float)
     parser.add_argument('--shift_init', default= 0.0, type=float)
     parser.add_argument("--freeze_ss", type=int, default=400000, 
                             help='dont update scale/shift in the last few epochs')
+
+    ### u sampling is joint or not
+    parser.add_argument('--is_joint', default= False, type=bool)
+
     return parser
 
 def run_nerf():

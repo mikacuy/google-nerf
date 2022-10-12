@@ -214,6 +214,372 @@ class NeRF(nn.Module):
         self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
         self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
 
+
+class NeRF_deeper_viewlinear(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, input_ch_cam=0, output_ch=4, skips=[4], use_viewdirs=False):
+        """ 
+        """
+        super(NeRF_deeper_viewlinear, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        self.input_ch_views = input_ch_views
+        self.input_ch_cam = input_ch_cam
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
+        
+        self.pts_linears = nn.ModuleList(
+            [DenseLayer(input_ch, W, activation="relu")] + [DenseLayer(W, W, activation="relu") if i not in self.skips else DenseLayer(W + input_ch, W, activation="relu") for i in range(D-1)])
+        
+        ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
+        # self.views_linears = nn.ModuleList([DenseLayer(input_ch_views + input_ch_cam + W, W//2, activation="relu")])
+        self.views_linears = nn.ModuleList(
+            [nn.Linear(input_ch_views + input_ch_cam + W, W//2)] + [nn.Linear(W//2, W//2)])
+
+        ### Implementation according to the paper
+        # self.views_linears = nn.ModuleList(
+        #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
+        
+        if use_viewdirs:
+            self.feature_linear = DenseLayer(W, W, activation="linear")
+            self.alpha_linear = DenseLayer(W, 1, activation="linear")
+            self.rgb_linear = DenseLayer(W//2, 3, activation="linear")
+        else:
+            self.output_linear = DenseLayer(W, output_ch, activation="linear")
+
+    def forward(self, x):
+        input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views + self.input_ch_cam], dim=-1)
+        h = input_pts
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        if self.use_viewdirs:
+            alpha = self.alpha_linear(h)
+            feature = self.feature_linear(h)
+            h = torch.cat([feature, input_views], -1)
+        
+            for i, l in enumerate(self.views_linears):
+                h = self.views_linears[i](h)
+                h = F.relu(h)
+
+            rgb = self.rgb_linear(h)
+            outputs = torch.cat([rgb, F.softplus(alpha, beta=10)], -1)
+        else:
+            outputs = self.output_linear(h)
+            outputs = torch.cat([outputs[..., :3], F.softplus(outputs[..., 3:], beta=10)], -1)
+
+        return outputs    
+
+    def load_weights_from_keras(self, weights):
+        assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
+        
+        # Load pts_linears
+        for i in range(self.D):
+            idx_pts_linears = 2 * i
+            self.pts_linears[i].weight.data = torch.from_numpy(np.transpose(weights[idx_pts_linears]))    
+            self.pts_linears[i].bias.data = torch.from_numpy(np.transpose(weights[idx_pts_linears+1]))
+        
+        # Load feature_linear
+        idx_feature_linear = 2 * self.D
+        self.feature_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_feature_linear]))
+        self.feature_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_feature_linear+1]))
+
+        # Load views_linears
+        idx_views_linears = 2 * self.D + 2
+        self.views_linears[0].weight.data = torch.from_numpy(np.transpose(weights[idx_views_linears]))
+        self.views_linears[0].bias.data = torch.from_numpy(np.transpose(weights[idx_views_linears+1]))
+
+        # Load rgb_linear
+        idx_rbg_linear = 2 * self.D + 4
+        self.rgb_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear]))
+        self.rgb_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear+1]))
+
+        # Load alpha_linear
+        idx_alpha_linear = 2 * self.D + 6
+        self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
+        self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
+
+
+class NeRF_deeper_viewlinear2(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, input_ch_cam=0, output_ch=4, skips=[4], use_viewdirs=False):
+        """ 
+        """
+        super(NeRF_deeper_viewlinear2, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        self.input_ch_views = input_ch_views
+        self.input_ch_cam = input_ch_cam
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
+        
+        self.pts_linears = nn.ModuleList(
+            [DenseLayer(input_ch, W, activation="relu")] + [DenseLayer(W, W, activation="relu") if i not in self.skips else DenseLayer(W + input_ch, W, activation="relu") for i in range(D-1)])
+        
+        ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
+        # self.views_linears = nn.ModuleList([DenseLayer(input_ch_views + input_ch_cam + W, W//2, activation="relu")])
+        self.views_linears = nn.ModuleList(
+            [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2 + input_ch_cam, W//2)])
+
+        ### Implementation according to the paper
+        # self.views_linears = nn.ModuleList(
+        #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
+        
+        if use_viewdirs:
+            self.feature_linear = DenseLayer(W, W, activation="linear")
+            self.alpha_linear = DenseLayer(W, 1, activation="linear")
+            self.rgb_linear = DenseLayer(W//2, 3, activation="linear")
+        else:
+            self.output_linear = DenseLayer(W, output_ch, activation="linear")
+
+    def forward(self, x):
+        input_pts, input_views, input_cam = torch.split(x, [self.input_ch, self.input_ch_views, self.input_ch_cam], dim=-1)
+        h = input_pts
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        if self.use_viewdirs:
+            alpha = self.alpha_linear(h)
+            feature = self.feature_linear(h)
+            h = torch.cat([feature, input_views], -1)
+            
+            ### linear layers for viewing direction and camera latent
+            h = self.views_linears[0](h)
+            h = F.relu(h)
+
+            ## Concat input camera
+            h = torch.cat([h, input_cam], -1)
+            h = self.views_linears[1](h)
+            h = F.relu(h)
+
+            rgb = self.rgb_linear(h)
+            outputs = torch.cat([rgb, F.softplus(alpha, beta=10)], -1)
+        else:
+            outputs = self.output_linear(h)
+            outputs = torch.cat([outputs[..., :3], F.softplus(outputs[..., 3:], beta=10)], -1)
+
+        return outputs    
+
+    def load_weights_from_keras(self, weights):
+        assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
+        
+        # Load pts_linears
+        for i in range(self.D):
+            idx_pts_linears = 2 * i
+            self.pts_linears[i].weight.data = torch.from_numpy(np.transpose(weights[idx_pts_linears]))    
+            self.pts_linears[i].bias.data = torch.from_numpy(np.transpose(weights[idx_pts_linears+1]))
+        
+        # Load feature_linear
+        idx_feature_linear = 2 * self.D
+        self.feature_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_feature_linear]))
+        self.feature_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_feature_linear+1]))
+
+        # Load views_linears
+        idx_views_linears = 2 * self.D + 2
+        self.views_linears[0].weight.data = torch.from_numpy(np.transpose(weights[idx_views_linears]))
+        self.views_linears[0].bias.data = torch.from_numpy(np.transpose(weights[idx_views_linears+1]))
+
+        # Load rgb_linear
+        idx_rbg_linear = 2 * self.D + 4
+        self.rgb_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear]))
+        self.rgb_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear+1]))
+
+        # Load alpha_linear
+        idx_alpha_linear = 2 * self.D + 6
+        self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
+        self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
+
+class NeRF_camlatent_layer(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, input_ch_cam=0, output_ch=4, skips=[4], use_viewdirs=False):
+        """ 
+        """
+        super(NeRF_camlatent_layer, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        self.input_ch_views = input_ch_views
+        self.input_ch_cam = input_ch_cam
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
+        
+        self.pts_linears = nn.ModuleList(
+            [DenseLayer(input_ch, W, activation="relu")] + [DenseLayer(W, W, activation="relu") if i not in self.skips else DenseLayer(W + input_ch, W, activation="relu") for i in range(D-1)])
+        
+        ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
+        self.ch_cam_linear = nn.Linear(input_ch_cam, input_ch_cam)
+
+        self.views_linears = nn.ModuleList([DenseLayer(input_ch_views + input_ch_cam + W, W//2, activation="relu")])
+
+        ### Implementation according to the paper
+        # self.views_linears = nn.ModuleList(
+        #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
+        
+        if use_viewdirs:
+            self.feature_linear = DenseLayer(W, W, activation="linear")
+            self.alpha_linear = DenseLayer(W, 1, activation="linear")
+            self.rgb_linear = DenseLayer(W//2, 3, activation="linear")
+        else:
+            self.output_linear = DenseLayer(W, output_ch, activation="linear")
+
+    def forward(self, x):
+        input_pts, input_views, input_cam = torch.split(x, [self.input_ch, self.input_ch_views, self.input_ch_cam], dim=-1)
+        h = input_pts
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        if self.use_viewdirs:
+            alpha = self.alpha_linear(h)
+            feature = self.feature_linear(h)
+
+            input_cam = self.ch_cam_linear(input_cam)
+            input_cam = F.relu(input_cam)
+
+            h = torch.cat([feature, input_views, input_cam], -1)
+            
+            for i, l in enumerate(self.views_linears):
+                h = self.views_linears[i](h)
+                h = F.relu(h)
+
+            rgb = self.rgb_linear(h)
+            outputs = torch.cat([rgb, F.softplus(alpha, beta=10)], -1)
+        else:
+            outputs = self.output_linear(h)
+            outputs = torch.cat([outputs[..., :3], F.softplus(outputs[..., 3:], beta=10)], -1)
+
+        return outputs    
+
+    def load_weights_from_keras(self, weights):
+        assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
+        
+        # Load pts_linears
+        for i in range(self.D):
+            idx_pts_linears = 2 * i
+            self.pts_linears[i].weight.data = torch.from_numpy(np.transpose(weights[idx_pts_linears]))    
+            self.pts_linears[i].bias.data = torch.from_numpy(np.transpose(weights[idx_pts_linears+1]))
+        
+        # Load feature_linear
+        idx_feature_linear = 2 * self.D
+        self.feature_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_feature_linear]))
+        self.feature_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_feature_linear+1]))
+
+        # Load views_linears
+        idx_views_linears = 2 * self.D + 2
+        self.views_linears[0].weight.data = torch.from_numpy(np.transpose(weights[idx_views_linears]))
+        self.views_linears[0].bias.data = torch.from_numpy(np.transpose(weights[idx_views_linears+1]))
+
+        # Load rgb_linear
+        idx_rbg_linear = 2 * self.D + 4
+        self.rgb_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear]))
+        self.rgb_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear+1]))
+
+        # Load alpha_linear
+        idx_alpha_linear = 2 * self.D + 6
+        self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
+        self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
+
+
+class NeRF_camlatent_add(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, input_ch_cam=0, output_ch=4, skips=[4], use_viewdirs=False):
+        """ 
+        """
+        super(NeRF_camlatent_add, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        self.input_ch_views = input_ch_views
+        self.input_ch_cam = input_ch_cam
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
+        
+        self.pts_linears = nn.ModuleList(
+            [DenseLayer(input_ch, W, activation="relu")] + [DenseLayer(W, W, activation="relu") if i not in self.skips else DenseLayer(W + input_ch, W, activation="relu") for i in range(D-1)])
+        
+        ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
+        self.ch_cam_linear = nn.Linear(input_ch_cam, W//2)
+
+        self.views_linears = nn.Linear(input_ch_views + W, W//2)
+
+        ### Implementation according to the paper
+        # self.views_linears = nn.ModuleList(
+        #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
+        
+        if use_viewdirs:
+            self.feature_linear = DenseLayer(W, W, activation="linear")
+            self.alpha_linear = DenseLayer(W, 1, activation="linear")
+            self.rgb_linear = DenseLayer(W//2, 3, activation="linear")
+        else:
+            self.output_linear = DenseLayer(W, output_ch, activation="linear")
+
+    def forward(self, x):
+        input_pts, input_views, input_cam = torch.split(x, [self.input_ch, self.input_ch_views, self.input_ch_cam], dim=-1)
+        h = input_pts
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        if self.use_viewdirs:
+            alpha = self.alpha_linear(h)
+            feature = self.feature_linear(h)
+
+            h1 = torch.cat([feature, input_views], -1)
+            h1 = self.views_linears(h1)
+            h1 = F.relu(h1)
+
+            h2 = self.ch_cam_linear(input_cam)             
+            h2 = F.relu(h2)
+            
+            ## Add
+            h = h1 + h2
+
+            rgb = self.rgb_linear(h)
+            outputs = torch.cat([rgb, F.softplus(alpha, beta=10)], -1)
+        else:
+            outputs = self.output_linear(h)
+            outputs = torch.cat([outputs[..., :3], F.softplus(outputs[..., 3:], beta=10)], -1)
+
+        return outputs    
+
+    def load_weights_from_keras(self, weights):
+        assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
+        
+        # Load pts_linears
+        for i in range(self.D):
+            idx_pts_linears = 2 * i
+            self.pts_linears[i].weight.data = torch.from_numpy(np.transpose(weights[idx_pts_linears]))    
+            self.pts_linears[i].bias.data = torch.from_numpy(np.transpose(weights[idx_pts_linears+1]))
+        
+        # Load feature_linear
+        idx_feature_linear = 2 * self.D
+        self.feature_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_feature_linear]))
+        self.feature_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_feature_linear+1]))
+
+        # Load views_linears
+        idx_views_linears = 2 * self.D + 2
+        self.views_linears[0].weight.data = torch.from_numpy(np.transpose(weights[idx_views_linears]))
+        self.views_linears[0].bias.data = torch.from_numpy(np.transpose(weights[idx_views_linears+1]))
+
+        # Load rgb_linear
+        idx_rbg_linear = 2 * self.D + 4
+        self.rgb_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear]))
+        self.rgb_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear+1]))
+
+        # Load alpha_linear
+        idx_alpha_linear = 2 * self.D + 6
+        self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
+        self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
+
+
 def select_coordinates(coords, N_rand):
     coords = torch.reshape(coords, [-1,2])  # (H * W, 2)
     select_inds = np.random.choice(coords.shape[0], size=[N_rand], replace=False)  # (N_rand,)
@@ -320,19 +686,148 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     return samples
 
-def sample_pdf_v2(bins, weights, N_samples, det=False, pytest=False):
+
+def sample_pdf_joint(bins, weights, N_samples, det=False, pytest=False):
     # Get pdf
     weights = weights + 1e-5 # prevent nans
-    pdf = weights
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
 
-    print(weights.shape)
-    print(weights.sum(axis=-1))
+    # Take uniform samples
+    if det:
+        u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+        u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+    else:
+        ## Joint samples
+        u = torch.rand(N_samples, device=bins.device)
+        u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+
+    # Pytest, overwrite u with numpy's fixed random numbers
+    if pytest:
+        np.random.seed(0)
+        new_shape = list(cdf.shape[:-1]) + [N_samples]
+        if det:
+            u = np.linspace(0., 1., N_samples)
+            u = np.broadcast_to(u, new_shape)
+        else:
+            u = np.random.rand(*new_shape)
+        u = torch.Tensor(u)
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[...,1]-cdf_g[...,0])
+    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    t = (u-cdf_g[...,0])/denom
+    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    return samples
+
+def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
+
+    bins = torch.cat([near, bins, far], -1)
+    pdf = weights 
 
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
 
-    print(cdf.shape)
-    exit()
+    # Take uniform samples
+    if det:
+        u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+        u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+    else:
+        u = torch.rand(N_samples, device=bins.device)
+        u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+
+    # Pytest, overwrite u with numpy's fixed random numbers
+    if pytest:
+        np.random.seed(0)
+        new_shape = list(cdf.shape[:-1]) + [N_samples]
+        if det:
+            u = np.linspace(0., 1., N_samples)
+            u = np.broadcast_to(u, new_shape)
+        else:
+            u = np.random.rand(*new_shape)
+        u = torch.Tensor(u)
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[...,1]-cdf_g[...,0])
+    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    t = (u-cdf_g[...,0])/denom
+    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    ### Also return these for custom autograd
+    ### T_below, tau_below, bin_below
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    T_below = T_g[...,0]
+    tau_below = tau_g[...,0]
+    bin_below = bins_g[...,0]
+
+    return samples, T_below, tau_below, bin_below
+
+
+def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
+    
+    ### This needs to be fixed...
+    ### Get pdf
+    # print("In compute PDF")
+    # print(weights.shape)
+    # print(bins.shape)
+
+    bins = torch.cat([near, bins, far], -1)
+    
+    curr_sum = torch.sum(weights, axis=-1)
+    # print(curr_sum)
+    # pdf = torch.cat([1-curr_sum, weights], -1) # make into a probability distribution, assign what is left to the first bin
+    
+    pdf = weights # make into a probability distribution, assign what is left to the first bin
+    # print(pdf.shape)
+
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    # print(cdf.shape)
+
+    ### Concat bins --> Now this was done explicitly
+    # bins = torch.cat([near, bins, far], -1)
+    # print(bins.shape)
+    # exit()
+
+    # print("Current shapes")
+    # print(cdf.shape)
+    # print(bins.shape)
+    # print(tau.shape)
+    # print(T.shape)
+    # exit()
 
 
     # Take uniform samples
@@ -373,57 +868,94 @@ def sample_pdf_v2(bins, weights, N_samples, det=False, pytest=False):
     t = (u-cdf_g[...,0])/denom
     samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
 
-    return samples
+    ### Also return these for custom autograd
+    ### T_below, tau_below, bin_below
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    T_below = T_g[...,0]
+    tau_below = tau_g[...,0]
+    bin_below = bins_g[...,0]
+
+    return samples, T_below, tau_below, bin_below
 
 
-def sample_pdf_joint(bins, weights, N_samples, det=False, pytest=False):
-    # Get pdf
-    weights = weights + 1e-5 # prevent nans
-    pdf = weights / torch.sum(weights, -1, keepdim=True)
-    cdf = torch.cumsum(pdf, -1)
-    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+class Scale_Gradient_PDF(torch.autograd.Function):
 
-    # Take uniform samples
-    if det:
-        u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
-        u = u.expand(list(cdf.shape[:-1]) + [N_samples])
-    else:
-        ## Joint samples
-        u = torch.rand(N_samples, device=bins.device)
-        u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+    # Note that both forward and backward are @staticmethods
+    @staticmethod
+    # bias is an optional argument
+    def forward(ctx, samples, T_below, tau_below, bin_below, samples_raw):
+        ctx.save_for_backward(samples, T_below, tau_below, bin_below, samples_raw)
 
-    # Pytest, overwrite u with numpy's fixed random numbers
-    if pytest:
-        np.random.seed(0)
-        new_shape = list(cdf.shape[:-1]) + [N_samples]
-        if det:
-            u = np.linspace(0., 1., N_samples)
-            u = np.broadcast_to(u, new_shape)
-        else:
-            u = np.random.rand(*new_shape)
-        u = torch.Tensor(u)
+        return samples
 
-    # Invert CDF
-    u = u.contiguous()
+    # This function has only a single output, so it gets only one gradient
+    @staticmethod
+    def backward(ctx, grad_samples):
+        # This is a pattern that is very convenient - at the top of backward
+        # unpack saved_tensors and initialize all gradients w.r.t. inputs to
+        # None. Thanks to the fact that additional trailing Nones are
+        # ignored, the return statement is simple even when the function has
+        # optional inputs.
+        samples, T_below, tau_below, bin_below, samples_raw = ctx.saved_tensors
+        grad_T_below = grad_tau_below = grad_bin_below = grad_samples_raw = None
 
-    inds = torch.searchsorted(cdf, u, right=True)
 
-    below = torch.max(torch.zeros_like(inds-1), inds-1)
-    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
-    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
-    
-    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
-    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
-    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
-    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
-    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+        #### To evaluate tau(s) --> from samples_raw (make sure to use no_grad here) transform (currently: ReLU)
+        tau_samples = samples_raw[...,3]
+        tau_samples = F.relu(tau_samples)
 
-    denom = (cdf_g[...,1]-cdf_g[...,0])
-    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
-    t = (u-cdf_g[...,0])/denom
-    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+        ### Based on derivation
+        # print("In custom backward.")
+        # print(T_below.shape)
+        # print(tau_samples.shape)
+        # print(tau_below.shape)
+        # print(samples.shape)
+        # print(bin_below.shape)
+        # exit()
 
-    return samples
+        # print(T_below*tau_samples)
+        # print(-0.5*(tau_samples+tau_below)(samples-bin_below))
+        # print(torch.exp(-0.5*(tau_samples+tau_below)(samples-bin_below)))
+
+        f_s = T_below*tau_samples*torch.exp(-0.5*(tau_samples+tau_below)*(samples-bin_below))
+        grad_scale = 1./torch.max(f_s, torch.ones_like(f_s, device=f_s.device)*1e-3) ### prevent nan
+        # grad_scale = 1./torch.max(f_s, torch.ones_like(f_s, device=f_s.device)*1e-2) ### prevent nan
+
+        # print("=========")
+        # print(T_below)
+        # print(tau_samples)
+        # print(torch.exp(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
+        # print()
+
+        # print("f_s")
+        # print(f_s.shape)
+        # print(torch.mean(f_s))
+        # print(torch.min(f_s))
+        # print("grad_scale")
+        # print(grad_scale.shape)
+        # print(torch.mean(grad_scale))
+        # print(torch.max(grad_scale))
+        # print()
+
+        # # These needs_input_grad checks are optional and there only to
+        # # improve efficiency. If you want to make your code simpler, you can
+        # # skip them. Returning gradients for inputs that don't require it is
+        # # not an error.
+        # if ctx.needs_input_grad[0]:
+        #     grad_input = grad_output.mm(weight)
+        # if ctx.needs_input_grad[1]:
+        #     grad_weight = grad_output.t().mm(input)
+        # if bias is not None and ctx.needs_input_grad[2]:
+        #     grad_bias = grad_output.sum(0)
+
+        scaled_grad_samples = grad_scale * grad_samples
+
+        ### use negative
+        # scaled_grad_samples = -grad_scale * grad_samples
+
+        return scaled_grad_samples, grad_T_below, grad_tau_below, grad_bin_below, grad_samples_raw
 
 
 def sample_pdf_scratch(bins, weights, N_samples, det=False, pytest=False):
@@ -498,87 +1030,6 @@ def sample_pdf_scratch(bins, weights, N_samples, det=False, pytest=False):
     # exit()
 
     return samples
-
-
-class Sample_Pvol(torch.autograd.Function):
-
-    # Note that both forward and backward are @staticmethods
-    @staticmethod
-    # bias is an optional argument
-    def forward(ctx, weights, bins, N_samples):
-        ctx.save_for_backward(weights, bins, N_samples)
-
-        # Get pdf
-        weights = weights + 1e-5 # prevent nans
-        pdf = weights / torch.sum(weights, -1, keepdim=True)
-        cdf = torch.cumsum(pdf, -1)
-        cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
-
-        # print(torch.min(torch.sum(weights, -1, keepdim=True)))
-
-        # Take uniform samples
-        if det:
-            u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
-            u = u.expand(list(cdf.shape[:-1]) + [N_samples])
-        else:
-            u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=bins.device)
-
-        # Pytest, overwrite u with numpy's fixed random numbers
-        if pytest:
-            np.random.seed(0)
-            new_shape = list(cdf.shape[:-1]) + [N_samples]
-            if det:
-                u = np.linspace(0., 1., N_samples)
-                u = np.broadcast_to(u, new_shape)
-            else:
-                u = np.random.rand(*new_shape)
-            u = torch.Tensor(u)
-
-        # Invert CDF
-        u = u.contiguous()
-        inds = torch.searchsorted(cdf, u, right=True)
-        below = torch.max(torch.zeros_like(inds-1), inds-1)
-        above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
-        inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
-
-        # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
-        # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
-        matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
-        cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
-        bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
-
-        denom = (cdf_g[...,1]-cdf_g[...,0])
-        denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
-        t = (u-cdf_g[...,0])/denom
-        samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
-
-        return samples
-
-    # This function has only a single output, so it gets only one gradient
-    @staticmethod
-    def backward(ctx, grad_output):
-        # This is a pattern that is very convenient - at the top of backward
-        # unpack saved_tensors and initialize all gradients w.r.t. inputs to
-        # None. Thanks to the fact that additional trailing Nones are
-        # ignored, the return statement is simple even when the function has
-        # optional inputs.
-        weights, bins, N_samples = ctx.saved_tensors
-        grad_weights = grad_bins = grad_n_samples = None
-
-        # These needs_input_grad checks are optional and there only to
-        # improve efficiency. If you want to make your code simpler, you can
-        # skip them. Returning gradients for inputs that don't require it is
-        # not an error.
-        if ctx.needs_input_grad[0]:
-            grad_input = grad_output.mm(weight)
-        if ctx.needs_input_grad[1]:
-            grad_weight = grad_output.t().mm(input)
-        if bias is not None and ctx.needs_input_grad[2]:
-            grad_bias = grad_output.sum(0)
-
-        return grad_input, grad_weight, grad_bias
-
-
 
 
 

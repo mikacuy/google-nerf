@@ -833,7 +833,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             psnr0 = mse2psnr(img_loss0)
             loss = loss + img_loss0
         loss.backward()
-        nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
+        # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
         optimizer.step()
                 
         # write logs

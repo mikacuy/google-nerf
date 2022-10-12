@@ -257,8 +257,11 @@ def load_scene_mika(basedir, cimle_dir, num_hypothesis=20, train_json = "transfo
         for j in range(num_hypothesis):
             cimle_depth_name = os.path.join(leres_dir, img_id+"_"+str(j)+".npy")
             cimle_depth = np.load(cimle_depth_name).astype(np.float32)
+
             ## To adhere to the shape of depths
-            cimle_depth = cimle_depth.T
+            # cimle_depth = cimle_depth.T ## Buggy version
+            cimle_depth = cimle_depth
+            
             cimle_depth = np.expand_dims(cimle_depth, -1)
             curr_depth_hypotheses.append(cimle_depth)
 

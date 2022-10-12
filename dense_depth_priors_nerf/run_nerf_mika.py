@@ -23,7 +23,7 @@ from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sa
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, compute_space_carving_loss
 from data import create_random_subsets, load_scene_mika, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
-from train_utils import MeanTracker, update_learning_rate
+from train_utils import MeanTracker, update_learning_rate, get_learning_rate
 from metric import compute_rmse
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -963,7 +963,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
-    tb = SummaryWriter(log_dir=os.path.join("runs", args.expname))
+    tb = SummaryWriter(log_dir=os.path.join("runs_0929", args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
     i_train, i_val, i_test, i_video = i_split
@@ -981,10 +981,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     if len(i_test) == 0:
         print("Error: There is no test set")
         exit()
-    # if len(i_val) == 0:
-    #     print("Warning: There is no validation set, test set is used instead")
-    #     i_val = i_test
-    #     i_relevant_for_training = np.concatenate((i_relevant_for_training, i_val), 0)
+    if len(i_val) == 0:
+        print("Warning: There is no validation set, test set is used instead")
+        i_val = i_test
+        i_relevant_for_training = np.concatenate((i_relevant_for_training, i_val), 0)
 
     # keep test data on cpu until needed
     test_images = images[i_test]
@@ -1034,7 +1034,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     # optimize nerf
     print('Begin')
-    N_iters = 500000 + 1
+    N_iters = args.num_iterations + 1
     global_step = start
     start = start + 1
     for i in trange(start, N_iters):
@@ -1083,26 +1083,27 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             loss = loss + img_loss0
 
         loss.backward()
-        nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
+        # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
 
-        found_nan = False
-        for k in range(len(nerf_grad_vars)):
-            # print(nerf_grad_names[i])
-            # print(nerf_grad_vars[i].grad)
-            # print()
-            if (torch.isnan(nerf_grad_vars[k].grad).any()):
-                ## Nan loss
-                found_nan = True
-                break
+        # found_nan = False
+        # for k in range(len(nerf_grad_vars)):
+        #     # print(nerf_grad_names[i])
+        #     # print(nerf_grad_vars[i].grad)
+        #     # print()
+        #     if (torch.isnan(nerf_grad_vars[k].grad).any()):
+        #         ## Nan loss
+        #         found_nan = True
+        #         break
 
-        if not found_nan:
-            # print("NaN sample.")
-            nn.utils.clip_grad_value_(nerf_grad_vars, 0.01)        
-            optimizer.step()
-        else:
-            # pass
-            print("NaN sample.")
+        # if not found_nan:
+        #     # print("NaN sample.")
+        #     nn.utils.clip_grad_value_(nerf_grad_vars, 0.01)        
+        #     optimizer.step()
+        # else:
+        #     # pass
+        #     print("NaN sample.")
 
+        optimizer.step()
                 
         # write logs
         if i%args.i_weights==0:
@@ -1140,32 +1141,32 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
                 torchvision.utils.make_grid(images_train["depths"], nrow=1), \
                 torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
-            # # compute validation metrics and visualize 8 validation images
-            # mean_metrics_val, images_val = render_images_with_metrics(8, i_val, images, depths, valid_depths, \
-            #     poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-            # tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
-            # tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
-            # tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
-            # tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
-            # if mean_metrics_val.has("depth_rmse"):
-            #     tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
-            # if 'rgbs0' in images_val:
-            #     tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
-            #     tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
-            # if 'rgbs0' in images_val:
-            #     tb.add_image('val_image',  torch.cat((
-            #         torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
-            # else:
-            #     tb.add_image('val_image',  torch.cat((
-            #         torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-            #         torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+            # compute validation metrics and visualize 8 validation images
+            mean_metrics_val, images_val = render_images_with_metrics(8, i_val, images, depths, valid_depths, \
+                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
+            tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
+            tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
+            tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
+            tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
+            if mean_metrics_val.has("depth_rmse"):
+                tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
+            if 'rgbs0' in images_val:
+                tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
+                tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
+            if 'rgbs0' in images_val:
+                tb.add_image('val_image',  torch.cat((
+                    torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+            else:
+                tb.add_image('val_image',  torch.cat((
+                    torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+                    torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
 
         # test at the last iteration
         if (i + 1) == N_iters:
@@ -1201,12 +1202,17 @@ def config_parser():
                         help='channels per layer in fine network')
     parser.add_argument("--N_rand", type=int, default=32*32,
                         help='batch size (number of random rays per gradient step)')
+    
+    ### Learning rate updates
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
+    parser.add_argument('--num_iterations', type=int, default=500000, help='Number of epochs')
     parser.add_argument("--start_decay_lrate", type=int, default=400000, 
                         help='start iteration for learning rate decay')
     parser.add_argument("--end_decay_lrate", type=int, default=500000, 
                         help='end iteration for learning rate decay')
+    
+
     parser.add_argument("--chunk", type=int, default=1024*32, 
                         help='number of rays processed in parallel, decrease if running out of memory')
     parser.add_argument("--netchunk_per_gpu", type=int, default=1024*64*4, 
