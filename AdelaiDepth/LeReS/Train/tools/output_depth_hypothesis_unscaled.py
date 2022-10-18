@@ -55,11 +55,14 @@ parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", ty
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unscaled_rotated/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated/", type=str)
 
+parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unscaled_rotated_bigsubset_dataparallel_40hyp/", type=str)
+
+
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated_bigsubset_dataparallel", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated_bigsubset_dataparallel", type=str)
 
 
 ### For the dataset
@@ -68,11 +71,11 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 # ### Scannet sample scene
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/mika_processed/scene0653_00/', help='Root dir for dataset')
 
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0708_00/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
 
 ### Nerf
 # parser.add_argument('--dataroot', default='/orion/group/NSVF/Synthetic_NeRF/Lego', help='Root dir for dataset')

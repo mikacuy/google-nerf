@@ -1228,7 +1228,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
 def config_parser():
     parser = configargparse.ArgumentParser()
-    parser.add_argument('task', type=str, help='one out of: "train", "test", "test_with_opt", "video"')
+    parser.add_argument('task', type=str, help='one out of: "train", "test", "test_opt", "video"')
     parser.add_argument('--config', is_config_file=True, 
                         help='config file path')
     parser.add_argument("--expname", type=str, default=None, 

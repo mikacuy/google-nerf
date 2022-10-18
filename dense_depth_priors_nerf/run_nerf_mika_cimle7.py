@@ -1,7 +1,7 @@
 '''
 Mikaela Uy
 mikacuy@stanford.edu
-1011: Add the latent code from the camera view NeRF_camlatent_add
+1013: Add the latent code from the camera view NeRF_camlatent_add --> lower lr for camera code --> add coarse sc
 '''
 import os
 import shutil
@@ -441,11 +441,18 @@ def create_nerf(args, scene_render_params):
     grad_vars = list(model.parameters())
 
     grad_vars = []
-    grad_names = []
-    for name, param in model.named_parameters():
-        grad_vars.append(param)
-        grad_names.append(name)
+    ch_grad_vars = []
 
+    grad_names = []
+    ch_grad_names = []
+
+    for name, param in model.named_parameters():
+        if "ch_cam_linear" not in name:
+            grad_vars.append(param)
+            grad_names.append(name)
+        else:
+            ch_grad_vars.append(param)
+            ch_grad_names.append(name)
 
     model_fine = None
     if args.N_importance > 0:
@@ -456,8 +463,12 @@ def create_nerf(args, scene_render_params):
         # grad_vars += list(model_fine.parameters())
 
         for name, param in model_fine.named_parameters():
-            grad_vars.append(param)
-            grad_names.append(name)
+            if "ch_cam_linear" not in name:
+                grad_vars.append(param)
+                grad_names.append(name)
+            else:
+                ch_grad_vars.append(param)
+                ch_grad_names.append(name)
 
     network_query_fn = lambda inputs, viewdirs, embedded_cam, network_fn : run_network(inputs, viewdirs, embedded_cam, network_fn,
                                                                 embed_fn=embed_fn,
@@ -468,6 +479,10 @@ def create_nerf(args, scene_render_params):
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+
+    print("Using different learning rate for cimle weights.")
+    optimizer.add_param_group({"params": ch_grad_vars, "lr":args.cimle_lrate})
+    grad_vars = grad_vars + ch_grad_vars
 
     start = 0
 
@@ -776,7 +791,7 @@ def render_rays(ray_batch,
         z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
         
         ## To model p_depth from coarse network
-        z_samples_depth = torch.clone(z_samples)
+        z_samples_coarse = torch.clone(z_samples)
 
         ## For fine network sampling
         z_samples = z_samples.detach()
@@ -799,6 +814,7 @@ def render_rays(ray_batch,
             z_samples = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
         pred_depth_hyp = z_samples
+        coarse_pred_depth_hyp = z_samples_coarse
 
 
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights, 'pred_hyp' : pred_depth_hyp}
@@ -813,7 +829,7 @@ def render_rays(ray_batch,
         ret['z_vals0'] = z_vals_0
         ret['weights0'] = weights_0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
-        # ret['pred_hyp'] = pred_depth_hyp
+        ret['coarse_pred_hyp'] = coarse_pred_depth_hyp
 
     for k in ret:
         if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
@@ -955,10 +971,9 @@ def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_tr
     return depths, valid_depths
 
 def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis):
-    np.random.seed(args.seed_num)
-    torch.manual_seed(args.seed_num)
-    torch.cuda.manual_seed(args.seed_num)
-
+    np.random.seed(0)
+    torch.manual_seed(0)
+    torch.cuda.manual_seed(0)
     tb = SummaryWriter(log_dir=os.path.join("runs_cimle_new", args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
@@ -1110,6 +1125,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         if 'rgb0' in extras:
             img_loss0 = img2mse(extras['rgb0'], target_s)
             psnr0 = mse2psnr(img_loss0)
+
+            ### Space carving on the coarse network
+            if args.space_carving_weight>0. and i>args.warm_start_nerf:
+                coarse_space_carving_loss = compute_space_carving_loss(extras["coarse_pred_hyp"], target_h, is_joint=args.is_joint)
+                loss = loss + args.space_carving_weight * coarse_space_carving_loss   
+
             loss = loss + img_loss0
 
         loss.backward()
@@ -1156,7 +1177,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             if 'rgb0' in extras:
                 tb.add_scalars('mse0', {'train': img_loss0.item()}, i)
                 tb.add_scalars('psnr0', {'train': psnr0.item()}, i)
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()}")
+                tb.add_scalars('space_carving_loss0', {'train': coarse_space_carving_loss.item()}, i) 
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Coarse space carving: {coarse_space_carving_loss.item()}")
             
         if i%args.i_img==0:
             # visualize 2 train images
@@ -1234,8 +1256,12 @@ def config_parser():
     
     ### Learning rate updates
     parser.add_argument('--num_iterations', type=int, default=500000, help='Number of epochs')
+
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
+    parser.add_argument("--cimle_lrate", type=float, default=5e-5, 
+                        help='learning rate')
+
     parser.add_argument('--decay_step', type=int, default=400000, help='Decay step for lr decay [default: 200000]')
     parser.add_argument('--decay_rate', type=float, default=0.1, help='Decay rate for lr decay [default: 0.7]')
 
@@ -1321,10 +1347,6 @@ def config_parser():
 
     ### u sampling is joint or not
     parser.add_argument('--is_joint', default= False, type=bool)
-
-    ## Random seed num
-    parser.add_argument('--seed_num', default= 0, type=int)
-
 
     return parser
 
