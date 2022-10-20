@@ -1,7 +1,7 @@
 '''
 Mikaela Uy
 mikacuy@stanford.edu
-0928: update on learning rate scheduler 
+1017: Combine opt_ss with cIMLE for white balancing experiments, log scale/shift updates through training, load pretrained model from non-scale/shift opt
 '''
 import os
 import shutil
@@ -24,7 +24,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF_camlatent_add, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, compute_space_carving_loss
 from data import create_random_subsets, load_scene_mika, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
@@ -421,6 +421,7 @@ def load_checkpoint(args):
         ckpt = torch.load(ckpt_path)
     return ckpt
 
+
 def create_nerf(args, scene_render_params):
     """Instantiate NeRF's MLP model.
     """
@@ -433,30 +434,42 @@ def create_nerf(args, scene_render_params):
     output_ch = 5 if args.N_importance > 0 else 4
     skips = [4]
 
-    model = NeRF(D=args.netdepth, W=args.netwidth,
+    model = NeRF_camlatent_add(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
     model = nn.DataParallel(model).to(device)
     grad_vars = list(model.parameters())
 
     grad_vars = []
+    ch_grad_vars = []
+
     grad_names = []
+    ch_grad_names = []
+
     for name, param in model.named_parameters():
-        grad_vars.append(param)
-        grad_names.append(name)
+        if "ch_cam_linear" not in name:
+            grad_vars.append(param)
+            grad_names.append(name)
+        else:
+            ch_grad_vars.append(param)
+            ch_grad_names.append(name)
 
 
     model_fine = None
     if args.N_importance > 0:
-        model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
+        model_fine = NeRF_camlatent_add(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
                           input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
         model_fine = nn.DataParallel(model_fine).to(device)
         # grad_vars += list(model_fine.parameters())
 
         for name, param in model_fine.named_parameters():
-            grad_vars.append(param)
-            grad_names.append(name)
+            if "ch_cam_linear" not in name:
+                grad_vars.append(param)
+                grad_names.append(name)
+            else:
+                ch_grad_vars.append(param)
+                ch_grad_names.append(name)
 
     network_query_fn = lambda inputs, viewdirs, embedded_cam, network_fn : run_network(inputs, viewdirs, embedded_cam, network_fn,
                                                                 embed_fn=embed_fn,
@@ -467,6 +480,9 @@ def create_nerf(args, scene_render_params):
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+    print("Using different learning rate for cimle weights.")
+    optimizer.add_param_group({"params": ch_grad_vars, "lr":args.cimle_lrate})
+    grad_vars = grad_vars + ch_grad_vars
 
     start = 0
 
@@ -518,22 +534,6 @@ def compute_weights(raw, z_vals, rays_d, noise=0.):
     # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
     weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1), device=device), 1.-alpha + 1e-10], -1), -1)[:, :-1]
 
-    # print(raw.shape)
-    # print(z_vals.shape)
-    # print(dists.shape)
-    # print(alpha.shape)
-    # print(weights.shape)
-    # print(torch.norm(rays_d[...,None,:], dim=-1))
-    # exit()
-
-    # ("In compute weights...")
-    # print("Alpha")
-    # print(alpha)
-    # print()
-    # print("Weights")
-    # print(weights)
-    # print()
-
     return weights
 
 def raw2depth(raw, z_vals, rays_d):
@@ -542,21 +542,6 @@ def raw2depth(raw, z_vals, rays_d):
     std = (((z_vals - depth.unsqueeze(-1)).pow(2) * weights).sum(-1)).sqrt()
     return depth, std
 
-
-### Mika: fix this ###
-# def raw2depth_hypotheses(raw, z_vals, rays_d):
-
-#     weights = compute_weights(raw, z_vals, rays_d)
-#     pred_depth_hyps = weights * z_vals
-
-#     # print("Z-vals")
-#     # print(z_vals)
-#     # print()
-#     # print("Pred depth")
-#     # print(pred_depth_hyps)
-#     # exit()
-
-#     return pred_depth_hyps
 
 def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, pytest=False):
     """Transforms model's predictions to semantically meaningful values.
@@ -787,7 +772,7 @@ def render_rays(ray_batch,
         z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
         
         ## To model p_depth from coarse network
-        z_samples_depth = torch.clone(z_samples)
+        z_samples_coarse = torch.clone(z_samples)
 
         ## For fine network sampling
         z_samples = z_samples.detach()
@@ -798,36 +783,6 @@ def render_rays(ray_batch,
         run_fn = network_fn if network_fine is None else network_fine
 
         raw = network_query_fn(pts, viewdirs, embedded_cam, run_fn)
-
-        # ### P_depth from coarse network
-        # pred_depth_hyp = z_samples_depth
-
-        ####### Scratch ########
-        # print(raw.shape)
-
-        ### pts for depth output --> just take the points from importance sampling
-        ### output predicted depths at those points
-        # print("Getting depth estimates from nerf network.")
-        # pts_depth = rays_o[...,None,:] + rays_d[...,None,:] * z_samples_depth[...,:,None]
-        # print(pts_depth)
-        # print(pts_depth.shape)
-
-        # print(pred_depth_hyp.shape)
-        # exit()
-
-        # print(pts_depth.shape)
-        # raw_depth = network_query_fn(pts_depth, viewdirs, embedded_cam, run_fn)
-        # print(raw_depth.shape)
-
-        # z_samples, _ = torch.sort(z_samples_depth, -1)
-        # print(z_samples)
-        # print(z_samples.shape)
-        # exit()
-        # pred_depth_hyp = raw2depth_hypotheses(raw_depth, z_samples, rays_d)    
-
-        # print(pred_depth_hyp.shape)
-        # exit()
-        ##########################
 
         rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
@@ -840,6 +795,7 @@ def render_rays(ray_batch,
             z_samples = sample_pdf_joint(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
         pred_depth_hyp = z_samples
+        coarse_pred_depth_hyp = z_samples_coarse
 
 
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights, 'pred_hyp' : pred_depth_hyp}
@@ -853,7 +809,7 @@ def render_rays(ray_batch,
         ret['z_vals0'] = z_vals_0
         ret['weights0'] = weights_0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
-        # ret['pred_hyp'] = pred_depth_hyp
+        ret['coarse_pred_hyp'] = coarse_pred_depth_hyp
 
     for k in ret:
         if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
@@ -998,7 +954,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
-    tb = SummaryWriter(log_dir=os.path.join("runs_prior_corrected", args.expname))
+    tb = SummaryWriter(log_dir=os.path.join("runs_ss_cimle", args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
     i_train, i_val, i_test, i_video = i_split
@@ -1066,12 +1022,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     # create camera embedding function
     embedcam_fn = None
-    if args.input_ch_cam > 0:
-        embedcam_fn = torch.autograd.Variable(torch.randn((len(i_train), args.input_ch_cam), dtype=torch.float, device=images.device), requires_grad=True)
-
-        ## Set optimizer for this embedding
-        if args.opt_ch_cam:
-            optimizer_latent = torch.optim.Adam(params=(embedcam_fn,), lr=args.ch_cam_lr)
 
     # optimize nerf
     print('Begin')
@@ -1082,7 +1032,82 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     init_learning_rate = args.lrate
     old_learning_rate = init_learning_rate
 
+    ########################################
+    #### Load pretrained model w/o cIMLE ###
+    ########################################
+    path = os.path.join("log_1011_scene0710", "1011_scene0710_optssbig_01_joint")
+    ckpts = [os.path.join(path, f) for f in sorted(os.listdir(path)) if '000.tar' in f]
+    print('Found ckpts', ckpts)
+    ckpt_path = ckpts[-1]
+    print('Reloading pretrained model from', ckpt_path)
+    ckpt = torch.load(ckpt_path)
+
+    coarse_model_dict = render_kwargs_train["network_fn"].state_dict()
+    coarse_keys = {k: v for k, v in ckpt['network_fn_state_dict'].items() if k in coarse_model_dict} 
+
+    fine_model_dict = render_kwargs_train["network_fine"].state_dict()
+    fine_keys = {k: v for k, v in ckpt['network_fine_state_dict'].items() if k in fine_model_dict} 
+
+    ### Load weights from pretrained model without cIMLE
+    coarse_model_dict.update(coarse_keys)
+    fine_model_dict.update(fine_keys)
+
+    ## Load scale and shift
+    DEPTH_SHIFTS = torch.load(ckpt_path)["depth_shifts"]
+    DEPTH_SCALES = torch.load(ckpt_path)["depth_scales"] 
+
+    print("Loaded weights from pretrained model.")
+    ########################################
+    ########################################
+
+
+    ### For cIMLE
+    NUM_SAMPLES = 20
+
     for i in trange(start, N_iters):
+
+        ###############################################
+        ########## cIMLE on the latent code ###########
+        ###############################################
+        if (args.input_ch_cam > 0) and (i % args.refresh_z == 3 or i == 1):
+            print("Recaching z-codes.")
+
+            ### Recacahe per image latent codes
+            num_images = len(i_train)
+            all_losses = torch.zeros((NUM_SAMPLES, num_images), device=images.device)
+            all_z = torch.normal(0.0, 1.0, size=(NUM_SAMPLES, num_images, args.input_ch_cam), device=images.device)
+
+            ### Sample NUM_SAMPLE times
+            for s in range(NUM_SAMPLES):
+                ### Loop through the images
+                for n, img_idx in enumerate(i_train):
+                    print("Recaching image {}/{}".format(n + 1, num_images), end="")
+                    target = images[img_idx]
+                    pose = poses[img_idx, :3,:4]
+                    intrinsic = intrinsics[img_idx, :]
+
+                    render_kwargs_test["embedded_cam"] = all_z[s, img_idx]
+
+                    with torch.no_grad():
+                        rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+                    
+                        # compute color metrics
+                        img_loss = img2mse(rgb, target)
+                        print(img_loss)
+                        
+                        all_losses[s, img_idx] = img_loss
+
+
+            ### Get the best loss and select and z code
+            idx_to_take = torch.argmin(all_losses, axis=0)
+
+            selected_z_np = np.empty((num_images, args.input_ch_cam), dtype=np.float32)
+            for n, img_idx in enumerate(i_train):
+                selected_z_np = all_z[idx_to_take[i_train]][img_idx].cpu().data.numpy()
+
+            selected_z_np = torch.from_numpy(selected_z_np).to(images.device)
+            embedcam_fn = selected_z_np
+        ###############################################
 
         ### Scale the hypotheses by scale and shift
         img_i = np.random.choice(i_train)
@@ -1124,6 +1149,18 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         if 'rgb0' in extras:
             img_loss0 = img2mse(extras['rgb0'], target_s)
             psnr0 = mse2psnr(img_loss0)
+            
+            ### Space carving on the coarse network
+            if args.space_carving_weight>0. and i>args.warm_start_nerf:
+
+                if args.coarse_space_carving_weight == -1:
+                    coarse_space_carving_weight = args.space_carving_weight
+                else:
+                    coarse_space_carving_weight = args.coarse_space_carving_weight
+
+                coarse_space_carving_loss = compute_space_carving_loss(extras["coarse_pred_hyp"], target_h, is_joint=args.is_joint)
+                loss = loss + coarse_space_carving_weight * coarse_space_carving_loss            
+
             loss = loss + img_loss0
 
         loss.backward()
@@ -1177,13 +1214,14 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             if 'rgb0' in extras:
                 tb.add_scalars('mse0', {'train': img_loss0.item()}, i)
                 tb.add_scalars('psnr0', {'train': psnr0.item()}, i)
-
+                tb.add_scalars('space_carving_loss0', {'train': coarse_space_carving_loss.item()}, i)
+            
             scale_mean = torch.mean(DEPTH_SCALES[i_train])
             shift_mean = torch.mean(DEPTH_SHIFTS[i_train])
             tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
             tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
 
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()}")
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Coarse space carving: {coarse_space_carving_loss.item()}")
             
         if i%args.i_img==0:
             # visualize 2 train images
@@ -1261,6 +1299,9 @@ def config_parser():
     parser.add_argument('--num_iterations', type=int, default=500000, help='Number of epochs')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
+    parser.add_argument("--cimle_lrate", type=float, default=5e-5, 
+                        help='learning rate')
+
     parser.add_argument('--decay_step', type=int, default=400000, help='Decay step for lr decay [default: 200000]')
     parser.add_argument('--decay_rate', type=float, default=0.1, help='Decay rate for lr decay [default: 0.7]')
 
@@ -1336,6 +1377,8 @@ def config_parser():
                         help='number of cimle hypothesis')
     parser.add_argument("--space_carving_weight", type=float, default=0.004,
                         help='weight of the depth loss, values <=0 do not apply depth loss')
+    parser.add_argument("--coarse_space_carving_weight", type=float, default=-1.0,
+                        help='weight for space carving on the coarse network. -1.0 means equal to space_carving_weight')    
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
@@ -1344,6 +1387,8 @@ def config_parser():
     parser.add_argument('--shift_init', default= 0.0, type=float)
     parser.add_argument("--freeze_ss", type=int, default=400000, 
                             help='dont update scale/shift in the last few epochs')
+
+    parser.add_argument('--refresh_z', default= 50000, type=int, help='Number of iterations to recache latent code')
 
     ### u sampling is joint or not
     parser.add_argument('--is_joint', default= False, type=bool)

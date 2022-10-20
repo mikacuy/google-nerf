@@ -1252,6 +1252,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 tb.add_scalars('mse0', {'train': img_loss0.item()}, i)
                 tb.add_scalars('psnr0', {'train': psnr0.item()}, i)
                 tb.add_scalars('space_carving_loss0', {'train': coarse_space_carving_loss.item()}, i)
+
+            scale_mean = torch.mean(DEPTH_SCALES[i_train])
+            shift_mean = torch.mean(DEPTH_SHIFTS[i_train])
+            tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
+            tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
+
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Coarse space carving: {coarse_space_carving_loss.item()}")
             
         if i%args.i_img==0:
