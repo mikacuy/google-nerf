@@ -45,9 +45,10 @@ print("Writing to file....")
 #out_fname = os.path.join(DATA_DIR, DATASET_NAME, 'annotations', DATA_SPLIT + '_annotations_subset.json')
 
 ## 15000 training images
-out_fname = os.path.join(DATA_DIR, DATASET_NAME, 'annotations', DATA_SPLIT + '_annotations_bigsubset.json')
+#out_fname = os.path.join(DATA_DIR, DATASET_NAME, 'annotations', DATA_SPLIT + '_annotations_bigsubset.json')
 
-#out_fname = os.path.join(DATA_DIR, DATASET_NAME, 'annotations', DATA_SPLIT + '_annotations_biggersubset.json')
+out_fname = os.path.join(DATA_DIR, DATASET_NAME, 'annotations', DATA_SPLIT + '_annotations_all.json')
+
 with open(out_fname, 'w') as dump_f:
     json.dump(all_annos_subset, dump_f)
 

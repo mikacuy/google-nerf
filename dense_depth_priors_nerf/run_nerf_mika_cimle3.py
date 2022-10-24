@@ -1,7 +1,7 @@
 '''
 Mikaela Uy
 mikacuy@stanford.edu
-1010: Deeper layers for viewing direction where input cam is on the later layer
+1010: Deeper layers for viewing direction where input cam is on the later layer --
 '''
 import os
 import shutil
