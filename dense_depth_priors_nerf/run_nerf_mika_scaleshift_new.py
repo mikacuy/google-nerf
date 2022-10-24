@@ -1039,6 +1039,26 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     # complete and check depth
     gt_depths_train = torch.Tensor(gt_depths[i_train]).to(device) # only used to evaluate error of completed depth
+
+    # ### Debug good initialization ###
+    # print(gt_depths_train[0].squeeze())
+    # print()
+    # print(all_depth_hypothesis[0].squeeze())
+    # print()
+    # print()
+    # print(gt_depths_train[1].squeeze())
+    # print()
+    # print(all_depth_hypothesis[1].squeeze())
+    # print()
+    # print()
+    # print(gt_depths_train[2].squeeze())
+    # print()
+    # print(all_depth_hypothesis[2].squeeze())
+    # print()        
+    # exit()
+    # #################################
+
+
     gt_valid_depths_train = torch.Tensor(gt_valid_depths[i_train]).bool().to(device) # only used to evaluate error of completed depth
     depths, valid_depths = complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, \
         scene_sample_params, args)

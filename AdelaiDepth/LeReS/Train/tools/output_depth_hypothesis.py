@@ -34,28 +34,33 @@ parser = argparse.ArgumentParser()
 # parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
 # parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
 
-parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
+# parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
+# parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
+
+parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
 # parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
 # parser.add_argument("--ckpt", default="epoch9_step0.pth", help="checkpoint", type=str)
 
+parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0710_train_debug/", type=str)
+
 # parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0710_train/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0758_train/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0781_train/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0708_train/", type=str)
-parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0738_train/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0826_pretrained_dd_scene0738_train/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
 # ### Scannet sample scene
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/mika_processed/scene0653_00/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0708_00/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
 
 ### Nerf
 # parser.add_argument('--dataroot', default='/orion/group/NSVF/Synthetic_NeRF/Lego', help='Root dir for dataset')
@@ -331,7 +336,7 @@ def recover_metric_depth(pred, gt):
 
     # pred_metric[~mask] = 0.
 
-    return pred_metric
+    return pred_metric, a, b
 
 #### Image transform #####
 def scale_torch(img):
@@ -470,6 +475,10 @@ else:
         # data['rgb'] = img_torch
 
 with torch.no_grad():
+
+    all_scales = []
+    all_shifts = []
+
     for i, data in enumerate(zcache_dataloader):
 
         batch_size = data['rgb'].shape[0]
@@ -529,6 +538,9 @@ with torch.no_grad():
         all_err_delta1 = np.zeros((batch_size, mini_batch_size*num_sets))
         all_err_whdr = np.zeros((batch_size, mini_batch_size*num_sets))
 
+        image_scales = []
+        image_shifts = []
+
         for k in range(num_sets):
 
             ## Hard coded d_latent
@@ -555,10 +567,14 @@ with torch.no_grad():
                     reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
 
                 ### Align prediction and compute qualitative results
-                curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, curr_gt)
+                curr_pred_depth_metric, _, _ = recover_metric_depth(curr_pred_depth, curr_gt)
 
                 ## Raw depth
-                curr_pred_depth_raw = recover_metric_depth(curr_pred_depth, depth_img)
+                curr_pred_depth_raw, curr_scale, curr_shift = recover_metric_depth(curr_pred_depth, depth_img)
+                
+                image_scales.append(curr_scale)
+                image_shifts.append(curr_shift)
+
                 curr_pred_depth_raw = cv2.resize(curr_pred_depth_raw, orig_shape) ### check this resize function 
 
                 # print(curr_pred_depth_raw)
@@ -588,6 +604,12 @@ with torch.no_grad():
                 all_err_delta1[:, k*mini_batch_size + s] = err_delta1
                 all_err_whdr[:, k*mini_batch_size + s] = err_whdr
             #######
+
+        image_scales = np.array(image_scales)
+        image_shifts = np.array(image_shifts)
+
+        all_scales.append(np.mean(image_scales))
+        all_shifts.append(np.mean(image_shifts))        
 
         ### Quantitative Results
         idx_to_take = np.argmin(all_err_absRel, axis=-1)[0]
@@ -660,7 +682,11 @@ print("Done.")
 
 
 
-
+print("Scales:")
+print(all_scales)
+print()
+print("Shifts:")
+print(all_shifts)
 
 
 

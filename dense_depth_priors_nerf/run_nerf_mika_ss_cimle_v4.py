@@ -1,7 +1,7 @@
 '''
 Mikaela Uy
 mikacuy@stanford.edu
-1017: Combine opt_ss with cIMLE for white balancing experiments, log scale/shift updates through training, load pretrained model from non-cimle
+1017: Combine opt_ss with cIMLE for white balancing experiments, log scale/shift updates through training, load depth/scale shifts
 '''
 import os
 import shutil
@@ -1040,23 +1040,32 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     print('Found ckpts', ckpts)
     ckpt_path = ckpts[-1]
     print('Reloading pretrained model from', ckpt_path)
-    ckpt = torch.load(ckpt_path)
 
-    coarse_model_dict = render_kwargs_train["network_fn"].state_dict()
-    coarse_keys = {k: v for k, v in ckpt['network_fn_state_dict'].items() if k in coarse_model_dict} 
+    # ckpt = torch.load(ckpt_path)
 
-    fine_model_dict = render_kwargs_train["network_fine"].state_dict()
-    fine_keys = {k: v for k, v in ckpt['network_fine_state_dict'].items() if k in fine_model_dict} 
+    # coarse_model_dict = render_kwargs_train["network_fn"].state_dict()
+    # coarse_keys = {k: v for k, v in ckpt['network_fn_state_dict'].items() if k in coarse_model_dict} 
 
-    ### Load weights from pretrained model without cIMLE
-    coarse_model_dict.update(coarse_keys)
-    fine_model_dict.update(fine_keys)
+    # fine_model_dict = render_kwargs_train["network_fine"].state_dict()
+    # fine_keys = {k: v for k, v in ckpt['network_fine_state_dict'].items() if k in fine_model_dict} 
+
+    # ### Load weights from pretrained model without cIMLE
+    # coarse_model_dict.update(coarse_keys)
+    # fine_model_dict.update(fine_keys)
 
     ## Load scale and shift
     DEPTH_SHIFTS = torch.load(ckpt_path)["depth_shifts"]
     DEPTH_SCALES = torch.load(ckpt_path)["depth_scales"] 
 
-    print("Loaded weights from pretrained model.")
+    print("Scales:")
+    print(DEPTH_SCALES)
+    print()
+    print("Shifts:")
+    print(DEPTH_SHIFTS)
+
+    print("Loaded depth shift/scale from pretrained model.")
+    
+    exit()
     ########################################
     ########################################
 

@@ -38,7 +38,6 @@ parser = argparse.ArgumentParser()
 # parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
 parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
-
 # parser.add_argument("--logdir", default="log_0928_all_dataparallel/", help="path to the log directory", type=str)
 
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
@@ -63,21 +62,14 @@ parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", ty
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unifiedscale_rotated/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unifiedscale_rotated/", type=str)
 
-parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_bigsubset_dataparallel_40hyp/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_bigsubset_dataparallel_40hyp/", type=str)
 
+### Scannet
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
-
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_all_dataparallel_80/", type=str)
-
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_all_dataparallel_72/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unifiedscale_rotated_all_dataparallel_72/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unifiedscale_rotated_all_dataparallel_72/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unifiedscale_rotated_all_dataparallel_72/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unifiedscale_rotated_all_dataparallel_72/", type=str)
 
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_all_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unifiedscale_rotated_all_dataparallel/", type=str)
@@ -85,18 +77,26 @@ parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_tr
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unifiedscale_rotated_all_dataparallel/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unifiedscale_rotated_all_dataparallel/", type=str)
 
+### Matterport
+# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room0_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room1_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room2_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
-# ### Scannet sample scene
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/mika_processed/scene0653_00/', help='Root dir for dataset')
 
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
+### Scannet
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0708_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
+
+### Matterport
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_0/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_1/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
 
 ### Nerf
 # parser.add_argument('--dataroot', default='/orion/group/NSVF/Synthetic_NeRF/Lego', help='Root dir for dataset')
@@ -376,7 +376,7 @@ def recover_metric_depth(pred, gt):
 
     # pred_metric[~mask] = 0.
 
-    return pred_metric
+    return pred_metric, a, b
 
 #### Image transform #####
 def scale_torch(img):
@@ -452,6 +452,10 @@ else:
     f = 1111.111
 
 with torch.no_grad():
+
+    all_scales = []
+    all_shifts = []
+
     for i, data in enumerate(zcache_dataloader):
 
         batch_size = data['rgb'].shape[0]
@@ -551,7 +555,10 @@ with torch.no_grad():
         all_pred_depths = all_pred_depths.flatten()
         depth_img = depth_img.flatten()
 
-        curr_pred_depth_raw = recover_metric_depth(all_pred_depths, depth_img)
+        curr_pred_depth_raw, curr_scale, curr_shift = recover_metric_depth(all_pred_depths, depth_img)
+
+        all_scales.append(curr_scale)
+        all_shifts.append(curr_shift)
 
         curr_pred_depth_raw = curr_pred_depth_raw.reshape(prev_shape)
         depth_img = depth_img.reshape(prev_shape)
@@ -615,8 +622,11 @@ with torch.no_grad():
             print("Finished "+str(i)+"/"+str(len(zcache_dataloader)
                 )+".")
 
-
-
+    print("Scales:")
+    print(all_scales)
+    print()
+    print("Shifts:")
+    print(all_shifts)
 
 
 

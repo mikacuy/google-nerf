@@ -1,7 +1,7 @@
 '''
 Mikaela Uy
-Usable eval script as of Aug 25, 2022
-NerF evaluation script
+1021    : Quantatively evaluate scannet scenes to pick the best prior model
+        : Also find the scale/shift init for the nerf training 
 '''
 import math
 import os, sys
@@ -31,44 +31,30 @@ import imageio
 
 
 parser = argparse.ArgumentParser()
+# parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
+# parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
 
-##### Use this, seems to be the best at the moment
+# parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
+# parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
+
 parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
 # parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
 # parser.add_argument("--ckpt", default="epoch9_step0.pth", help="checkpoint", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0710_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0758_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0781_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0708_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0738_train_unscaled/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1022_scene0710_scaleshift_0926big_dp_e56/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1022_scene0758_scaleshift_0926big_dp_e56/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1022_scene0781_scaleshift_0926big_dp_e56/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1022_scene0708_scaleshift_0926big_dp_e56/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1022_scene0738_scaleshift_0926big_dp_e56/", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated/", type=str)
-
-#### Scannet
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated_bigsubset_dataparallel", type=str)
-
-#### Matterport
-# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room0_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room1_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room2_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-
+# parser.add_argument('--dump_dir', default= "dump_1022_room0_scaleshift_0926big_dp_e56/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1022_room1_scaleshift_0926big_dp_e56/", type=str)
+parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
-
-# ### Scannet sample scene
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/mika_processed/scene0653_00/', help='Root dir for dataset')
 
 ### Scannet
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
@@ -338,19 +324,21 @@ def transform_shift_scale(depth, valid_threshold=-1e-8, max_threshold=1e8):
     return gt_trans
 
 ### Tranform pred to fit the ground truth
+
+#### Fit with regularization ####
 def recover_metric_depth(pred, gt):
     if type(pred).__module__ == torch.__name__:
         pred = pred.cpu().numpy()
     if type(gt).__module__ == torch.__name__:
         gt = gt.cpu().numpy()
-
-    # gt = np.expand_dims(all_pred_depths, axis=0)
-    # pred = np.expand_dims(all_pred_depths, axis=0)
-
     gt = gt.squeeze()
     pred = pred.squeeze()
     
-    mask = (gt > 1e-8) & (pred > 1e-8)
+
+    mask = (gt > 0.1)
+
+    if np.sum(mask) == 0 :
+        return pred, 1.0, 0.0
 
     gt_mask = gt[mask]
     pred_mask = pred[mask]
@@ -360,7 +348,7 @@ def recover_metric_depth(pred, gt):
 
     # pred_metric[~mask] = 0.
 
-    return pred_metric
+    return pred_metric, a, b
 
 #### Image transform #####
 def scale_torch(img):
@@ -390,6 +378,13 @@ def remap_color_to_depth(depth_img):
     return depth    
 ##############################
 
+### Compute RSME ###
+def compute_rmse(prediction, target):
+    return np.sqrt(np.mean(np.square(prediction - target)))
+
+
+### Dataset
+
 ### Dataloader
 # datapath = os.path.join(FLAGS.dataroot, FLAGS.scenename)
 datapath = FLAGS.dataroot
@@ -402,8 +397,12 @@ dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=IS_NSVF, split="test",
 
 
 ### Create output dir for the multiple hypothesis
-hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
-if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
+# hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
+# if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
+
+scaleshift_outdir = os.path.join(FLAGS.dataroot, "scale_shift_inits", DUMP_DIR)
+if not os.path.exists(scaleshift_outdir): os.makedirs(scaleshift_outdir)
+
 
 #### Evaluation ######
 zcache_dataloader = torch.utils.data.DataLoader(
@@ -419,23 +418,27 @@ true_num_samples = num_sets*mini_batch_size # just take the floor
 
 
 ### For quantitative evaluation
-total_err_absRel = 0.0
-total_err_squaRel = 0.0
-total_err_silog = 0.0
-total_err_delta1 = 0.0
-total_err_whdr = 0.0
+total_gt_rsme = 0.0
+total_sfm_rsme = 0.0
 num_evaluated = 0
 
 model.eval()
 
 ### Focal length for scannet
 if not IS_NSVF:
-    f = 577.870605
+    f = 577.870605 ### this focal length is not exactly right for DDP images, but it doesn't matter here
 else:
     ### Check this for other models
     f = 1111.111
 
 with torch.no_grad():
+
+    all_scales = []
+    all_shifts = []
+
+    best_sfm_scales = []
+    best_sfm_shifts = []
+
     for i, data in enumerate(zcache_dataloader):
 
         batch_size = data['rgb'].shape[0]
@@ -448,15 +451,6 @@ with torch.no_grad():
         data['rgb'] = data['rgb'].unsqueeze(1).repeat(1,mini_batch_size, 1, 1, 1)
         data['rgb'] = data['rgb'].view(-1, C, H, W)
 
-        gt_depth = data['gt_depth'].cuda()
-
-        if len(gt_depth.shape) == 3:
-            curr_gt = gt_depth[0]
-        else:
-            curr_gt = gt_depth
-
-        curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
-        curr_gt = cv2.resize(curr_gt, (448, 448), interpolation=cv2.INTER_NEAREST)
 
         rgb = torch.clone(data['rgb'][0]).permute(1, 2, 0).to("cpu").detach().numpy() 
         rgb = rgb[:, :, ::-1] ## dataloader is bgr
@@ -466,18 +460,44 @@ with torch.no_grad():
 
         ### Raw gt depth ###
         curr_depth_path = data['B_paths'][0]
-        depth_img = np.array(imageio.imread(curr_depth_path))
+
+        depth_img = cv2.imread(curr_depth_path, cv2.IMREAD_UNCHANGED).astype(np.float64)
+        valid_depth = depth_img > 0.5
 
         if not IS_NSVF:
             ## Scannet depth
-            depth_img = depth_img.astype(float)/1000.
+            depth_img = (depth_img/1000.).astype(np.float32)
         else:
             depth_img = remap_color_to_depth(depth_img)
             depth_img = depth_img.astype(float)
 
         orig_shape = depth_img.shape
+
+        ### For computing scale and shift
+        depth_orig_size = depth_img.copy()
+
         depth_img = cv2.resize(depth_img, (448, 448), interpolation=cv2.INTER_NEAREST)
-        # print(depth_img)
+
+
+        ### Load sparse SfM depth
+        curr_sfm_depth_path = data['C_paths'][0]
+        sfm_depth_img = cv2.imread(curr_sfm_depth_path, cv2.IMREAD_UNCHANGED).astype(np.float64)
+        sfm_depth_img = (sfm_depth_img/1000.).astype(np.float32)
+        valid_sfm_depth = sfm_depth_img > 0.5
+
+
+        # ### To Debug ###
+        # img = cv2.imread(data['A_paths'][0], cv2.IMREAD_UNCHANGED)
+
+        # print(img.shape)
+        # print(depth_orig_size.shape)
+        # print()
+        # print(curr_sfm_depth_path)
+        # print(sfm_depth_img.shape)
+        # print(sfm_depth_img[valid_sfm_depth])
+        # print(np.sum(valid_sfm_depth))
+        # exit()
+        # ##########################
 
         ### Iterate over the minibatch
         image_fname = []
@@ -487,16 +507,17 @@ with torch.no_grad():
             cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
             image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
             img_name = "image" + str(i) + "_gt"
-            reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
-
-        all_err_absRel = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_squaRel = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_silog = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_delta1 = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_whdr = np.zeros((batch_size, mini_batch_size*num_sets))
+            reconstruct_depth(depth_img, rgb, gt_fol, img_name, f)
 
 
-        all_pred_depths = []
+        all_gt_rsme = np.zeros((batch_size, mini_batch_size*num_sets))
+        all_sfm_rsme = np.zeros((batch_size, mini_batch_size*num_sets))
+
+        gt_image_scales = []
+        gt_image_shifts = []
+
+        sfm_image_scales = []
+        sfm_image_shifts = []
 
         for k in range(num_sets):
 
@@ -523,47 +544,112 @@ with torch.no_grad():
                     ### Output point cloud
                     reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
 
-                all_pred_depths.append(curr_pred_depth)
+                ### Resize first then compute for error
+                curr_pred_depth_raw = cv2.resize(curr_pred_depth, (depth_orig_size.shape[1], depth_orig_size.shape[0])) ### check this resize function 
+
+                ### Align prediction and compute qualitative results
+                ## Raw depth
+                curr_pred_depth_metric, curr_scale, curr_shift = recover_metric_depth(curr_pred_depth_raw, depth_orig_size)
+
+                gt_image_scales.append(curr_scale)
+                gt_image_shifts.append(curr_shift)
+
+                gt_depth_rmse = compute_rmse(curr_pred_depth_metric[valid_depth], depth_orig_size[valid_depth])
+
+
+                ## SfM depth
+                curr_pred_sfm_depth_metric, curr_sfm_scale, curr_sfm_shift = recover_metric_depth(curr_pred_depth_raw, sfm_depth_img)
+
+                sfm_image_scales.append(curr_sfm_scale)
+                sfm_image_shifts.append(curr_sfm_shift)
+
+                sfm_depth_rmse = compute_rmse(curr_pred_sfm_depth_metric[valid_depth], depth_orig_size[valid_depth])                
+
+
+                ##### Save the current RSME
+                all_gt_rsme[:, k*mini_batch_size + s] = gt_depth_rmse
+                all_sfm_rsme[:, k*mini_batch_size + s] = sfm_depth_rmse
+
+                # ### Debug ###
+                # print(curr_pred_depth_metric)
+                # print()
+                # print(curr_pred_sfm_depth_metric)
+                # print()
+
+                # print("For ground truth alignment:")
+                # print(curr_scale)
+                # print(curr_shift)
+                # print(gt_depth_rmse)
+                # print()
+                # print("For sparse sfm points alignment:")
+                # print(curr_sfm_scale)
+                # print(curr_sfm_shift)
+                # print(sfm_depth_rmse)
+                # exit()
+                # ##################
+
+                # ### Save output hypothesis ###
+                # curr_rbg_name = data['A_paths'][0]
+                # # print(curr_rbg_name)
+                # fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
+
+                # outfname = os.path.join(hypothesis_outdir, fname)
+                # np.save(outfname, np.array(curr_pred_depth_metric))
+
+                # # ## Check output --> debug
+                # # depth = np.load(outfname).astype(np.float64)
+                # # print(depth)
+                # # print(depth.shape)
+                # # print(outfname)
+                # ##############################
+
             #######
 
-        ### Find scale and fit
-        all_pred_depths = np.stack(all_pred_depths)
-        depth_img = np.repeat(np.expand_dims(depth_img, axis=0), NUM_SAMPLE, axis=0)
+        ### Get the best SfM scale and append this
+        sfm_idx_to_take = np.argmin(all_sfm_rsme, axis=-1)[0]
+        best_sfm_scales.append(sfm_image_scales[sfm_idx_to_take])
+        best_sfm_shifts.append(sfm_image_shifts[sfm_idx_to_take])
+        total_sfm_rsme += all_sfm_rsme[0][sfm_idx_to_take]
 
-        # prev_shape = all_pred_depths.shape
+        ### Gt mean scales and shifts
+        gt_image_scales = np.array(gt_image_scales)
+        gt_image_shifts = np.array(gt_image_shifts)
+        all_scales.append(np.mean(gt_image_scales))
+        all_shifts.append(np.mean(gt_image_shifts)) 
 
-        # all_pred_depths = all_pred_depths.flatten()
-        # depth_img = depth_img.flatten()
+        idx_to_take = np.argmin(all_gt_rsme, axis=-1)[0]
+        total_gt_rsme += all_gt_rsme[0][idx_to_take]
+        num_evaluated += 1       
 
-        curr_pred_depth_raw = all_pred_depths
+        
+        ### Save scale/shift init for the image
+        #### Save into numpy array in the dump dir
+        curr_rbg_name = data['A_paths'][0]
+        print(curr_rbg_name)
 
-        # curr_pred_depth_raw = curr_pred_depth_raw.reshape(prev_shape)
-        # depth_img = depth_img.reshape(prev_shape)
+        fname = curr_rbg_name.split("/")[-1][:-4] + "_sfminit.npy"
 
-        print("===============")
-        print("i")
-        ### Output to file
-        for k in range(num_sets):
-            for s in range(mini_batch_size):
+        curr_scaleshift = np.array([sfm_image_scales[sfm_idx_to_take], sfm_image_shifts[sfm_idx_to_take]])
+        outfname = os.path.join(scaleshift_outdir, fname)
+        np.save(outfname, curr_scaleshift)
 
-                curr_depth = curr_pred_depth_raw[k*mini_batch_size+s]
+        scaleshift = np.load(outfname).astype(np.float64)
+        print(scaleshift)
+        print(scaleshift.shape)
+        print(outfname)
+        print()
 
-                ### Resize --> check the opencv function
-                # curr_depth = cv2.resize(curr_depth, orig_shape) ### check this resize function 
-                curr_depth = cv2.resize(curr_depth, (orig_shape[1], orig_shape[0])) ### check this resize function 
+        fname = curr_rbg_name.split("/")[-1][:-4] + "_gtinit.npy"
 
-                curr_rbg_name = data['A_paths'][0]
-                fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
+        curr_scaleshift = np.array([gt_image_scales[idx_to_take], gt_image_shifts[idx_to_take]])
+        outfname = os.path.join(scaleshift_outdir, fname)
+        np.save(outfname, curr_scaleshift)
 
-                outfname = os.path.join(hypothesis_outdir, fname)
-                np.save(outfname, np.array(curr_depth))                
-
-                ## Check output --> debug
-                depth = np.load(outfname).astype(np.float64)
-                print(depth)
-                print(depth.shape)
-                print(outfname)
-                print()
+        scaleshift = np.load(outfname).astype(np.float64)
+        print(scaleshift)
+        print(scaleshift.shape)
+        print(outfname)
+        print()
 
         if i%10==0  or VISU_ALL:
             ### Collate and output to a single image
@@ -597,6 +683,38 @@ with torch.no_grad():
         if i%100==0:
             print("Finished "+str(i)+"/"+str(len(zcache_dataloader)
                 )+".")
+
+mean_gt_rsme = total_gt_rsme/float(num_evaluated)
+mean_sfm_rsme = total_sfm_rsme/float(num_evaluated)
+
+
+log_string("=" * 20)
+log_string("")
+log_string("Num evaluated= "+str(num_evaluated))
+log_string("")
+log_string("Mean GT RSME= "+str(mean_gt_rsme))
+log_string("")             
+log_string("Mean SfM RSME = "+str(mean_sfm_rsme))
+log_string("")           
+
+print("Done.")
+
+
+
+print("Scales:")
+print(all_scales)
+print()
+print("Shifts:")
+print(all_shifts)
+
+print()
+print("Best SfM Scales:")
+print(best_sfm_scales)
+print()
+print("Best SfM Shifts:")
+print(best_sfm_shifts)
+
+
 
 
 

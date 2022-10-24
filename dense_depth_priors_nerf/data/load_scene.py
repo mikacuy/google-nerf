@@ -165,7 +165,7 @@ def load_scene(basedir, train_json = "transforms_train.json"):
     return imgs, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths
 
 
-def load_scene_mika(basedir, cimle_dir, num_hypothesis=20, train_json = "transforms_train.json"):
+def load_scene_mika(basedir, cimle_dir, num_hypothesis=20, train_json = "transforms_train.json", init_scales=False, scales_dir=None, gt_init=False):
     splits = ['train', 'val', 'test', 'video']
 
     all_imgs = []
@@ -272,8 +272,39 @@ def load_scene_mika(basedir, cimle_dir, num_hypothesis=20, train_json = "transfo
 
     ### Clamp depth hypothesis to near plane and far plane
     all_depth_hypothesis = np.clip(all_depth_hypothesis, near, far)
-    #########################################3
+    #########################################
 
+    ############################################    
+    #### Load scale/shift init ####
+    ############################################        
+    if init_scales:
+        scale_shift_dir = os.path.join(basedir, "train", "scale_shift_inits", scales_dir)
+        train_idx = i_split[0]
+
+        all_scales_init = []        
+        all_shifts_init = []        
+
+        for i in range(len(train_idx)):
+            filename = filenames[train_idx[i]]
+            img_id = filename.split("/")[-1][:-4]
+
+            if not gt_init:
+                print("Use SfM scale init.")
+                curr_scale_shift_name = os.path.join(scale_shift_dir, img_id+"_sfminit.npy")
+            else:
+                print("Use gt scale init.")
+                curr_scale_shift_name = os.path.join(scale_shift_dir, img_id+"_gtinit.npy")
+
+            curr_scale_shift = np.load(curr_scale_shift_name).astype(np.float32)
+            print(curr_scale_shift)
+
+            all_scales_init.append(curr_scale_shift[0])
+            all_shifts_init.append(curr_scale_shift[1])
+
+        all_scales_init = np.array(all_scales_init)
+        all_shifts_init = np.array(all_shifts_init)
+
+        return imgs, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths, all_depth_hypothesis, all_scales_init, all_shifts_init
 
     return imgs, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths, all_depth_hypothesis
 

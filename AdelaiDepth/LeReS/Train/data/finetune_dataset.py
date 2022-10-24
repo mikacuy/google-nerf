@@ -29,7 +29,7 @@ class FinetuneDataset(Dataset):
         self.split = split
         self.data_aug = data_aug
 
-        self.rgb_paths, self.depth_paths, self.disp_paths, self.sem_masks, self.ins_paths= self.getData()
+        self.rgb_paths, self.depth_paths, self.sfm_depth_paths, self.disp_paths, self.sem_masks, self.ins_paths= self.getData()
         self.data_size = len(self.rgb_paths)
         self.focal_length_dict = {'scannet': 577.870605, 'nsvf': 1111.111}
 
@@ -37,11 +37,15 @@ class FinetuneDataset(Dataset):
 
         if not self.is_nsvf:
             image_dir = os.path.join(self.root, "rgb")
+            
+            depth_dir = os.path.join(self.root, "target_depth")
 
-            if "target_depth" in os.listdir(self.root):
-                depth_dir = os.path.join(self.root, "target_depth")
-            else:
-                depth_dir = os.path.join(self.root, "depth")
+            sfm_depth_dir = os.path.join(self.root, "depth")
+
+            # if "target_depth" in os.listdir(self.root):
+            #     depth_dir = os.path.join(self.root, "target_depth")
+            # else:
+            #     depth_dir = os.path.join(self.root, "depth")
         else:
             image_dir = os.path.join(self.root, "leres_cimle_v1", "rgb")
             depth_dir = os.path.join(self.root, "leres_cimle_v1", "depth")
@@ -53,11 +57,17 @@ class FinetuneDataset(Dataset):
         depth_list = os.listdir(depth_dir)
         depth_list.sort()
 
+        sfm_depth_list = os.listdir(sfm_depth_dir)
+        sfm_depth_list.sort()
+
         rgb_paths = [os.path.join(image_dir, i) for i in imgs_list]
         print(len(rgb_paths))
 
         depth_paths = [os.path.join(depth_dir, i) for i in depth_list]
         print(len(depth_paths))
+
+        sfm_depth_paths = [os.path.join(sfm_depth_dir, i) for i in sfm_depth_list]
+        print(len(sfm_depth_paths))
 
         if len(rgb_paths) !=  len(depth_paths):
             print("ERROR. Number of images and depth maps don't match.")
@@ -67,7 +77,7 @@ class FinetuneDataset(Dataset):
         mask_paths = None
         ins_paths = None
 
-        return rgb_paths, depth_paths, disp_paths, mask_paths, ins_paths
+        return rgb_paths, depth_paths, sfm_depth_paths, disp_paths, mask_paths, ins_paths
 
     def __getitem__(self, anno_index):
         if self.split == "train":
@@ -88,6 +98,7 @@ class FinetuneDataset(Dataset):
         """
         rgb_path = self.rgb_paths[anno_index]
         depth_path = self.depth_paths[anno_index]
+        sfm_depth_path = self.sfm_depth_paths[anno_index]
 
         rgb = cv2.imread(rgb_path)[:, :, ::-1]  # bgr, H*W*C
         
@@ -160,7 +171,7 @@ class FinetuneDataset(Dataset):
 
 
         data = {'rgb': rgb_torch, 'depth': depth_torch, 'disp': disp_torch,
-                'A_paths': rgb_path, 'B_paths': depth_path, 'quality_flg': quality_flg,
+                'A_paths': rgb_path, 'B_paths': depth_path, 'C_paths':sfm_depth_path, 'quality_flg': quality_flg,
                 'planes': ins_planes, 'focal_length': focal_length, 'gt_depth': depth_torch}
         return data
 
