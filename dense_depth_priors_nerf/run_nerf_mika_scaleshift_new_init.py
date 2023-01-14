@@ -904,12 +904,29 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
     target_vd = target_valid_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1)
     target_h = target_hypothesis[:, select_coords[:, 0], select_coords[:, 1]]
 
+    if args.mask_corners:
+        ### Initialize a masked image
+        space_carving_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
+
+        ### Mask out the corners
+        num_pix_to_mask = 20
+        space_carving_mask[:num_pix_to_mask, :num_pix_to_mask] = 0
+        space_carving_mask[:num_pix_to_mask, -num_pix_to_mask:] = 0
+        space_carving_mask[-num_pix_to_mask:, :num_pix_to_mask] = 0
+        space_carving_mask[-num_pix_to_mask:, -num_pix_to_mask:] = 0
+
+        space_carving_mask = space_carving_mask[select_coords[:, 0], select_coords[:, 1]]
+    else:
+        space_carving_mask = None
+
+
     if args.depth_loss_weight > 0.:
         depth_range = precompute_depth_sampling(target_d)
         batch_rays = torch.stack([rays_o, rays_d, depth_range], 0)  # (3, N_rand, 3)
     else:
         batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
-    return batch_rays, target_s, target_d, target_vd, img_i, target_h
+    return batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask
+
 
 def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, invalidate_large_std_threshold=-1.):
     device = images.device
@@ -1096,7 +1113,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         curr_shift = DEPTH_SHIFTS[img_i]
 
         ## Scale and shift
-        batch_rays, target_s, target_d, target_vd, img_i, target_h = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
+        batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
             intrinsics, all_depth_hypothesis, args)
 
         target_h = target_h*curr_scale + curr_shift        
@@ -1118,7 +1135,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         loss = img_loss
 
         if args.space_carving_weight>0. and i>args.warm_start_nerf:
-            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint)
+            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint, norm_p=args.norm_p, threshold=args.space_carving_threshold, mask=space_carving_mask)
             loss = loss + args.space_carving_weight * space_carving_loss
         else:
             space_carving_loss = torch.mean(torch.zeros([target_h.shape[0]]).to(target_h.device))
@@ -1345,7 +1362,7 @@ def config_parser():
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
     parser.add_argument('--scaleshift_lr', default= 0.000001, type=float)
-    parser.add_argument('--scale_init', default= 0.5, type=float)
+    parser.add_argument('--scale_init', default= 1.0, type=float)
     parser.add_argument('--shift_init', default= 0.0, type=float)
     parser.add_argument("--freeze_ss", type=int, default=400000, 
                             help='dont update scale/shift in the last few epochs')
@@ -1359,6 +1376,13 @@ def config_parser():
     parser.add_argument("--scales_dir", type=str, default="dump_1022_scene0710_scaleshift_0926big_dp_e56/",
                         help='dump_dir name for the scale/shift init')
     parser.add_argument('--use_gt_init', default= False, type=bool) 
+
+
+    ### Norm for space carving loss
+    parser.add_argument("--norm_p", type=int, default=2, help='norm for loss')
+    parser.add_argument("--space_carving_threshold", type=float, default=0.0,
+                        help='threshold to not penalize the space carving loss.')
+    parser.add_argument('--mask_corners', default= False, type=bool)
 
     return parser
 

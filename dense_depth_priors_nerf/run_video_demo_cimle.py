@@ -19,7 +19,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
+from model import NeRF_camlatent_add, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
@@ -155,51 +155,51 @@ def precompute_depth_sampling(depth):
     return torch.stack((depth[:, 0], depth_min, depth_max), -1)
 
 def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fps=25):
-    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_' + filename)
-    if os.path.exists(video_dir):
-        shutil.rmtree(video_dir)
-    os.makedirs(video_dir, exist_ok=True)
-    depth_scale = render_kwargs_test["far"]
-    max_depth_in_video = 0
+    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo1_' + filename)
+    # if os.path.exists(video_dir):
+    #     shutil.rmtree(video_dir)
+    # os.makedirs(video_dir, exist_ok=True)
+    # depth_scale = render_kwargs_test["far"]
+    # max_depth_in_video = 0
 
-    # start_idx = int(len(poses)*(24./35.))
-    # end_idx = int(len(poses)*(32./35.))+1
+    # # start_idx = int(len(poses)*(24./35.))
+    # # end_idx = int(len(poses)*(32./35.))+1
 
-    start_idx = 0
-    end_idx = len(poses)
+    # start_idx = 0
+    # end_idx = len(poses)
 
-    imgs = []
-    for img_idx in range(start_idx, end_idx):
-        pose = poses[img_idx, :3,:4]
-        intrinsic = intrinsics[img_idx, :]
-        with torch.no_grad():
-            if args.input_ch_cam > 0:
-                render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
-            # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
-            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, with_5_9=False, **render_kwargs_test)
-            rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
-            video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
+    # imgs = []
+    # for img_idx in range(start_idx, end_idx, 3):
+    #     # pose = poses[img_idx, :3,:4]
+    #     # intrinsic = intrinsics[img_idx, :]
+    #     # with torch.no_grad():
+    #     #     if args.input_ch_cam > 0:
+    #     #         render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
+    #     #     # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
+    #     #     rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, with_5_9=False, **render_kwargs_test)
+    #     #     rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
+    #     #     video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
 
-            # max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
-            # depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
-            # video_frame = np.concatenate((video_frame, depth_frame), 1)
-            # depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
-            # depth_std = depth_var.clamp(0., 1.).sqrt()
-            # video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
+    #     #     # max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
+    #     #     # depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
+    #     #     # video_frame = np.concatenate((video_frame, depth_frame), 1)
+    #     #     # depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
+    #     #     # depth_std = depth_var.clamp(0., 1.).sqrt()
+    #     #     # video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
 
-            cv2.imwrite(os.path.join(video_dir, str(img_idx) + '.jpg'), video_frame)
+    #     #     cv2.imwrite(os.path.join(video_dir, str(img_idx) + '.jpg'), video_frame)
 
-            imgs.append(os.path.join(video_dir, str(img_idx) + '.jpg'))
+    #         imgs.append(os.path.join(video_dir, str(img_idx) + '.jpg'))
 
     video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
 
-    # imageio.mimsave(video_file,
-    #                 [imageio.imread(img) for img in imgs],
-    #                 fps=10, macro_block_size=1)
-    imageio.mimsave(video_file,
-                    [imageio.imread(img) for img in imgs],
-                    fps=10, macro_block_size=1)
+    imgs = os.listdir(video_dir)
+    imgs = sorted(imgs)
+    print(imgs)
 
+    imageio.mimsave(video_file,
+                    [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
+                    fps=10, macro_block_size=1)
     print("Done.")
 
 def optimize_camera_embedding(image, pose, H, W, intrinsic, args, render_kwargs_test):
@@ -360,7 +360,7 @@ def create_nerf(args, scene_render_params):
     output_ch = 5 if args.N_importance > 0 else 4
     skips = [4]
 
-    model = NeRF(D=args.netdepth, W=args.netwidth,
+    model = NeRF_camlatent_add(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
     model = nn.DataParallel(model).to(device)
@@ -368,7 +368,7 @@ def create_nerf(args, scene_render_params):
 
     model_fine = None
     if args.N_importance > 0:
-        model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
+        model_fine = NeRF_camlatent_add(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
                           input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
         model_fine = nn.DataParallel(model_fine).to(device)
@@ -392,7 +392,7 @@ def create_nerf(args, scene_render_params):
     ckpt = load_checkpoint(args)
     if ckpt is not None:
         start = ckpt['global_step']
-        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        # optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
         # Load model
         model.load_state_dict(ckpt['network_fn_state_dict'])
@@ -1089,7 +1089,7 @@ def run_nerf():
     print(vposes.shape)
     print(vintrinsics.shape)
 
-    render_video(vposes, H, W, vintrinsics, "demo2", args, render_kwargs_test)
+    render_video(vposes, H, W, vintrinsics, "demo", args, render_kwargs_test)
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')

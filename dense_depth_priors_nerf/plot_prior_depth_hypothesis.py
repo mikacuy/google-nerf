@@ -5,7 +5,7 @@ import time
 import datetime
 
 import cv2
-from data import load_scene_mika
+from data import load_scene_mika, load_scene_processed
 import trimesh
 import matplotlib
 
@@ -45,27 +45,39 @@ def point_cloud_from_depth(depth, intrinsic):
 # scene_data_dir = os.path.join("/orion/group/scannet_v2/dense_depth_priors/scenes/", "scene0758_00")
 # cimle_dir = "dump_1009_pretrained_dd_scene0758_train_unifiedscale_rotated/"
 
-DUMP_DIR = "plot_prior_depth_scene710_bigsubset"
-scene_data_dir = os.path.join("/orion/group/scannet_v2/dense_depth_priors/scenes/", "scene0710_00")
-cimle_dir = "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_bigsubset_dataparallel/"
+# DUMP_DIR = "plot_prior_depth_scene710_bigsubset"
+# scene_data_dir = os.path.join("/orion/group/scannet_v2/dense_depth_priors/scenes/", "scene0710_00")
+# cimle_dir = "dump_1009_pretrained_dd_scene0710_train_unifiedscale_rotated_bigsubset_dataparallel/"
+
+DUMP_DIR = "plot_prior_depth_Auditorium"
+scene_data_dir = os.path.join("/orion/u/mikacuy/coordinate_mvs/processed_scenes/", "Auditorium_subsample")
+cimle_dir = "dump_1107_Auditoriumsubsample_sfmaligned_indv/"
 
 if not os.path.exists(DUMP_DIR): os.mkdir(DUMP_DIR)
 
 num_hypothesis = 20
 
 images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-gt_depths, gt_valid_depths, all_depth_hypothesis = load_scene_mika(scene_data_dir, cimle_dir, num_hypothesis, 'transforms_train.json')
+gt_depths, gt_valid_depths, all_depth_hypothesis = load_scene_processed(scene_data_dir, cimle_dir, num_hypothesis, 'transforms_train.json')
+
+# images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
+# gt_depths, gt_valid_depths, all_depth_hypothesis = load_scene_mika(scene_data_dir, cimle_dir, num_hypothesis, 'transforms_train.json')
 
 i_train, i_val, i_test, i_video = i_split
 
 images = images[i_train]
-gt_depths = gt_depths[i_train]
-gt_depths = gt_depths[i_train]
+depths = depths[i_train]
+
+# gt_depths = gt_depths[i_train]
+# gt_depths = gt_depths[i_train]
+
 poses = poses[i_train]
 intrinsics = intrinsics[i_train]
 
 print(images.shape)
-print(gt_depths.shape)
+# print(gt_depths.shape)
+
+print(depths.shape)
 print(all_depth_hypothesis.shape)
 print(poses.shape)
 print(intrinsics.shape)
@@ -74,7 +86,8 @@ print(intrinsics.shape)
 ### Reconstruct ground truth depth
 for i in range(len(poses)):
 	c2w = poses[i]
-	depth_img = gt_depths[i].squeeze()
+	# depth_img = gt_depths[i].squeeze()
+	depth_img = depths[i].squeeze()
 
 	pc = point_cloud_from_depth(depth_img, intrinsics[i]).reshape(-1, 3)
 

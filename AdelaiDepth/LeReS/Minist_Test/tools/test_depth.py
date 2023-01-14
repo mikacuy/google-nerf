@@ -6,6 +6,9 @@ import torch
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE_DIR, "../"))
+
 from lib.multi_depth_model_woauxi import RelDepthModel
 from lib.net_tools import load_ckpt
 

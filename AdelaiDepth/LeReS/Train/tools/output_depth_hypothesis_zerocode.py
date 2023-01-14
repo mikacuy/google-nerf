@@ -8,7 +8,7 @@ import os, sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR, "../"))
-from data.finetune_dataset import FinetuneDataset
+from data.finetune_dataset import FinetuneDataset, FinetuneDataset_wild
 from lib.models.multi_depth_model_auxiv2 import *
 from lib.configs.config import cfg, merge_cfg_from_file, print_configs
 from lib.utils.net_tools import save_ckpt, load_ckpt
@@ -32,32 +32,30 @@ import json
 
 
 parser = argparse.ArgumentParser()
-# parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
 
-# parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
+# parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
 # parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
-parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
+parser.add_argument("--logdir", default="log_0928_all_dataparallel/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
-# parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch9_step0.pth", help="checkpoint", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0710_zerocode_sfmaligned/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0758_zerocode_sfmaligned/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0781_zerocode_sfmaligned/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0708_zerocode_sfmaligned/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0738_zerocode_sfmaligned/", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0710_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0758_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0781_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0708_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0738_scaleshift_0926big_dp_e56/", type=str)
-
-# parser.add_argument('--dump_dir', default= "dump_1022_room0_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_room1_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_room0_sfmaligned_indv_big/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_room1_sfmaligned_indv_big/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_room2_sfmaligned_indv_big/", type=str)
 
 # parser.add_argument('--dump_dir', default= "dump_1022_room0_scaleshift_0926big_dp_e56_corrected/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1022_room1_scaleshift_0926big_dp_e56_corrected/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56_corrected/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56_corrected/", type=str)
 
+# parser.add_argument('--dump_dir', default= "dump_1114_lounge_v3_zerocode/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1114_b_kitchen_zerocode/", type=str)
+parser.add_argument('--dump_dir', default= "dump_1114_basement_part2_zerocode/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
@@ -72,14 +70,15 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 ### Matterport
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_0/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_1/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
 
-### Nerf
-# parser.add_argument('--dataroot', default='/orion/group/NSVF/Synthetic_NeRF/Lego', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_processed/processed/lounge_v3/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_processed/processed/b_kitchen/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_processed/processed/basement_part2/train/', help='Root dir for dataset')
 
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
-parser.add_argument('--num_samples', default= 20, type=int)
+parser.add_argument('--num_samples', default= 1, type=int)
 parser.add_argument('--rescaled', default=False, type=bool)
 
 parser.add_argument('--ada_version', default= "v2", type=str)
@@ -88,7 +87,11 @@ parser.add_argument('--import_from_logdir', default=False, type=bool)
 parser.add_argument('--visu_all', default=False, type=bool)
 parser.add_argument('--seed_num', default= 0, type=int)
 
+parser.add_argument('--default_scale', default= 0.5, type=float)
+parser.add_argument('--default_shift', default= 0.0, type=float)
+
 parser.add_argument('--is_nsvf', default=False, type=bool)
+parser.add_argument('--is_wild', default=False, type=bool)
 
 
 FLAGS = parser.parse_args()
@@ -103,6 +106,7 @@ np.random.seed(SEED_NUM)
 random.seed(SEED_NUM)
 
 IS_NSVF = FLAGS.is_nsvf
+IS_WILD = FLAGS.is_wild
 
 #### Import from LOG_DIR files or from global files
 if IMPORT_FROM_LOGDIR:
@@ -344,7 +348,7 @@ def recover_metric_depth(pred, gt):
     mask = (gt > 0.1)
 
     if np.sum(mask) == 0 :
-        return pred, 1.0, 0.0
+        return pred, FLAGS.default_scale, FLAGS.default_shift
 
     gt_mask = gt[mask]
     pred_mask = pred[mask]
@@ -388,6 +392,8 @@ def remap_color_to_depth(depth_img):
 def compute_rmse(prediction, target):
     return np.sqrt(np.mean(np.square(prediction - target)))
 
+def per_pixel_error(prediction, target):
+    return np.sqrt(np.square(prediction - target))
 
 ### Dataset
 
@@ -399,12 +405,16 @@ if IS_NSVF:
     dataset_name = "nsvf"
 else:
     dataset_name = "scannet"
-dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=IS_NSVF, split="test", data_aug=False)
+
+if not IS_WILD:    
+    dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=IS_NSVF, split="test", data_aug=False)
+else:
+    dataset = FinetuneDataset_wild(datapath, "processed", is_nsvf=IS_NSVF, split="test", data_aug=False)
 
 
 ### Create output dir for the multiple hypothesis
-# hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
-# if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
+hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
+if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
 
 ##### Also load intrinsics and depth scale for the dataset. #####
 json_fname =  os.path.join(datapath, '../transforms_train.json')
@@ -426,7 +436,7 @@ zcache_dataloader = torch.utils.data.DataLoader(
     shuffle=False)
 print(len(zcache_dataloader))
 
-mini_batch_size = 5
+mini_batch_size = 1
 num_sets = int(NUM_SAMPLE/mini_batch_size)
 true_num_samples = num_sets*mini_batch_size # just take the floor
 
@@ -452,6 +462,9 @@ with torch.no_grad():
 
     best_sfm_scales = []
     best_sfm_shifts = []
+
+    all_npercentile = []
+    all_tpercentile = []
 
     for i, data in enumerate(zcache_dataloader):
 
@@ -504,26 +517,13 @@ with torch.no_grad():
         valid_sfm_depth = sfm_depth_img > 0.5
 
 
-        # ### To Debug ###
-        # img = cv2.imread(data['A_paths'][0], cv2.IMREAD_UNCHANGED)
-
-        # print(img.shape)
-        # print(depth_orig_size.shape)
-        # print()
-        # print(curr_sfm_depth_path)
-        # print(sfm_depth_img.shape)
-        # print(sfm_depth_img[valid_sfm_depth])
-        # print(np.sum(valid_sfm_depth))
-        # exit()
-        # ##########################
-
         ### Iterate over the minibatch
         image_fname = []
 
         if i%10==0  or VISU_ALL:      
             img_name = "image" + str(i)
             cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
-            image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
+            # image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
             img_name = "image" + str(i) + "_gt"
             reconstruct_depth_intrinsics(depth_img, rgb, gt_fol, img_name, intrinsics)
 
@@ -537,12 +537,18 @@ with torch.no_grad():
         sfm_image_scales = []
         sfm_image_shifts = []
 
-
         all_pred_depths = []
+        all_pp_error = []
+
+        all_npercentile_error = []
+        all_tpercentile_error = []
+
         for k in range(num_sets):
 
-            ## Hard coded d_latent
-            z = torch.normal(0.0, 1.0, size=(num_images, mini_batch_size, D_LATENT))
+            ## Zero latent code
+            z = torch.zeros((num_images, mini_batch_size, D_LATENT))
+
+            # z = torch.normal(0.0, 1.0, size=(num_images, mini_batch_size, D_LATENT))
             z = z.view(-1, D_LATENT).cuda()
 
             pred_depth = model.inference(data, z, rescaled=RESCALED)
@@ -569,6 +575,12 @@ with torch.no_grad():
 
                 gt_depth_rmse = compute_rmse(curr_pred_depth_metric[valid_depth], depth_orig_size[valid_depth])
 
+                pixelwise_error = per_pixel_error(curr_pred_depth_metric[valid_depth], depth_orig_size[valid_depth])
+                n_error = np.percentile(pixelwise_error, 90)
+                t_error = np.percentile(pixelwise_error, 80)
+                all_npercentile_error.append(n_error)
+                all_tpercentile_error.append(t_error)
+
 
                 ## SfM depth
                 curr_pred_sfm_depth_metric, curr_sfm_scale, curr_sfm_shift = recover_metric_depth(curr_pred_depth_raw, sfm_depth_img)
@@ -578,10 +590,11 @@ with torch.no_grad():
 
                 sfm_depth_rmse = compute_rmse(curr_pred_sfm_depth_metric[valid_depth], depth_orig_size[valid_depth])                
 
+                curr_pp_error = per_pixel_error(curr_pred_sfm_depth_metric, depth_orig_size)
 
                 if i%10==0  or VISU_ALL:
                     # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
+                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), curr_pred_sfm_depth_metric, cmap='rainbow')
                     image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
                     ### Output point cloud
@@ -589,49 +602,49 @@ with torch.no_grad():
 
                     rgb_orig = cv2.imread(data['A_paths'][0])
                     reconstruct_depth_intrinsics(curr_pred_sfm_depth_metric, rgb_orig, pc_fol, img_name+"-sfmscaled", intrinsics)
+                    reconstruct_depth_intrinsics(curr_pred_depth_metric, rgb_orig, pc_fol, img_name+"-gtscaled", intrinsics)
 
 
                 ##### Save the current RSME
                 all_gt_rsme[:, k*mini_batch_size + s] = gt_depth_rmse
                 all_sfm_rsme[:, k*mini_batch_size + s] = sfm_depth_rmse
-                all_pred_depths.append(curr_pred_depth)
 
-                # ### Debug ###
-                # print(curr_pred_depth_metric)
-                # print()
-                # print(curr_pred_sfm_depth_metric)
-                # print()
 
-                # print("For ground truth alignment:")
-                # print(curr_scale)
-                # print(curr_shift)
-                # print(gt_depth_rmse)
-                # print()
-                # print("For sparse sfm points alignment:")
-                # print(curr_sfm_scale)
-                # print(curr_sfm_shift)
-                # print(sfm_depth_rmse)
-                # exit()
-                # ##################
-
-                # ### Save output hypothesis ###
-                # curr_rbg_name = data['A_paths'][0]
-                # # print(curr_rbg_name)
-                # fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
-
-                # outfname = os.path.join(hypothesis_outdir, fname)
-                # np.save(outfname, np.array(curr_pred_depth_metric))
-
-                # # ## Check output --> debug
-                # # depth = np.load(outfname).astype(np.float64)
-                # # print(depth)
-                # # print(depth.shape)
-                # # print(outfname)
-                # ##############################
+                ### Change to using aligned depth instead
+                all_pred_depths.append(curr_pred_sfm_depth_metric)
+                all_pp_error.append(curr_pp_error)
 
             #######
 
+        #### this is actually per pixel alignment error
+
+
         all_pred_depths = np.stack(all_pred_depths)
+        all_pp_error = np.stack(all_pp_error)
+
+        # if np.sum(valid_sfm_depth) > 0:
+        best_per_pixel = np.min(all_pp_error, axis=0)
+        best_per_pixel[~valid_depth] = 0
+
+
+
+        plt.clf()
+        # plt.rcParams['font.size'] = '4'
+
+        fig, ax = plt.subplots()
+
+        plt.title('Num SfM points: '+str(np.sum(valid_sfm_depth))+ '\nper-pixel min error - post alignement')
+        im = ax.imshow(best_per_pixel, cmap='rainbow')
+        plt.colorbar(im, ax=ax)
+
+        plt.axis("off")
+
+        # plt.tight_layout()
+        plt.savefig(os.path.join(DUMP_DIR, "Image_"+str(i)))
+
+        # print(all_pred_depths.shape)
+        # print(best_per_pixel.shape)
+        # exit()
         
         ### Get the best SfM scale and append this
         sfm_idx_to_take = np.argmin(all_sfm_rsme, axis=-1)[0]
@@ -649,46 +662,38 @@ with torch.no_grad():
         total_gt_rsme += all_gt_rsme[0][idx_to_take]
         num_evaluated += 1       
 
-        
-        ### Save scale/shift init for the image
-        #### Save into numpy array in the dump dir
-        curr_rbg_name = data['A_paths'][0]
-        print(curr_rbg_name)
 
-        fname = curr_rbg_name.split("/")[-1][:-4] + "_sfminit.npy"
 
-        curr_scaleshift = np.array([sfm_image_scales[sfm_idx_to_take], sfm_image_shifts[sfm_idx_to_take]])
-        outfname = os.path.join(scaleshift_outdir, fname)
-        np.save(outfname, curr_scaleshift)
-
-        scaleshift = np.load(outfname).astype(np.float64)
-        print(scaleshift)
-        print(scaleshift.shape)
-        print(outfname)
-        print()
-
-        fname = curr_rbg_name.split("/")[-1][:-4] + "_gtinit.npy"
-
-        curr_scaleshift = np.array([gt_image_scales[idx_to_take], gt_image_shifts[idx_to_take]])
-        outfname = os.path.join(scaleshift_outdir, fname)
-        np.save(outfname, curr_scaleshift)
-
-        scaleshift = np.load(outfname).astype(np.float64)
-        print(scaleshift)
-        print(scaleshift.shape)
-        print(outfname)
-        print()
-
-        #### Scaled output
+        print("===============")
+        print("i")
+        ### Output to file
         for k in range(num_sets):
             for s in range(mini_batch_size):
+
                 curr_depth = all_pred_depths[k*mini_batch_size+s]
 
-                img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
-                if i%10==0  or VISU_ALL:
-                    scaled_depth = curr_depth*curr_scaleshift[0] + curr_scaleshift[1]
-                    reconstruct_depth_intrinsics(scaled_depth, rgb, pc_fol, img_name+"-sfmunifiedscaled", intrinsics)
+                curr_rbg_name = data['A_paths'][0]
+                
+                if not IS_WILD:
+                    fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
+                else:
+                    fname = curr_rbg_name.split("/")[-1][:-5] + "_" + str(k*mini_batch_size+s) + ".npy"
 
+                outfname = os.path.join(hypothesis_outdir, fname)
+
+                # ### Debug
+                # print(depth_orig_size.shape)
+                # print(curr_depth.shape)
+                # exit()
+
+                np.save(outfname, np.array(curr_depth))                
+
+                ## Check output --> debug
+                depth = np.load(outfname).astype(np.float64)
+                print(depth)
+                print(depth.shape)
+                print(outfname)
+                print()
 
 
         if i%10==0  or VISU_ALL:
@@ -753,9 +758,23 @@ print(best_sfm_scales)
 print()
 print("Best SfM Shifts:")
 print(best_sfm_shifts)
+print()
+print()
 
 
+# print("90th percentile error")
+# print(all_npercentile)
+# print(np.median(np.array(all_npercentile)))
+# print(np.min(np.array(all_npercentile)))
+# print(np.mean(np.array(all_npercentile)))
+# print("========")
+# print()
 
+# print("80th percentile error")
+# print(all_tpercentile)
+# print(np.median(np.array(all_tpercentile)))
+# print(np.min(np.array(all_tpercentile)))
+# print(np.mean(np.array(all_tpercentile)))
 
 
 

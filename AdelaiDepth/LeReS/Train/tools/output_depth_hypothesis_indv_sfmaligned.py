@@ -32,39 +32,30 @@ import json
 
 
 parser = argparse.ArgumentParser()
-# parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
-
-# parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
 parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
-# parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch9_step0.pth", help="checkpoint", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0710_sfmaligned_indv_visuall/", type=str)
+parser.add_argument('--dump_dir', default= "dump_1102_scene0758_sfmaligned_indv_visuall/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0781_sfmaligned_indv_visuall/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0708_sfmaligned_indv_visuall/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0738_sfmaligned_indv_visuall/", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0710_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0758_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0781_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0708_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0738_scaleshift_0926big_dp_e56/", type=str)
-
-# parser.add_argument('--dump_dir', default= "dump_1022_room0_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_room1_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_room0_sfmaligned_indv_big/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_room1_sfmaligned_indv_big/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_room2_sfmaligned_indv_big/", type=str)
 
 # parser.add_argument('--dump_dir', default= "dump_1022_room0_scaleshift_0926big_dp_e56_corrected/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1022_room1_scaleshift_0926big_dp_e56_corrected/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56_corrected/", type=str)
-
+# parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56_corrected/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
 ### Scannet
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0708_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
@@ -72,10 +63,7 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 ### Matterport
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_0/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_1/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
-
-### Nerf
-# parser.add_argument('--dataroot', default='/orion/group/NSVF/Synthetic_NeRF/Lego', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
 
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
@@ -87,6 +75,9 @@ parser.add_argument('--cimle_version', default= "enc", type=str)
 parser.add_argument('--import_from_logdir', default=False, type=bool)
 parser.add_argument('--visu_all', default=False, type=bool)
 parser.add_argument('--seed_num', default= 0, type=int)
+
+parser.add_argument('--default_scale', default= 0.5, type=float)
+parser.add_argument('--default_shift', default= 0.0, type=float)
 
 parser.add_argument('--is_nsvf', default=False, type=bool)
 
@@ -344,7 +335,7 @@ def recover_metric_depth(pred, gt):
     mask = (gt > 0.1)
 
     if np.sum(mask) == 0 :
-        return pred, 1.0, 0.0
+        return pred, FLAGS.default_scale, FLAGS.default_shift
 
     gt_mask = gt[mask]
     pred_mask = pred[mask]
@@ -388,6 +379,8 @@ def remap_color_to_depth(depth_img):
 def compute_rmse(prediction, target):
     return np.sqrt(np.mean(np.square(prediction - target)))
 
+def per_pixel_error(prediction, target):
+    return np.sqrt(np.square(prediction - target))
 
 ### Dataset
 
@@ -403,8 +396,8 @@ dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=IS_NSVF, split="test",
 
 
 ### Create output dir for the multiple hypothesis
-# hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
-# if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
+hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
+if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
 
 ##### Also load intrinsics and depth scale for the dataset. #####
 json_fname =  os.path.join(datapath, '../transforms_train.json')
@@ -452,6 +445,9 @@ with torch.no_grad():
 
     best_sfm_scales = []
     best_sfm_shifts = []
+
+    all_npercentile = []
+    all_tpercentile = []
 
     for i, data in enumerate(zcache_dataloader):
 
@@ -504,19 +500,6 @@ with torch.no_grad():
         valid_sfm_depth = sfm_depth_img > 0.5
 
 
-        # ### To Debug ###
-        # img = cv2.imread(data['A_paths'][0], cv2.IMREAD_UNCHANGED)
-
-        # print(img.shape)
-        # print(depth_orig_size.shape)
-        # print()
-        # print(curr_sfm_depth_path)
-        # print(sfm_depth_img.shape)
-        # print(sfm_depth_img[valid_sfm_depth])
-        # print(np.sum(valid_sfm_depth))
-        # exit()
-        # ##########################
-
         ### Iterate over the minibatch
         image_fname = []
 
@@ -537,8 +520,12 @@ with torch.no_grad():
         sfm_image_scales = []
         sfm_image_shifts = []
 
-
         all_pred_depths = []
+        all_pp_error = []
+
+        all_npercentile_error = []
+        all_tpercentile_error = []
+
         for k in range(num_sets):
 
             ## Hard coded d_latent
@@ -569,6 +556,12 @@ with torch.no_grad():
 
                 gt_depth_rmse = compute_rmse(curr_pred_depth_metric[valid_depth], depth_orig_size[valid_depth])
 
+                pixelwise_error = per_pixel_error(curr_pred_depth_metric[valid_depth], depth_orig_size[valid_depth])
+                n_error = np.percentile(pixelwise_error, 90)
+                t_error = np.percentile(pixelwise_error, 80)
+                all_npercentile_error.append(n_error)
+                all_tpercentile_error.append(t_error)
+
 
                 ## SfM depth
                 curr_pred_sfm_depth_metric, curr_sfm_scale, curr_sfm_shift = recover_metric_depth(curr_pred_depth_raw, sfm_depth_img)
@@ -578,10 +571,11 @@ with torch.no_grad():
 
                 sfm_depth_rmse = compute_rmse(curr_pred_sfm_depth_metric[valid_depth], depth_orig_size[valid_depth])                
 
+                curr_pp_error = per_pixel_error(curr_pred_sfm_depth_metric, depth_orig_size)
 
                 if i%10==0  or VISU_ALL:
                     # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
+                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), curr_pred_sfm_depth_metric, cmap='rainbow')
                     image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
                     ### Output point cloud
@@ -589,49 +583,49 @@ with torch.no_grad():
 
                     rgb_orig = cv2.imread(data['A_paths'][0])
                     reconstruct_depth_intrinsics(curr_pred_sfm_depth_metric, rgb_orig, pc_fol, img_name+"-sfmscaled", intrinsics)
+                    reconstruct_depth_intrinsics(curr_pred_depth_metric, rgb_orig, pc_fol, img_name+"-gtscaled", intrinsics)
 
 
                 ##### Save the current RSME
                 all_gt_rsme[:, k*mini_batch_size + s] = gt_depth_rmse
                 all_sfm_rsme[:, k*mini_batch_size + s] = sfm_depth_rmse
-                all_pred_depths.append(curr_pred_depth)
 
-                # ### Debug ###
-                # print(curr_pred_depth_metric)
-                # print()
-                # print(curr_pred_sfm_depth_metric)
-                # print()
 
-                # print("For ground truth alignment:")
-                # print(curr_scale)
-                # print(curr_shift)
-                # print(gt_depth_rmse)
-                # print()
-                # print("For sparse sfm points alignment:")
-                # print(curr_sfm_scale)
-                # print(curr_sfm_shift)
-                # print(sfm_depth_rmse)
-                # exit()
-                # ##################
-
-                # ### Save output hypothesis ###
-                # curr_rbg_name = data['A_paths'][0]
-                # # print(curr_rbg_name)
-                # fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
-
-                # outfname = os.path.join(hypothesis_outdir, fname)
-                # np.save(outfname, np.array(curr_pred_depth_metric))
-
-                # # ## Check output --> debug
-                # # depth = np.load(outfname).astype(np.float64)
-                # # print(depth)
-                # # print(depth.shape)
-                # # print(outfname)
-                # ##############################
+                ### Change to using aligned depth instead
+                all_pred_depths.append(curr_pred_sfm_depth_metric)
+                all_pp_error.append(curr_pp_error)
 
             #######
 
+        #### this is actually per pixel alignment error
+
+
         all_pred_depths = np.stack(all_pred_depths)
+        all_pp_error = np.stack(all_pp_error)
+
+        # if np.sum(valid_sfm_depth) > 0:
+        best_per_pixel = np.min(all_pp_error, axis=0)
+        best_per_pixel[~valid_depth] = 0
+
+
+
+        plt.clf()
+        # plt.rcParams['font.size'] = '4'
+
+        fig, ax = plt.subplots()
+
+        plt.title('Num SfM points: '+str(np.sum(valid_sfm_depth))+ '\nper-pixel min error - post alignement')
+        im = ax.imshow(best_per_pixel, cmap='rainbow')
+        plt.colorbar(im, ax=ax)
+
+        plt.axis("off")
+
+        # plt.tight_layout()
+        plt.savefig(os.path.join(DUMP_DIR, "Image_"+str(i)))
+
+        # print(all_pred_depths.shape)
+        # print(best_per_pixel.shape)
+        # exit()
         
         ### Get the best SfM scale and append this
         sfm_idx_to_take = np.argmin(all_sfm_rsme, axis=-1)[0]
@@ -649,46 +643,181 @@ with torch.no_grad():
         total_gt_rsme += all_gt_rsme[0][idx_to_take]
         num_evaluated += 1       
 
+        # ### 20th and 80th percentile
+        # best_n_percentile = np.array(all_npercentile_error)[idx_to_take]
+        # best_t_percentile = np.array(all_tpercentile_error)[idx_to_take]
+        # all_npercentile.append(best_n_percentile)
+        # all_tpercentile.append(best_t_percentile)
+
         
-        ### Save scale/shift init for the image
-        #### Save into numpy array in the dump dir
-        curr_rbg_name = data['A_paths'][0]
-        print(curr_rbg_name)
+        # ### Save scale/shift init for the image
+        # #### Save into numpy array in the dump dir
+        # curr_rbg_name = data['A_paths'][0]
+        # # print(curr_rbg_name)
 
-        fname = curr_rbg_name.split("/")[-1][:-4] + "_sfminit.npy"
+        # fname = curr_rbg_name.split("/")[-1][:-4] + "_sfminit.npy"
 
-        curr_scaleshift = np.array([sfm_image_scales[sfm_idx_to_take], sfm_image_shifts[sfm_idx_to_take]])
-        outfname = os.path.join(scaleshift_outdir, fname)
-        np.save(outfname, curr_scaleshift)
+        # curr_scaleshift = np.array([sfm_image_scales[sfm_idx_to_take], sfm_image_shifts[sfm_idx_to_take]])
+        # outfname = os.path.join(scaleshift_outdir, fname)
+        # np.save(outfname, curr_scaleshift)
 
-        scaleshift = np.load(outfname).astype(np.float64)
-        print(scaleshift)
-        print(scaleshift.shape)
-        print(outfname)
-        print()
+        # scaleshift = np.load(outfname).astype(np.float64)
+        # # print(scaleshift)
+        # # print(scaleshift.shape)
+        # # print(outfname)
+        # # print()
 
-        fname = curr_rbg_name.split("/")[-1][:-4] + "_gtinit.npy"
+        # fname = curr_rbg_name.split("/")[-1][:-4] + "_gtinit.npy"
 
-        curr_scaleshift = np.array([gt_image_scales[idx_to_take], gt_image_shifts[idx_to_take]])
-        outfname = os.path.join(scaleshift_outdir, fname)
-        np.save(outfname, curr_scaleshift)
+        # curr_scaleshift = np.array([gt_image_scales[idx_to_take], gt_image_shifts[idx_to_take]])
+        # outfname = os.path.join(scaleshift_outdir, fname)
+        # np.save(outfname, curr_scaleshift)
 
-        scaleshift = np.load(outfname).astype(np.float64)
-        print(scaleshift)
-        print(scaleshift.shape)
-        print(outfname)
-        print()
+        # scaleshift = np.load(outfname).astype(np.float64)
+        # print(scaleshift)
+        # print(scaleshift.shape)
+        # print(outfname)
+        # print()
 
-        #### Scaled output
+        # ###########################
+        # if np.sum(valid_sfm_depth) > 0:
+        #     idx_selected = sfm_idx_to_take
+        #     # idx_selected = idx_to_take
+
+        #     print(idx_selected)
+        #     ## Output in matplotlib
+        #     plt.clf()
+        #     plt.rcParams['font.size'] = '4'
+
+        #     fig, axs = plt.subplots(4, 2)
+        #     fig.suptitle('Num SfM points: '+str(np.sum(valid_sfm_depth)))
+
+        #     ### SfM points
+        #     axs[0, 0].scatter(all_pred_depths[idx_selected][valid_depth], depth_orig_size[valid_depth], s=0.2, c="g")
+        #     axs[0, 0].scatter(all_pred_depths[idx_selected][valid_sfm_depth], sfm_depth_img[valid_sfm_depth], s=4.0, c="b")
+
+        #     # axs[0].set_title('Num SfM points: '+str(np.sum(valid_sfm_depth)))
+        #     axs[0, 0].set(xlabel='Best hypothesis prediction')
+        #     axs[0, 0].set(ylabel='SfM/GT points')
+
+
+        #     ### Draw line that 
+        #     axs[0, 0].axline((0.0, sfm_image_shifts[idx_selected]), (1.0, sfm_image_scales[idx_selected]+sfm_image_shifts[idx_selected]), c='b')
+        #     axs[0, 0].axline((0.0, gt_image_shifts[idx_selected]), (1.0, gt_image_scales[idx_selected]+gt_image_shifts[idx_selected]), c='r')
+        #     axs[0, 0].set_xlim(np.min(all_pred_depths[idx_selected][valid_depth])-0.01, np.max(all_pred_depths[idx_selected][valid_depth])+0.01)
+        #     axs[0, 0].set_ylim(np.min(depth_orig_size[valid_depth])-0.01, np.max(depth_orig_size[valid_depth])+0.01)
+
+
+        #     ### SfM points
+        #     axs[0, 1].scatter(all_pred_depths[idx_selected][valid_sfm_depth], sfm_depth_img[valid_sfm_depth], s=4.0, c="b")
+        #     axs[0, 1].set(xlabel='Best hypothesis prediction')
+        #     # axs[1].set(ylabel='SfM points')
+
+
+        #     ### Draw line that 
+        #     axs[0, 1].axline((0.0, sfm_image_shifts[idx_selected]), (1.0, sfm_image_scales[idx_selected]+sfm_image_shifts[idx_selected]), c='b')
+        #     axs[0, 1].set_xlim(np.min(all_pred_depths[idx_selected][valid_sfm_depth])-0.01, np.max(all_pred_depths[idx_selected][valid_sfm_depth])+0.01)
+        #     axs[0, 1].set_ylim(np.min(sfm_depth_img[valid_sfm_depth])-0.01, np.max(sfm_depth_img[valid_sfm_depth])+0.01)
+
+
+        #     #### Plot GT depth map and LeReS raw output
+        #     axs[1, 0].set_title("GT depth map normalized")
+        #     im3 = axs[1, 0].imshow(depth_orig_size, cmap='rainbow', vmin=0, vmax=10)
+        #     axs[1, 0].get_xaxis().set_visible(False)
+        #     axs[1, 0].get_yaxis().set_visible(False)
+        #     plt.colorbar(im3, ax=axs[1, 0])
+
+        #     axs[1, 1].set_title("Raw LeReS output normalized")
+        #     im4 = axs[1, 1].imshow(all_pred_depths[idx_selected], cmap='rainbow', vmin=0, vmax=10)
+        #     axs[1, 1].get_xaxis().set_visible(False)
+        #     axs[1, 1].get_yaxis().set_visible(False)
+        #     plt.colorbar(im4, ax=axs[1, 1])
+
+        #     #### Corrected depth
+        #     corrected_depth_gt = all_pred_depths[idx_selected]*gt_image_scales[idx_selected] + gt_image_shifts[idx_selected]
+        #     corrected_depth_sfm = all_pred_depths[idx_selected]*sfm_image_scales[idx_selected] + sfm_image_shifts[idx_selected]
+
+
+        #     #### Plot GT depth map and LeReS raw output
+        #     axs[2, 0].set_title("Aligned with GT")
+        #     im5 = axs[2, 0].imshow(corrected_depth_gt, cmap='rainbow', vmin=0, vmax=10)
+        #     axs[2, 0].get_xaxis().set_visible(False)
+        #     axs[2, 0].get_yaxis().set_visible(False)
+        #     plt.colorbar(im5, ax=axs[2, 0])
+
+        #     axs[2, 1].set_title("Aligned with SfM")
+        #     im6 = axs[2, 1].imshow(corrected_depth_sfm, cmap='rainbow', vmin=0, vmax=10)
+        #     axs[2, 1].get_xaxis().set_visible(False)
+        #     axs[2, 1].get_yaxis().set_visible(False)
+        #     plt.colorbar(im6, ax=axs[2, 1])
+
+
+            
+        #     corrected_depth_sfm[~valid_depth] = 0
+        #     corrected_depth_sfm[~valid_depth] = 0
+
+        #     error_gt = per_pixel_error(corrected_depth_gt, depth_orig_size)
+        #     error_sfm = per_pixel_error(corrected_depth_sfm, depth_orig_size)
+
+        #     axs[3, 0].set_title("Residual best alignment scale/shift with GT")
+        #     im1 = axs[3, 0].imshow(error_gt, cmap='rainbow')
+        #     plt.colorbar(im1, ax=axs[3, 0])
+
+        #     axs[3, 0].get_xaxis().set_visible(False)
+        #     axs[3, 0].get_yaxis().set_visible(False)
+
+        #     axs[3, 1].set_title("Residual best alignment scale/shift with SfM points")
+        #     im2 = axs[3, 1].imshow(error_sfm, cmap='rainbow')
+        #     plt.colorbar(im2, ax=axs[3, 1])
+
+        #     axs[3, 1].get_xaxis().set_visible(False)
+        #     axs[3, 1].get_yaxis().set_visible(False)
+
+        #     # plt.tight_layout()
+        #     plt.savefig(os.path.join(DUMP_DIR, "Image_"+str(i)), dpi = 200)
+            # exit()
+
+        ##########################
+
+
+        # #### Scaled output
+        # for k in range(num_sets):
+        #     for s in range(mini_batch_size):
+        #         curr_depth = all_pred_depths[k*mini_batch_size+s]
+
+        #         img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
+        #         if i%10==0  or VISU_ALL:
+        #             scaled_depth = curr_depth*curr_scaleshift[0] + curr_scaleshift[1]
+        #             rgb_resized = cv2.resize(rgb, (scaled_depth.shape[1], scaled_depth.shape[0]))
+        #             reconstruct_depth_intrinsics(scaled_depth, rgb_resized, pc_fol, img_name+"-sfmunifiedscaled", intrinsics)
+
+
+        print("===============")
+        print("i")
+        ### Output to file
         for k in range(num_sets):
             for s in range(mini_batch_size):
+
                 curr_depth = all_pred_depths[k*mini_batch_size+s]
 
-                img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
-                if i%10==0  or VISU_ALL:
-                    scaled_depth = curr_depth*curr_scaleshift[0] + curr_scaleshift[1]
-                    reconstruct_depth_intrinsics(scaled_depth, rgb, pc_fol, img_name+"-sfmunifiedscaled", intrinsics)
+                curr_rbg_name = data['A_paths'][0]
+                fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
 
+                outfname = os.path.join(hypothesis_outdir, fname)
+
+                # ### Debug
+                # print(depth_orig_size.shape)
+                # print(curr_depth.shape)
+                # exit()
+
+                np.save(outfname, np.array(curr_depth))                
+
+                ## Check output --> debug
+                depth = np.load(outfname).astype(np.float64)
+                print(depth)
+                print(depth.shape)
+                print(outfname)
+                print()
 
 
         if i%10==0  or VISU_ALL:
@@ -753,9 +882,23 @@ print(best_sfm_scales)
 print()
 print("Best SfM Shifts:")
 print(best_sfm_shifts)
+print()
+print()
 
 
+# print("90th percentile error")
+# print(all_npercentile)
+# print(np.median(np.array(all_npercentile)))
+# print(np.min(np.array(all_npercentile)))
+# print(np.mean(np.array(all_npercentile)))
+# print("========")
+# print()
 
+# print("80th percentile error")
+# print(all_tpercentile)
+# print(np.median(np.array(all_tpercentile)))
+# print(np.min(np.array(all_tpercentile)))
+# print(np.mean(np.array(all_tpercentile)))
 
 
 

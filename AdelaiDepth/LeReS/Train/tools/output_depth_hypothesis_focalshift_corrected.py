@@ -1,7 +1,7 @@
 '''
 Mikaela Uy
-1021    : Quantatively evaluate scannet scenes to pick the best prior model
-        : Also find the scale/shift init for the nerf training 
+Loading focal shift model from pretrained LeReS and correcting the output
+New script as of Oct. 29
 '''
 import math
 import os, sys
@@ -31,32 +31,32 @@ import imageio
 import json
 
 
+### For 3D reconstruction
+from lib.test_utils import refine_focal, refine_shift
+from lib.spvcnn_classsification import SPVCNN_CLASSIFICATION
+
+from scipy.interpolate import griddata
+
+
 parser = argparse.ArgumentParser()
-# parser.add_argument("--logdir", default="log_0726_lrfixed_001/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch104_step39375.pth", help="checkpoint", type=str)
 
-# parser.add_argument("--logdir", default="log_0825_encv2_noaug_noshuffle_s12/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
-
+##### Use this, seems to be the best at the moment
 parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
-# parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch9_step0.pth", help="checkpoint", type=str)
+parser.add_argument('--dump_dir', default= "dump_1029_scene0758_debug7/", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0710_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0758_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0781_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0708_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_scene0738_scaleshift_0926big_dp_e56/", type=str)
+#### Scannet
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated_bigsubset_dataparallel", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_1022_room0_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_room1_scaleshift_0926big_dp_e56/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56/", type=str)
-
-# parser.add_argument('--dump_dir', default= "dump_1022_room0_scaleshift_0926big_dp_e56_corrected/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1022_room1_scaleshift_0926big_dp_e56_corrected/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1022_room2_scaleshift_0926big_dp_e56_corrected/", type=str)
+#### Matterport
+# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room0_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room1_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room2_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
 
 
 ### For the dataset
@@ -64,7 +64,7 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
 ### Scannet
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0708_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
@@ -72,15 +72,13 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 ### Matterport
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_0/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_1/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
 
-### Nerf
-# parser.add_argument('--dataroot', default='/orion/group/NSVF/Synthetic_NeRF/Lego', help='Root dir for dataset')
 
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
 parser.add_argument('--num_samples', default= 20, type=int)
-parser.add_argument('--rescaled', default=False, type=bool)
+parser.add_argument('--rescaled', default=True, type=bool)
 
 parser.add_argument('--ada_version', default= "v2", type=str)
 parser.add_argument('--cimle_version', default= "enc", type=str)
@@ -88,8 +86,8 @@ parser.add_argument('--import_from_logdir', default=False, type=bool)
 parser.add_argument('--visu_all', default=False, type=bool)
 parser.add_argument('--seed_num', default= 0, type=int)
 
-parser.add_argument('--is_nsvf', default=False, type=bool)
-
+### Pretrained LeReS model --> get focal and shift models
+parser.add_argument("--leres_pretrained", default="../Minist_Test/res101.pth", help="checkpoint", type=str)
 
 FLAGS = parser.parse_args()
 LOG_DIR = FLAGS.logdir
@@ -101,8 +99,6 @@ SEED_NUM = FLAGS.seed_num
 torch.manual_seed(SEED_NUM)
 np.random.seed(SEED_NUM)
 random.seed(SEED_NUM)
-
-IS_NSVF = FLAGS.is_nsvf
 
 #### Import from LOG_DIR files or from global files
 if IMPORT_FROM_LOGDIR:
@@ -193,6 +189,77 @@ else:
 mean0, var0, mean1, var1, mean2, var2, mean3, var3 = load_mean_var_adain(os.path.join(LOG_DIR, "mean_var_adain.npy"), torch.device("cuda"))
 model.set_mean_var_shifts(mean0, var0, mean1, var1, mean2, var2, mean3, var3)
 print("Initialized adain mean and var.")
+
+
+######################################################
+### For scale and focal models from pretrained LeReS
+######################################################
+def make_shift_focallength_models():
+    shift_model = SPVCNN_CLASSIFICATION(input_channel=3,
+                                        num_classes=1,
+                                        cr=1.0,
+                                        pres=0.01,
+                                        vres=0.01
+                                        )
+    focal_model = SPVCNN_CLASSIFICATION(input_channel=5,
+                                        num_classes=1,
+                                        cr=1.0,
+                                        pres=0.01,
+                                        vres=0.01
+                                        )
+    shift_model.eval()
+    focal_model.eval()
+    return shift_model, focal_model
+
+def reconstruct3D_from_depth(rgb, pred_depth, shift_model, focal_model, init_focal=None):
+    cam_u0 = rgb.shape[1] / 2.0
+    cam_v0 = rgb.shape[0] / 2.0
+
+    pred_depth_norm = pred_depth - pred_depth.min() + 0.5
+    dmax = np.percentile(pred_depth_norm, 98)
+    pred_depth_norm = pred_depth_norm / dmax
+
+    # proposed focal length, FOV is 60', Note that 60~80' are acceptable.
+    if init_focal is None:
+        proposed_scaled_focal = (rgb.shape[0] // 2 / np.tan((60/2.0)*np.pi/180))
+
+    else:
+        proposed_scaled_focal = init_focal
+
+    # recover focal
+    focal_scale_1 = refine_focal(pred_depth_norm, proposed_scaled_focal, focal_model, u0=cam_u0, v0=cam_v0)
+    predicted_focal_1 = proposed_scaled_focal / focal_scale_1.item()
+
+    # recover shift
+    shift_1 = refine_shift(pred_depth_norm, shift_model, predicted_focal_1, cam_u0, cam_v0)
+    shift_1 = shift_1 if shift_1.item() < 0.6 else torch.tensor([0.6])
+
+    depth_scale_1 = pred_depth_norm - shift_1.item()
+
+    # recover focal
+    focal_scale_2 = refine_focal(depth_scale_1, predicted_focal_1, focal_model, u0=cam_u0, v0=cam_v0)
+    predicted_focal_2 = predicted_focal_1 / focal_scale_2.item()
+
+    return shift_1, predicted_focal_2, depth_scale_1, proposed_scaled_focal, dmax
+
+
+
+### Pretrained LeReS model on monocular depth estimation ###
+LERES_CKPT_FILE = FLAGS.leres_pretrained
+print("Loading pretrained LeReS model " + LERES_CKPT_FILE)
+checkpoint = torch.load(LERES_CKPT_FILE)
+
+shift_model, focal_model = make_shift_focallength_models()
+shift_model.load_state_dict(strip_prefix_if_present(checkpoint['shift_model'], 'module.'),
+                                    strict=True)
+focal_model.load_state_dict(strip_prefix_if_present(checkpoint['focal_model'], 'module.'),
+                                    strict=True)
+
+shift_model.cuda()
+focal_model.cuda()
+print("Shift and Focal model loaded.")
+######################################################
+
 
 ### Quantitative Metrics ####
 def evaluate_rel_err(pred, gt, mask_invalid=None, scale=10.0 ):
@@ -330,21 +397,23 @@ def transform_shift_scale(depth, valid_threshold=-1e-8, max_threshold=1e8):
     return gt_trans
 
 ### Tranform pred to fit the ground truth
-
-#### Fit with regularization ####
 def recover_metric_depth(pred, gt):
     if type(pred).__module__ == torch.__name__:
         pred = pred.cpu().numpy()
     if type(gt).__module__ == torch.__name__:
         gt = gt.cpu().numpy()
+
+    # gt = np.expand_dims(all_pred_depths, axis=0)
+    # pred = np.expand_dims(all_pred_depths, axis=0)
+
     gt = gt.squeeze()
     pred = pred.squeeze()
     
-
     mask = (gt > 0.1)
 
     if np.sum(mask) == 0 :
         return pred, 1.0, 0.0
+
 
     gt_mask = gt[mask]
     pred_mask = pred[mask]
@@ -354,7 +423,7 @@ def recover_metric_depth(pred, gt):
 
     # pred_metric[~mask] = 0.
 
-    return pred_metric, a, b
+    return pred_metric, a, 
 
 #### Image transform #####
 def scale_torch(img):
@@ -384,27 +453,15 @@ def remap_color_to_depth(depth_img):
     return depth    
 ##############################
 
-### Compute RSME ###
-def compute_rmse(prediction, target):
-    return np.sqrt(np.mean(np.square(prediction - target)))
-
-
-### Dataset
-
 ### Dataloader
-# datapath = os.path.join(FLAGS.dataroot, FLAGS.scenename)
 datapath = FLAGS.dataroot
 
-if IS_NSVF:
-    dataset_name = "nsvf"
-else:
-    dataset_name = "scannet"
-dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=IS_NSVF, split="test", data_aug=False)
-
+dataset_name = "scannet"
+dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=False, split="test", data_aug=False)
 
 ### Create output dir for the multiple hypothesis
-# hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
-# if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
+hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
+if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
 
 ##### Also load intrinsics and depth scale for the dataset. #####
 json_fname =  os.path.join(datapath, '../transforms_train.json')
@@ -413,10 +470,6 @@ with open(json_fname, 'r') as fp:
 
 depth_scaling_factor = float(meta['depth_scaling_factor'])
 #################################################################
-
-scaleshift_outdir = os.path.join(FLAGS.dataroot, "scale_shift_inits", DUMP_DIR)
-if not os.path.exists(scaleshift_outdir): os.makedirs(scaleshift_outdir)
-
 
 #### Evaluation ######
 zcache_dataloader = torch.utils.data.DataLoader(
@@ -432,27 +485,12 @@ true_num_samples = num_sets*mini_batch_size # just take the floor
 
 
 ### For quantitative evaluation
-total_gt_rsme = 0.0
-total_sfm_rsme = 0.01
+total_err_absRel = 0.0
 num_evaluated = 0
 
 model.eval()
 
-### Focal length for scannet
-if not IS_NSVF:
-    f = 577.870605 ### this focal length is not exactly right for DDP images, but it doesn't matter here
-else:
-    ### Check this for other models
-    f = 1111.111
-
 with torch.no_grad():
-
-    all_scales = []
-    all_shifts = []
-
-    best_sfm_scales = []
-    best_sfm_shifts = []
-
     for i, data in enumerate(zcache_dataloader):
 
         batch_size = data['rgb'].shape[0]
@@ -465,57 +503,48 @@ with torch.no_grad():
         data['rgb'] = data['rgb'].unsqueeze(1).repeat(1,mini_batch_size, 1, 1, 1)
         data['rgb'] = data['rgb'].view(-1, C, H, W)
 
+        gt_depth = data['gt_depth'].cuda()
 
-        rgb = torch.clone(data['rgb'][0]).permute(1, 2, 0).to("cpu").detach().numpy() 
-        rgb = rgb[:, :, ::-1] ## dataloader is bgr
-        rgb = 255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())
-        rgb = np.array(rgb, np.int)
-
-
-        ### Raw gt depth ###
-        curr_depth_path = data['B_paths'][0]
-
-        depth_img = cv2.imread(curr_depth_path, cv2.IMREAD_UNCHANGED).astype(np.float64)
-        valid_depth = depth_img > 0.5
-
-        if not IS_NSVF:
-            ## Scannet depth
-            depth_img = (depth_img/depth_scaling_factor).astype(np.float32)
+        if len(gt_depth.shape) == 3:
+            curr_gt = gt_depth[0]
         else:
-            depth_img = remap_color_to_depth(depth_img)
-            depth_img = depth_img.astype(float)
+            curr_gt = gt_depth
 
-        orig_shape = depth_img.shape
+        curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
+        curr_gt = cv2.resize(curr_gt, (448, 448), interpolation=cv2.INTER_NEAREST)
 
-        ### For computing scale and shift
-        depth_orig_size = depth_img.copy()
-        depth_img = cv2.resize(depth_img, (448, 448), interpolation=cv2.INTER_NEAREST)
+        # rgb = torch.clone(data['rgb'][0]).permute(1, 2, 0).to("cpu").detach().numpy() 
+        # rgb = rgb[:, :, ::-1] ## dataloader is bgr
+        # rgb = 255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())
+        # rgb = np.array(rgb, np.int)
 
-        #### Get image focal length
-        frame = meta['frames'][i]
-        fx, fy, cx, cy = frame['fx'], frame['fy'], frame['cx'], frame['cy']
-        intrinsics = np.array((fx, fy, cx, cy))
-        ###########################        
+        ### Raw rbg and gt depth ###
+        curr_depth_path = data['B_paths'][0]
+        depth_img = np.array(imageio.imread(curr_depth_path))
 
-        ### Load sparse SfM depth
+        ## Scannet depth
+        depth_img = depth_img.astype(float)/depth_scaling_factor
+        rgb = cv2.imread(data['A_paths'][0])
+
         curr_sfm_depth_path = data['C_paths'][0]
         sfm_depth_img = cv2.imread(curr_sfm_depth_path, cv2.IMREAD_UNCHANGED).astype(np.float64)
         sfm_depth_img = (sfm_depth_img/depth_scaling_factor).astype(np.float32)
         valid_sfm_depth = sfm_depth_img > 0.5
 
-
-        # ### To Debug ###
-        # img = cv2.imread(data['A_paths'][0], cv2.IMREAD_UNCHANGED)
-
-        # print(img.shape)
-        # print(depth_orig_size.shape)
-        # print()
-        # print(curr_sfm_depth_path)
+        orig_shape = depth_img.shape
+        # print(depth_img)
+        # print(depth_img.shape)
         # print(sfm_depth_img.shape)
-        # print(sfm_depth_img[valid_sfm_depth])
-        # print(np.sum(valid_sfm_depth))
+        # print(rgb.shape)
         # exit()
-        # ##########################
+
+        frame = meta['frames'][i]
+        fx, fy, cx, cy = frame['fx'], frame['fy'], frame['cx'], frame['cy']
+        intrinsics = np.array((fx, fy, cx, cy))
+
+
+        # depth_img = cv2.resize(depth_img, (448, 448), interpolation=cv2.INTER_NEAREST)
+        # print(depth_img)
 
         ### Iterate over the minibatch
         image_fname = []
@@ -527,18 +556,10 @@ with torch.no_grad():
             img_name = "image" + str(i) + "_gt"
             reconstruct_depth_intrinsics(depth_img, rgb, gt_fol, img_name, intrinsics)
 
-
-        all_gt_rsme = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_sfm_rsme = np.zeros((batch_size, mini_batch_size*num_sets))
-
-        gt_image_scales = []
-        gt_image_shifts = []
-
-        sfm_image_scales = []
-        sfm_image_shifts = []
-
+        all_err_absRel = np.zeros((batch_size, mini_batch_size*num_sets))
 
         all_pred_depths = []
+
         for k in range(num_sets):
 
             ## Hard coded d_latent
@@ -552,144 +573,95 @@ with torch.no_grad():
                 curr_pred_depth = curr_pred_depth.to("cpu").detach().numpy().squeeze() 
 
                 pred_depth_ori = curr_pred_depth
-                # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
+
+                ### Check the interpolation method for this resize function
+                pred_depth_ori = cv2.resize(curr_pred_depth, (orig_shape[1], orig_shape[0]))
 
                 img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
                 
-
-                ### Resize first then compute for error
-                curr_pred_depth_raw = cv2.resize(curr_pred_depth, (depth_orig_size.shape[1], depth_orig_size.shape[0])) ### check this resize function 
-
-                ### Align prediction and compute qualitative results
-                ## Raw depth
-                curr_pred_depth_metric, curr_scale, curr_shift = recover_metric_depth(curr_pred_depth_raw, depth_orig_size)
-
-                gt_image_scales.append(curr_scale)
-                gt_image_shifts.append(curr_shift)
-
-                gt_depth_rmse = compute_rmse(curr_pred_depth_metric[valid_depth], depth_orig_size[valid_depth])
-
-
-                ## SfM depth
-                curr_pred_sfm_depth_metric, curr_sfm_scale, curr_sfm_shift = recover_metric_depth(curr_pred_depth_raw, sfm_depth_img)
-
-                sfm_image_scales.append(curr_sfm_scale)
-                sfm_image_shifts.append(curr_sfm_shift)
-
-                sfm_depth_rmse = compute_rmse(curr_pred_sfm_depth_metric[valid_depth], depth_orig_size[valid_depth])                
-
-
                 if i%10==0  or VISU_ALL:
                     # save depth
                     plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
                     image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
                     ### Output point cloud
-                    reconstruct_depth_intrinsics(curr_pred_depth, rgb, pc_fol, img_name, intrinsics)
+                    reconstruct_depth_intrinsics(pred_depth_ori, rgb, pc_fol, img_name+"-rawleres", intrinsics)
 
-                    rgb_orig = cv2.imread(data['A_paths'][0])
-                    reconstruct_depth_intrinsics(curr_pred_sfm_depth_metric, rgb_orig, pc_fol, img_name+"-sfmscaled", intrinsics)
+                    curr_pred_depth_gtscaled = recover_metric_depth(pred_depth_ori, depth_img)
+                    reconstruct_depth_intrinsics(curr_pred_depth_gtscaled, rgb, pc_fol, img_name+"-gtscaled", intrinsics)
 
+                    curr_pred_sfm_depth_metric = recover_metric_depth(pred_depth_ori, sfm_depth_img)
+                    reconstruct_depth_intrinsics(curr_pred_sfm_depth_metric, rgb, pc_fol, img_name+"-sfmscaled", intrinsics)
 
-                ##### Save the current RSME
-                all_gt_rsme[:, k*mini_batch_size + s] = gt_depth_rmse
-                all_sfm_rsme[:, k*mini_batch_size + s] = sfm_depth_rmse
+                    # ### Correct with scale/shift
+                    # shift, focal_length, depth_scaleinv, proposed_scaled_focal, scale_factor = reconstruct3D_from_depth(rgb, pred_depth_ori,
+                    #                                                        shift_model, focal_model, 0.5*(intrinsics[0]+intrinsics[1]))
+
+                    # dmax = np.percentile(pred_depth_ori, 98)
+                    # pred_depth_ori = pred_depth_ori / dmax
+                    # reconstruct_depth(pred_depth_ori, rgb, pc_fol, img_name+'-focalshiftcorrected-initfocal-raw', focal=proposed_scaled_focal)
+
+                    # reconstruct_depth(curr_pred_depth_gtscaled, rgb, pc_fol, img_name+'-focalshiftcorrected-initfocal', focal=proposed_scaled_focal)
+
+                    # print(focal_length)
+                    # depth_scaleinv = depth_scaleinv*scale_factor + pred_depth_ori.min()
+
+                    # reconstruct_depth(depth_scaleinv, rgb, pc_fol, img_name+'-focalshiftcorrected-raw', focal=focal_length)
+
+                    # curr_pred_shifted = recover_metric_depth(depth_scaleinv, depth_img)
+
+                    # reconstruct_depth_intrinsics(depth_scaleinv, rgb, pc_fol, img_name+'-focalshiftcorrected-origfocal', intrinsics)
+
+                    # reconstruct_depth_intrinsics(curr_pred_shifted, rgb, pc_fol, img_name+'-focalshiftcorrected-gtscaled-origfocal', intrinsics)
+                    # reconstruct_depth(curr_pred_shifted, rgb, pc_fol, img_name+'-focalshiftcorrected-gtscaled-pred_focal', focal_length)
+
+                    # exit()
+                    # # pointcloud = reconstruct_3D(curr_pred_shifted, f=focal_length)
+
+                    # if i>=2:
+                    #     exit()
+
                 all_pred_depths.append(curr_pred_depth)
-
-                # ### Debug ###
-                # print(curr_pred_depth_metric)
-                # print()
-                # print(curr_pred_sfm_depth_metric)
-                # print()
-
-                # print("For ground truth alignment:")
-                # print(curr_scale)
-                # print(curr_shift)
-                # print(gt_depth_rmse)
-                # print()
-                # print("For sparse sfm points alignment:")
-                # print(curr_sfm_scale)
-                # print(curr_sfm_shift)
-                # print(sfm_depth_rmse)
-                # exit()
-                # ##################
-
-                # ### Save output hypothesis ###
-                # curr_rbg_name = data['A_paths'][0]
-                # # print(curr_rbg_name)
-                # fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
-
-                # outfname = os.path.join(hypothesis_outdir, fname)
-                # np.save(outfname, np.array(curr_pred_depth_metric))
-
-                # # ## Check output --> debug
-                # # depth = np.load(outfname).astype(np.float64)
-                # # print(depth)
-                # # print(depth.shape)
-                # # print(outfname)
-                # ##############################
-
             #######
 
+        ### Find scale and fit
         all_pred_depths = np.stack(all_pred_depths)
-        
-        ### Get the best SfM scale and append this
-        sfm_idx_to_take = np.argmin(all_sfm_rsme, axis=-1)[0]
-        best_sfm_scales.append(sfm_image_scales[sfm_idx_to_take])
-        best_sfm_shifts.append(sfm_image_shifts[sfm_idx_to_take])
-        total_sfm_rsme += all_sfm_rsme[0][sfm_idx_to_take]
+        depth_img = np.repeat(np.expand_dims(depth_img, axis=0), NUM_SAMPLE, axis=0)
 
-        ### Gt mean scales and shifts
-        gt_image_scales = np.array(gt_image_scales)
-        gt_image_shifts = np.array(gt_image_shifts)
-        all_scales.append(np.mean(gt_image_scales))
-        all_shifts.append(np.mean(gt_image_shifts)) 
+        # prev_shape = all_pred_depths.shape
 
-        idx_to_take = np.argmin(all_gt_rsme, axis=-1)[0]
-        total_gt_rsme += all_gt_rsme[0][idx_to_take]
-        num_evaluated += 1       
+        # all_pred_depths = all_pred_depths.flatten()
+        # depth_img = depth_img.flatten()
 
-        
-        ### Save scale/shift init for the image
-        #### Save into numpy array in the dump dir
-        curr_rbg_name = data['A_paths'][0]
-        print(curr_rbg_name)
+        curr_pred_depth_raw = all_pred_depths
 
-        fname = curr_rbg_name.split("/")[-1][:-4] + "_sfminit.npy"
+        # curr_pred_depth_raw = curr_pred_depth_raw.reshape(prev_shape)
+        # depth_img = depth_img.reshape(prev_shape)
 
-        curr_scaleshift = np.array([sfm_image_scales[sfm_idx_to_take], sfm_image_shifts[sfm_idx_to_take]])
-        outfname = os.path.join(scaleshift_outdir, fname)
-        np.save(outfname, curr_scaleshift)
-
-        scaleshift = np.load(outfname).astype(np.float64)
-        print(scaleshift)
-        print(scaleshift.shape)
-        print(outfname)
-        print()
-
-        fname = curr_rbg_name.split("/")[-1][:-4] + "_gtinit.npy"
-
-        curr_scaleshift = np.array([gt_image_scales[idx_to_take], gt_image_shifts[idx_to_take]])
-        outfname = os.path.join(scaleshift_outdir, fname)
-        np.save(outfname, curr_scaleshift)
-
-        scaleshift = np.load(outfname).astype(np.float64)
-        print(scaleshift)
-        print(scaleshift.shape)
-        print(outfname)
-        print()
-
-        #### Scaled output
+        print("===============")
+        print("i")
+        ### Output to file
         for k in range(num_sets):
             for s in range(mini_batch_size):
-                curr_depth = all_pred_depths[k*mini_batch_size+s]
 
-                img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
-                if i%10==0  or VISU_ALL:
-                    scaled_depth = curr_depth*curr_scaleshift[0] + curr_scaleshift[1]
-                    reconstruct_depth_intrinsics(scaled_depth, rgb, pc_fol, img_name+"-sfmunifiedscaled", intrinsics)
+                curr_depth = curr_pred_depth_raw[k*mini_batch_size+s]
 
+                ### Resize --> check the opencv function
+                # curr_depth = cv2.resize(curr_depth, orig_shape) ### check this resize function 
+                curr_depth = cv2.resize(curr_depth, (orig_shape[1], orig_shape[0])) ### check this resize function 
 
+                curr_rbg_name = data['A_paths'][0]
+                fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
+
+                outfname = os.path.join(hypothesis_outdir, fname)
+                np.save(outfname, np.array(curr_depth))                
+
+                ## Check output --> debug
+                depth = np.load(outfname).astype(np.float64)
+                print(depth)
+                print(depth.shape)
+                print(outfname)
+                print()
 
         if i%10==0  or VISU_ALL:
             ### Collate and output to a single image
@@ -723,38 +695,6 @@ with torch.no_grad():
         if i%100==0:
             print("Finished "+str(i)+"/"+str(len(zcache_dataloader)
                 )+".")
-
-mean_gt_rsme = total_gt_rsme/float(num_evaluated)
-mean_sfm_rsme = total_sfm_rsme/float(num_evaluated)
-
-
-log_string("=" * 20)
-log_string("")
-log_string("Num evaluated= "+str(num_evaluated))
-log_string("")
-log_string("Mean GT RSME= "+str(mean_gt_rsme))
-log_string("")             
-log_string("Mean SfM RSME = "+str(mean_sfm_rsme))
-log_string("")           
-
-print("Done.")
-
-
-
-print("Scales:")
-print(all_scales)
-print()
-print("Shifts:")
-print(all_shifts)
-
-print()
-print("Best SfM Scales:")
-print(best_sfm_scales)
-print()
-print("Best SfM Shifts:")
-print(best_sfm_shifts)
-
-
 
 
 

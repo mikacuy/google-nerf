@@ -21,12 +21,13 @@ from tqdm import tqdm, trange
 
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip
-from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
+from data import create_random_subsets, load_scene_nogt, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
-import imageio
+import matplotlib.pyplot as plt
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
@@ -149,58 +150,41 @@ def render(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
     ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
 
+### range from [mean-3*sd, mean+3*sd]
 def precompute_depth_sampling(depth):
     depth_min = (depth[:, 0] - 3. * depth[:, 1])
     depth_max = depth[:, 0] + 3. * depth[:, 1]
     return torch.stack((depth[:, 0], depth_min, depth_max), -1)
 
 def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fps=25):
-    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_' + filename)
+    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_' + filename)
     if os.path.exists(video_dir):
         shutil.rmtree(video_dir)
     os.makedirs(video_dir, exist_ok=True)
     depth_scale = render_kwargs_test["far"]
     max_depth_in_video = 0
-
-    # start_idx = int(len(poses)*(24./35.))
-    # end_idx = int(len(poses)*(32./35.))+1
-
-    start_idx = 0
-    end_idx = len(poses)
-
-    imgs = []
-    for img_idx in range(start_idx, end_idx):
+    for img_idx in range(0, len(poses), 3):
+    # for img_idx in range(200):
         pose = poses[img_idx, :3,:4]
         intrinsic = intrinsics[img_idx, :]
         with torch.no_grad():
             if args.input_ch_cam > 0:
                 render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
             # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
-            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, with_5_9=False, **render_kwargs_test)
+            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, with_5_9=True, **render_kwargs_test)
             rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
             video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
-
-            # max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
-            # depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
-            # video_frame = np.concatenate((video_frame, depth_frame), 1)
-            # depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
-            # depth_std = depth_var.clamp(0., 1.).sqrt()
-            # video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
-
+            max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
+            depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
+            video_frame = np.concatenate((video_frame, depth_frame), 1)
+            depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
+            depth_std = depth_var.clamp(0., 1.).sqrt()
+            video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
             cv2.imwrite(os.path.join(video_dir, str(img_idx) + '.jpg'), video_frame)
 
-            imgs.append(os.path.join(video_dir, str(img_idx) + '.jpg'))
-
     video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
-
-    # imageio.mimsave(video_file,
-    #                 [imageio.imread(img) for img in imgs],
-    #                 fps=10, macro_block_size=1)
-    imageio.mimsave(video_file,
-                    [imageio.imread(img) for img in imgs],
-                    fps=10, macro_block_size=1)
-
-    print("Done.")
+    subprocess.call(["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(video_dir, "%d.jpg"), "-c:v", "libx264", "-profile:v", "high", "-crf", str(fps), video_file])
+    print("Maximal depth in video: {}".format(max_depth_in_video))
 
 def optimize_camera_embedding(image, pose, H, W, intrinsic, args, render_kwargs_test):
     render_kwargs_test["embedded_cam"] = torch.zeros(args.input_ch_cam, requires_grad=True).to(device)
@@ -720,12 +704,12 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
     # mask out depth with very large uncertainty
     depths_out = depths_out.permute(0, 2, 3, 1)
     valid_depths_out = torch.full_like(valid_depths, True)
-    if invalidate_large_std_threshold > 0.:
-        large_std_mask = depths_out[:, :, :, 1] > invalidate_large_std_threshold
-        valid_depths_out[large_std_mask] = False
-        depths_out[large_std_mask] = 0.
-        print("Masked out {:.1f} percent of completed depth with standard deviation greater {:.2f}".format( \
-            100. * (1. - valid_depths_out.sum() / valid_depths_out.numel()), invalidate_large_std_threshold))
+    # if invalidate_large_std_threshold > 0.:
+    #     large_std_mask = depths_out[:, :, :, 1] > invalidate_large_std_threshold
+    #     valid_depths_out[large_std_mask] = False
+    #     depths_out[large_std_mask] = 0.
+    #     print("Masked out {:.1f} percent of completed depth with standard deviation greater {:.2f}".format( \
+    #         100. * (1. - valid_depths_out.sum() / valid_depths_out.numel()), invalidate_large_std_threshold))
     
     return depths_out, valid_depths_out
 
@@ -744,6 +728,83 @@ def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_tr
     depths[i_train], valid_depths[i_train] = complete_depth(images[i_train], depths[i_train], valid_depths[i_train], \
         args.depth_completion_input_h, args.depth_completion_input_w, args.depth_prior_network_path, \
         invalidate_large_std_threshold=args.invalidate_large_std_threshold)
+
+    print(i_train)
+
+    ### Get corresponding fnames 
+    json_fname =  os.path.join(os.path.join(args.data_dir, args.scene_id, "train"), '../transforms_train.json')
+    with open(json_fname, 'r') as fp:
+        meta = json.load(fp)
+
+    all_fnames = []
+    for i in i_train:
+        frame = meta['frames'][i]
+        # image_name = frame['file_path'].split("/")[-1][:-4]
+        image_name = frame['file_path'].split("/")[-1][:-5]
+        all_fnames.append(image_name)
+
+    ### Output to LeReS Dir
+    # hypothesis_outdir = os.path.join("/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/", "leres_cimle", args.ckpt_dir)
+    hypothesis_outdir = os.path.join(os.path.join(args.data_dir, args.scene_id, "train"), "leres_cimle", args.ckpt_dir)
+    if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
+
+    ## Dump_dir for sanity check
+    DUMP_DIR = os.path.join(args.ckpt_dir, args.expname)
+    if not os.path.exists(DUMP_DIR): os.mkdir(DUMP_DIR)
+
+    num_samples = 20
+
+
+    # ### This is for single point estimate
+    # for j in i_train:
+    #     curr_depth = depths[j][:,:,0].to("cpu").detach().numpy().squeeze()
+
+    #     curr_rbg_name = all_fnames[j]
+    #     fname = curr_rbg_name + "_" + str(0) + ".npy"
+
+    #     outfname = os.path.join(hypothesis_outdir, fname)
+
+    #     np.save(outfname, np.array(curr_depth))                
+
+    #     ## Check output --> debug
+    #     depth = np.load(outfname).astype(np.float64)
+    #     print(depth)
+    #     print(depth.shape)
+    #     print(outfname)
+    #     print()
+
+    #     plt.imsave(os.path.join(DUMP_DIR, curr_rbg_name+'-depth.png'), curr_depth, cmap='rainbow')    
+
+
+
+    ###### Sample Multiple
+
+    for i in range(num_samples):
+        sample = torch.normal(depths[i_train][:,:,:,0], depths[i_train][:,:,:,1])
+        sample = sample.to("cpu").detach().numpy().squeeze()
+
+        for j in i_train:
+            curr_depth = sample[j]
+
+            curr_rbg_name = all_fnames[j]
+            fname = curr_rbg_name + "_" + str(i) + ".npy"
+
+            outfname = os.path.join(hypothesis_outdir, fname)
+
+            np.save(outfname, np.array(curr_depth))                
+
+            ## Check output --> debug
+            depth = np.load(outfname).astype(np.float64)
+            print(depth)
+            print(depth.shape)
+            print(outfname)
+            print()
+
+            plt.imsave(os.path.join(DUMP_DIR, curr_rbg_name+ "_" + str(i)+'-depth.png'), curr_depth, cmap='rainbow')
+
+    print(len(i_train))
+    exit()
+
 
     # print statistics after completion
     depths[:, :, :, 0][valid_depths] = depths[:, :, :, 0][valid_depths].clamp(min=near, max=far)
@@ -801,8 +862,9 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
 
     # complete and check depth
-    gt_depths_train = torch.Tensor(gt_depths[i_train]).to(device) # only used to evaluate error of completed depth
-    gt_valid_depths_train = torch.Tensor(gt_valid_depths[i_train]).bool().to(device) # only used to evaluate error of completed depth
+    gt_depths_train = depths[i_train] # only used to evaluate error of completed depth
+    gt_valid_depths_train = valid_depths[i_train] # only used to evaluate error of completed depth
+
     depths, valid_depths = complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, \
         scene_sample_params, args)
     del gt_depths_train, gt_valid_depths_train
@@ -852,7 +914,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             psnr0 = mse2psnr(img_loss0)
             loss = loss + img_loss0
         loss.backward()
-        nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
+        # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
         optimizer.step()
                 
         # write logs
@@ -930,6 +992,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
 def config_parser():
     parser = configargparse.ArgumentParser()
+    parser.add_argument('task', type=str, help='one out of: "train", "test", "test_with_opt", "video"')
     parser.add_argument('--config', is_config_file=True, 
                         help='config file path')
     parser.add_argument("--expname", type=str, default=None, 
@@ -1021,19 +1084,31 @@ def run_nerf():
     args = parser.parse_args()
 
     
-    if args.expname is None:
-        print("Error: Specify experiment name for test or video")
-        exit()
-    tmp_data_dir = args.data_dir
-    tmp_ckpt_dir = args.ckpt_dir
-    # load nerf parameters from training
-    args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
-    with open(args_file, 'r') as af:
-        args_dict = json.load(af)
-    args = Namespace(**args_dict)
 
-    args.data_dir = tmp_data_dir
-    args.ckpt_dir = tmp_ckpt_dir
+    if args.task == "train":
+        if args.expname is None:
+            args.expname = "{}_{}".format(datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S'), args.scene_id)
+        args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
+        os.makedirs(os.path.join(args.ckpt_dir, args.expname), exist_ok=True)
+        with open(args_file, 'w') as af:
+            json.dump(vars(args), af, indent=4)
+    else:
+        if args.expname is None:
+            print("Error: Specify experiment name for test or video")
+            exit()
+        tmp_task = args.task
+        tmp_data_dir = args.data_dir
+        tmp_ckpt_dir = args.ckpt_dir
+        # load nerf parameters from training
+        args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
+        with open(args_file, 'r') as af:
+            args_dict = json.load(af)
+        args = Namespace(**args_dict)
+        # task and paths are not overwritten
+        args.task = tmp_task
+        args.data_dir = tmp_data_dir
+        args.ckpt_dir = tmp_ckpt_dir
+        args.train_jsonfile = 'transforms_train.json'
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
@@ -1043,7 +1118,7 @@ def run_nerf():
 
     # Load data
     scene_data_dir = os.path.join(args.data_dir, args.scene_id)
-    images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths = load_scene(scene_data_dir)
+    images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths = load_scene_nogt(scene_data_dir, args.train_jsonfile)
 
     i_train, i_val, i_test, i_video = i_split
 
@@ -1077,19 +1152,37 @@ def run_nerf():
 
     lpips_alex = LPIPS()
 
+    if args.task == "train":
+        train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths)
+        exit()
+
     # create nerf model for testing
     _, render_kwargs_test, _, nerf_grad_vars, _ = create_nerf(args, scene_sample_params)
     for param in nerf_grad_vars:
         param.requires_grad = False
 
-    vposes = torch.Tensor(poses[i_video]).to(device)
-    vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
-
-    print("Number of video poses:")
-    print(vposes.shape)
-    print(vintrinsics.shape)
-
-    render_video(vposes, H, W, vintrinsics, "demo2", args, render_kwargs_test)
+    # render test set and compute statistics
+    if "test" in args.task: 
+        with_test_time_optimization = False
+        if args.task == "test_opt":
+            with_test_time_optimization = True
+        images = torch.Tensor(images[i_test]).to(device)
+        if gt_depths is None:
+            depths = torch.Tensor(depths[i_test]).to(device)
+            valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
+        else:
+            depths = torch.Tensor(gt_depths[i_test]).to(device)
+            valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
+        poses = torch.Tensor(poses[i_test]).to(device)
+        intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
+        i_test = i_test - i_test[0]
+        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+            render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
+        write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
+    elif args.task == "video":
+        vposes = torch.Tensor(poses[i_video]).to(device)
+        vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
+        render_video(vposes, H, W, vintrinsics, str(0), args, render_kwargs_test)
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')

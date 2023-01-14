@@ -387,6 +387,11 @@ for epoch in range(MAX_EPOCH):
                     H = data['rgb'].shape[2]
                     W = data['rgb'].shape[3]
 
+                    print()
+                    print(data['depth'].shape)
+                    print(data['depth'][0].squeeze())
+                    exit()
+
                     num_images = data['rgb'].shape[0]
 
                     ## Hard coded d_latent

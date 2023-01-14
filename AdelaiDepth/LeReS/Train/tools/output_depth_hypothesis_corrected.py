@@ -28,6 +28,7 @@ import argparse
 from PIL import Image
 import random
 import imageio
+import json
 
 
 parser = argparse.ArgumentParser()
@@ -78,9 +79,9 @@ parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", ty
 # parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unifiedscale_rotated_all_dataparallel/", type=str)
 
 ### Matterport
-# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room0_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room1_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room2_train_unifiedscale_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room0_train_unifiedscale_rotated_bigsubset_dataparallel_corrected/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room1_train_unifiedscale_rotated_bigsubset_dataparallel_corrected/", type=str)
+parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room2_train_unifiedscale_rotated_bigsubset_dataparallel_corrected/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
@@ -421,6 +422,14 @@ dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=IS_NSVF, split="test",
 hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
 if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
 
+##### Also load intrinsics and depth scale for the dataset. #####
+json_fname =  os.path.join(datapath, '../transforms_train.json')
+with open(json_fname, 'r') as fp:
+    meta = json.load(fp)
+
+depth_scaling_factor = float(meta['depth_scaling_factor'])
+#################################################################
+
 #### Evaluation ######
 zcache_dataloader = torch.utils.data.DataLoader(
     dataset=dataset,
@@ -490,13 +499,13 @@ with torch.no_grad():
 
         if not IS_NSVF:
             ## Scannet depth
-            depth_img = depth_img.astype(float)/1000.
+            depth_img = depth_img.astype(float)/depth_scaling_factor
         else:
             depth_img = remap_color_to_depth(depth_img)
             depth_img = depth_img.astype(float)
 
         orig_shape = depth_img.shape
-        depth_img = cv2.resize(depth_img, (448, 448), interpolation=cv2.INTER_NEAREST)
+        # depth_img = cv2.resize(depth_img, (448, 448), interpolation=cv2.INTER_NEAREST)
         # print(depth_img)
 
         ### Iterate over the minibatch
@@ -534,7 +543,8 @@ with torch.no_grad():
                 # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
 
                 img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
-                
+
+
                 if i%10==0  or VISU_ALL:
                     # save depth
                     plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
@@ -543,6 +553,8 @@ with torch.no_grad():
                     ### Output point cloud
                     reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
 
+                ### Resize here
+                curr_pred_depth = cv2.resize(curr_pred_depth, (orig_shape[1], orig_shape[0]))
                 all_pred_depths.append(curr_pred_depth)
             #######
 
@@ -574,7 +586,7 @@ with torch.no_grad():
                 ### Resize --> check the opencv function
 
                 # curr_depth = cv2.resize(curr_depth, orig_shape) ### buggy version 
-                curr_depth = cv2.resize(curr_depth, (orig_shape[1], orig_shape[0])) ### check this resize function 
+                # curr_depth = cv2.resize(curr_depth, (orig_shape[1], orig_shape[0])) ### check this resize function 
 
                 curr_rbg_name = data['A_paths'][0]
                 fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"

@@ -1,7 +1,7 @@
 '''
 Mikaela Uy
-Usable eval script as of Aug 25, 2022
-NerF evaluation script
+1021    : Quantatively evaluate scannet scenes to pick the best prior model
+        : Also find the scale/shift init for the nerf training 
 '''
 import math
 import os, sys
@@ -28,69 +28,95 @@ import argparse
 from PIL import Image
 import random
 import imageio
+import json
 
 
 parser = argparse.ArgumentParser()
 
-##### Use this, seems to be the best at the moment
-parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
+# parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
+# parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
+
+parser.add_argument('--dump_dir', default= "dump_in_the_wild_paper_trial2_cropped/", type=str)
+parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/paper_trial2_cropped', help='Root dir for dataset')
+
+
+parser.add_argument("--logdir", default="log_0928_all_dataparallel/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
-# parser.add_argument("--logdir", default="log_finetune_scannet0653_0825/", help="path to the log directory", type=str)
-# parser.add_argument("--ckpt", default="epoch9_step0.pth", help="checkpoint", type=str)
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_paper_trial2/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/paper_trial2', help='Root dir for dataset')
 
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0710_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0758_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0781_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0708_train_unscaled/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_0925_pretrained_dd_scene0738_train_unscaled/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_chair_trial2/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/chair_trial2', help='Root dir for dataset')
 
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unscaled_rotated/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_cardboard_cropped2/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/cardboard_cropped2', help='Root dir for dataset')
 
-parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unscaled_rotated_bigsubset_dataparallel_debug_visuall/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_chair_more/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/chair', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_compressed_misc/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/misc', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_compressed_cardboard_cropped/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/cardboard_cropped', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_compressed_cardboard_v2_2/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/cardboard_v2', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_compressed_cardboard_more/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/cardboard', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_compressed_paper2/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/paper', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_compressed_chair/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/chair', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_compressed_olaf/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/olaf', help='Root dir for dataset')
 
 
-#### Scannet
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0710_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0758_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0781_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0708_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1009_pretrained_dd_scene0738_train_unscaled_rotated_bigsubset_dataparallel", type=str)
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_basement_alltaskonomy/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild/basement/subset', help='Root dir for dataset')
 
-#### Matterport
-# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room0_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room1_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
-# parser.add_argument('--dump_dir', default= "dump_1023_pretrained_dd_room2_train_unscaled_rotated_bigsubset_dataparallel/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_lounge_alltaskonomy/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild/lounge/subset', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_b_kitchen_alltaskonomy/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild/b_kitchen/subset', help='Root dir for dataset')
+
+
+
+# parser.add_argument('--dump_dir', default= "dump_sample_ambiguous_image_alltaskonomy/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/sample_ambiguous_image', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_tanks_and_temples_courtroom_subsample_alltaskonomy/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Courtroom_subsample/train', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_tanks_and_temples_meetingroom_subsample_alltaskonomy/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Meetingroom_subsample/train', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_tanks_and_temples_church_subsample_alltaskonomy/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Church_subsample/train', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_tanks_and_temples_courtroom/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/tanks_and_temples/Courtroom/', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_replica_room1/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/Replica_subset/room_1/rgb/', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_assembly_sample1/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/assembly_demo/assembly_sample1/', help='Root dir for dataset')
 
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
-# ### Scannet sample scene
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/mika_processed/scene0653_00/', help='Root dir for dataset')
-
-### Scannet
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0708_00/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
-
-### Matterport
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_0/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_1/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rooms/room_2/train/', help='Root dir for dataset')
-
-### Nerf
-# parser.add_argument('--dataroot', default='/orion/group/NSVF/Synthetic_NeRF/Lego', help='Root dir for dataset')
 
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
-parser.add_argument('--num_samples', default= 20, type=int)
+parser.add_argument('--num_samples', default= 40, type=int)
 parser.add_argument('--rescaled', default=False, type=bool)
 
 parser.add_argument('--ada_version', default= "v2", type=str)
@@ -98,6 +124,9 @@ parser.add_argument('--cimle_version', default= "enc", type=str)
 parser.add_argument('--import_from_logdir', default=False, type=bool)
 parser.add_argument('--visu_all', default=False, type=bool)
 parser.add_argument('--seed_num', default= 0, type=int)
+
+parser.add_argument('--default_scale', default= 0.5, type=float)
+parser.add_argument('--default_shift', default= 0.0, type=float)
 
 parser.add_argument('--is_nsvf', default=False, type=bool)
 
@@ -341,19 +370,21 @@ def transform_shift_scale(depth, valid_threshold=-1e-8, max_threshold=1e8):
     return gt_trans
 
 ### Tranform pred to fit the ground truth
+
+#### Fit with regularization ####
 def recover_metric_depth(pred, gt):
     if type(pred).__module__ == torch.__name__:
         pred = pred.cpu().numpy()
     if type(gt).__module__ == torch.__name__:
         gt = gt.cpu().numpy()
-
-    # gt = np.expand_dims(all_pred_depths, axis=0)
-    # pred = np.expand_dims(all_pred_depths, axis=0)
-
     gt = gt.squeeze()
     pred = pred.squeeze()
     
-    mask = (gt > 1e-8) & (pred > 1e-8)
+
+    mask = (gt > 0.1)
+
+    if np.sum(mask) == 0 :
+        return pred, FLAGS.default_scale, FLAGS.default_shift
 
     gt_mask = gt[mask]
     pred_mask = pred[mask]
@@ -363,7 +394,7 @@ def recover_metric_depth(pred, gt):
 
     # pred_metric[~mask] = 0.
 
-    return pred_metric
+    return pred_metric, a, b
 
 #### Image transform #####
 def scale_torch(img):
@@ -393,54 +424,46 @@ def remap_color_to_depth(depth_img):
     return depth    
 ##############################
 
-### Dataloader
-# datapath = os.path.join(FLAGS.dataroot, FLAGS.scenename)
-datapath = FLAGS.dataroot
+### Compute RSME ###
+def compute_rmse(prediction, target):
+    return np.sqrt(np.mean(np.square(prediction - target)))
 
-if IS_NSVF:
-    dataset_name = "nsvf"
-else:
-    dataset_name = "scannet"
-dataset = FinetuneDataset(datapath, dataset_name, is_nsvf=IS_NSVF, split="test", data_aug=False)
+def per_pixel_error(prediction, target):
+    return np.sqrt(np.square(prediction - target))
 
 
-### Create output dir for the multiple hypothesis
-hypothesis_outdir = os.path.join(FLAGS.dataroot, "leres_cimle", DUMP_DIR)
-if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
+### Dataset
+image_dir = os.path.join(FLAGS.dataroot)
+imgs_list = os.listdir(image_dir)
+imgs_list.sort()
+imgs_path = [os.path.join(image_dir, i) for i in imgs_list if i != 'outputs']
+print(len(imgs_path))
 
 #### Evaluation ######
-zcache_dataloader = torch.utils.data.DataLoader(
-    dataset=dataset,
-    batch_size=1,
-    num_workers=0,
-    shuffle=False)
-print(len(zcache_dataloader))
-
 mini_batch_size = 5
 num_sets = int(NUM_SAMPLE/mini_batch_size)
 true_num_samples = num_sets*mini_batch_size # just take the floor
 
 
-### For quantitative evaluation
-total_err_absRel = 0.0
-total_err_squaRel = 0.0
-total_err_silog = 0.0
-total_err_delta1 = 0.0
-total_err_whdr = 0.0
-num_evaluated = 0
-
-model.eval()
-
-### Focal length for scannet
-if not IS_NSVF:
-    f = 577.870605
-else:
-    ### Check this for other models
-    f = 1111.111
-
 with torch.no_grad():
-    for i, data in enumerate(zcache_dataloader):
+    for i, v in enumerate(imgs_path):
 
+        if ".txt" in v or ".DS_Store" in v:
+            continue
+
+        print('processing (%04d)-th image... %s' % (i, v))
+        print(v)
+        rgb = cv2.imread(v)
+
+        rgb_c = rgb.copy()
+        gt_depth = None
+        A_resize = cv2.resize(rgb_c, (448, 448))
+        rgb_half = cv2.resize(rgb, (rgb.shape[1]//2, rgb.shape[0]//2), interpolation=cv2.INTER_LINEAR)
+
+        img_torch = scale_torch(A_resize)[None, :, :, :]
+
+        data = {}
+        data['rgb'] = img_torch
         batch_size = data['rgb'].shape[0]
         C = data['rgb'].shape[1]
         H = data['rgb'].shape[2]
@@ -451,55 +474,13 @@ with torch.no_grad():
         data['rgb'] = data['rgb'].unsqueeze(1).repeat(1,mini_batch_size, 1, 1, 1)
         data['rgb'] = data['rgb'].view(-1, C, H, W)
 
-        gt_depth = data['gt_depth'].cuda()
-
-        if len(gt_depth.shape) == 3:
-            curr_gt = gt_depth[0]
-        else:
-            curr_gt = gt_depth
-
-        curr_gt = curr_gt.to("cpu").detach().numpy().squeeze()
-        curr_gt = cv2.resize(curr_gt, (448, 448), interpolation=cv2.INTER_NEAREST)
-
-        rgb = torch.clone(data['rgb'][0]).permute(1, 2, 0).to("cpu").detach().numpy() 
-        rgb = rgb[:, :, ::-1] ## dataloader is bgr
-        rgb = 255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())
-        rgb = np.array(rgb, np.int)
-
-
-        ### Raw gt depth ###
-        curr_depth_path = data['B_paths'][0]
-        depth_img = np.array(imageio.imread(curr_depth_path))
-
-        if not IS_NSVF:
-            ## Scannet depth
-            depth_img = depth_img.astype(float)/1000.
-        else:
-            depth_img = remap_color_to_depth(depth_img)
-            depth_img = depth_img.astype(float)
-
-        orig_shape = depth_img.shape
-        depth_img = cv2.resize(depth_img, (448, 448), interpolation=cv2.INTER_NEAREST)
-        # print(depth_img)
-
         ### Iterate over the minibatch
         image_fname = []
+    
+        img_name = "image" + str(i)
+        cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
+        image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
 
-        if i%10==0  or VISU_ALL:      
-            img_name = "image" + str(i)
-            cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
-            image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
-            img_name = "image" + str(i) + "_gt"
-            reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
-
-        all_err_absRel = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_squaRel = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_silog = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_delta1 = np.zeros((batch_size, mini_batch_size*num_sets))
-        all_err_whdr = np.zeros((batch_size, mini_batch_size*num_sets))
-
-
-        all_pred_depths = []
 
         for k in range(num_sets):
 
@@ -509,97 +490,70 @@ with torch.no_grad():
 
             pred_depth = model.inference(data, z, rescaled=RESCALED)
 
+
+            # ### Scale the output by mean and sd
+
             for s in range(mini_batch_size):
                 curr_pred_depth = pred_depth[s]
+
+
                 curr_pred_depth = curr_pred_depth.to("cpu").detach().numpy().squeeze() 
 
-                pred_depth_ori = curr_pred_depth
-                # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
+                pred_depth_ori = cv2.resize(curr_pred_depth, (rgb.shape[1], rgb.shape[0]))
+
+                pred_depth_ori = pred_depth_ori[30:, 30:]
 
                 img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
                 
-                if i%10==0  or VISU_ALL:
-                    # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')
-                    image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
-                    ### Output point cloud
-                    reconstruct_depth(curr_pred_depth, rgb, pc_fol, img_name, f)
+                plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow')                  
 
-                all_pred_depths.append(curr_pred_depth)
-            #######
+                image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
-        ### Find scale and fit
-        all_pred_depths = np.stack(all_pred_depths)
-        depth_img = np.repeat(np.expand_dims(depth_img, axis=0), NUM_SAMPLE, axis=0)
+                ### Output point cloud
+                # f = 577.870605 ### Hardcoded for scannet
+                # reconstruct_depth(pred_depth_ori, rgb, pc_fol, img_name, f)
+                # reconstruct_depth(curr_pred_depth_scaled, rgb, pc_scaled_fol, img_name, f)
 
-        # prev_shape = all_pred_depths.shape
 
-        # all_pred_depths = all_pred_depths.flatten()
-        # depth_img = depth_img.flatten()
+        ### Collate and output to a single image
+        height = rgb.shape[0]
+        width = rgb.shape[1]   
 
-        curr_pred_depth_raw = all_pred_depths
+        #Output to a single image
+        new_im = Image.new('RGBA', (width*(1+NUM_SAMPLE), height))
 
-        # curr_pred_depth_raw = curr_pred_depth_raw.reshape(prev_shape)
-        # depth_img = depth_img.reshape(prev_shape)
+        images = []
+        for fname in image_fname:
+            images.append(Image.open(fname))
 
-        print("===============")
-        print("i")
-        ### Output to file
-        for k in range(num_sets):
-            for s in range(mini_batch_size):
+        x_offset = 0
+        for im in images:
+            new_im.paste(im, (x_offset,0))
+            x_offset += width
 
-                curr_depth = curr_pred_depth_raw[k*mini_batch_size+s]
+        output_image_filename = os.path.join(DUMP_DIR, str(i) +'_collate.png')
+        new_im.save(output_image_filename)      
 
-                ### Resize --> check the opencv function
-                # curr_depth = cv2.resize(curr_depth, orig_shape) ### check this resize function 
-                curr_depth = cv2.resize(curr_depth, (orig_shape[1], orig_shape[0])) ### check this resize function 
+print("Done.")
 
-                curr_rbg_name = data['A_paths'][0]
-                fname = curr_rbg_name.split("/")[-1][:-4] + "_" + str(k*mini_batch_size+s) + ".npy"
 
-                outfname = os.path.join(hypothesis_outdir, fname)
-                np.save(outfname, np.array(curr_depth))                
 
-                ## Check output --> debug
-                depth = np.load(outfname).astype(np.float64)
-                print(depth)
-                print(depth.shape)
-                print(outfname)
-                print()
 
-        if i%10==0  or VISU_ALL:
-            ### Collate and output to a single image
-            height = H
-            width = W    
 
-            #Output to a single image
-            for k in range(num_sets):
 
-                new_im = Image.new('RGBA', (width*(1+mini_batch_size), height))
 
-                curr_image_fname = []
-                curr_image_fname.append(image_fname[0])
-                for j in range(k*mini_batch_size, (k+1)*mini_batch_size):
-                    curr_image_fname.append(image_fname[j])
 
-                images = []
 
-                for fname in curr_image_fname:
-                    images.append(Image.open(fname))
 
-                x_offset = 0
-                for im in images:
-                    new_im.paste(im, (x_offset,0))
-                    x_offset += width
 
-                output_image_filename = os.path.join(DUMP_DIR, str(i) + "_" + str(k) + '_collate.png')
-                new_im.save(output_image_filename) 
-        # print(output_image_filename)
 
-        if i%100==0:
-            print("Finished "+str(i)+"/"+str(len(zcache_dataloader)
-                )+".")
+
+
+
+
+
+
 
 
 

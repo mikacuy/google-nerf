@@ -34,7 +34,37 @@ def reconstruct_3D(depth, f):
     y = np.reshape(y, (width * height, 1)).astype(np.float)
     z = np.reshape(z, (width * height, 1)).astype(np.float)
     pcd = np.concatenate((x, y, z), axis=1)
-    pcd = pcd.astype(np.int)
+    # pcd = pcd.astype(np.int)
+    return pcd
+
+def reconstruct_3D_intrinsics(depth, intrinsic):
+    """
+    Reconstruct depth to 3D pointcloud with the provided focal length.
+    Return:
+        pcd: N X 3 array, point cloud
+    """
+    fx, fy, cu, cv = intrinsic[0], intrinsic[1], intrinsic[2], intrinsic[3]
+
+    # cu = depth.shape[1] / 2
+    # cv = depth.shape[0] / 2
+
+    width = depth.shape[1]
+    height = depth.shape[0]
+    row = np.arange(0, width, 1)
+    u = np.array([row for i in np.arange(height)])
+    col = np.arange(0, height, 1)
+    v = np.array([col for i in np.arange(width)])
+    v = v.transpose(1, 0)
+
+    x = (u - cu) * depth / fx
+    y = (v - cv) * depth / fy
+    z = depth
+
+    x = np.reshape(x, (width * height, 1)).astype(np.float)
+    y = np.reshape(y, (width * height, 1)).astype(np.float)
+    z = np.reshape(z, (width * height, 1)).astype(np.float)
+    pcd = np.concatenate((x, y, z), axis=1)
+    # pcd = pcd.astype(np.int)
     return pcd
 
 def save_point_cloud(pcd, rgb, filename, binary=True):
@@ -86,7 +116,7 @@ def save_point_cloud(pcd, rgb, filename, binary=True):
         # ---- Save ply data to disk
         np.savetxt(filename, np.column_stack((x, y, z, r, g, b)), fmt="%d %d %d %d %d %d", header=ply_head, comments='')
 
-def reconstruct_depth(depth, rgb, dir, pcd_name, focal):
+def reconstruct_depth(depth, rgb, dir, pcd_name, focal, scale=1.0):
     """
     para disp: disparity, [h, w]
     para rgb: rgb image, [h, w, 3], in rgb format
@@ -96,11 +126,86 @@ def reconstruct_depth(depth, rgb, dir, pcd_name, focal):
 
     mask = depth < 1e-8
     depth[mask] = 0
-    depth = depth / depth.max() * 10000
+
+    # print(depth.max())
+    # exit()
+    # depth = depth / depth.max() * scale
+    depth = depth * scale
 
     pcd = reconstruct_3D(depth, f=focal)
     rgb_n = np.reshape(rgb, (-1, 3))
     save_point_cloud(pcd, rgb_n, os.path.join(dir, pcd_name + '.ply'))
+
+def reconstruct_depth_intrinsics(depth, rgb, dir, pcd_name, intrinsic, scale=1.0):
+    """
+    para disp: disparity, [h, w]
+    para rgb: rgb image, [h, w, 3], in rgb format
+    """
+    rgb = np.squeeze(rgb)
+    depth = np.squeeze(depth)
+
+    mask = depth < 1e-8
+    depth[mask] = 0
+
+    # print(depth.max())
+    # exit()
+    # depth = depth / depth.max() * scale
+    depth = depth * scale
+
+    pcd = reconstruct_3D_intrinsics(depth, intrinsic)
+    rgb_n = np.reshape(rgb, (-1, 3))
+    save_point_cloud(pcd, rgb_n, os.path.join(dir, pcd_name + '.ply'))
+
+
+def get_nonoccluded_points(pointcloud, focal, input_rgb):
+    cu = input_rgb.shape[1] / 2.
+    cv = input_rgb.shape[0] / 2.
+
+    cam_pts_x = pointcloud[:,0]
+    cam_pts_y = pointcloud[:,1]
+    cam_pts_z = pointcloud[:,2]
+
+    cam_pts_x = cam_pts_x.astype(float) / cam_pts_z * focal + cu
+    cam_pts_y = cam_pts_y.astype(float) / cam_pts_z * focal + cv
+
+    # cam_pts_x = (focal/input_rgb.shape[1]) * cam_pts_x.astype(float)/cam_pts_z + 0.5
+    # cam_pts_y = (focal/input_rgb.shape[0]) * cam_pts_y.astype(float)/cam_pts_z + 0.5
+
+    # print(cam_pts_x.shape)
+    
+    idx = np.rint(cam_pts_y / 2) * 1000 + np.rint(cam_pts_x / 2)
+    val = np.stack([cam_pts_z, np.arange(len(cam_pts_x))]).T
+    order = idx.argsort()
+    idx = idx[order]
+    val = val[order]
+    grouped_pts = np.split(val, np.unique(idx, return_index=True)[1][1:])
+    min_depth = np.array([p[p[:,0].argsort()][-1] for p in grouped_pts])
+    min_idx = min_depth[:,-1].astype(int)
+
+    # print(min_idx.shape)
+
+    ### Normalize 
+    # cam_pts_x = (cam_pts_x - cu)/input_rgb.shape[1] + 0.5
+    # cam_pts_y = (cam_pts_y - cv)/input_rgb.shape[0] + 0.5
+    # min_idx = min_idx[(cam_pts_x[min_idx] >= 0.0) & (cam_pts_x[min_idx] <= 1.0) & (cam_pts_y[min_idx] >= 0.0) & (cam_pts_y[min_idx] <= 1.0)]
+    # print(min_idx.shape)
+    # exit()
+
+    return pointcloud[min_idx]
+
+def project_2d(pointcloud, focal_length, input_rgb):
+    cu = input_rgb.shape[1] / 2.
+    cv = input_rgb.shape[0] / 2.
+
+    proj_x = (focal_length) * pointcloud[:, 0]/pointcloud[:, 2] + cu
+    proj_y = (focal_length) * pointcloud[:, 1]/pointcloud[:, 2] + cv
+
+    # proj_x = (focal_length/input_rgb.shape[1]) * pointcloud[:, 0]/pointcloud[:, 2] + 0.5
+    # proj_y = (focal_length/input_rgb.shape[0]) * pointcloud[:, 1]/pointcloud[:, 2] + 0.5
+
+    pc_2d = np.array([proj_x, proj_y])
+
+    return pc_2d
 
 def backup_files(log_dir, train_fname):
     ### For training file backups

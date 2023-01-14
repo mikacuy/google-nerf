@@ -28,6 +28,12 @@ from metric import compute_rmse
 
 import imageio
 
+## For pose interpolation
+from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Slerp
+from scipy import interpolate
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
 
@@ -155,7 +161,7 @@ def precompute_depth_sampling(depth):
     return torch.stack((depth[:, 0], depth_min, depth_max), -1)
 
 def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fps=25):
-    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_' + filename)
+    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_' + filename)
     if os.path.exists(video_dir):
         shutil.rmtree(video_dir)
     os.makedirs(video_dir, exist_ok=True)
@@ -169,7 +175,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     end_idx = len(poses)
 
     imgs = []
-    for img_idx in range(start_idx, end_idx):
+    for img_idx in range(start_idx, end_idx, 3):
         pose = poses[img_idx, :3,:4]
         intrinsic = intrinsics[img_idx, :]
         with torch.no_grad():
@@ -193,13 +199,9 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
 
     video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
 
-    # imageio.mimsave(video_file,
-    #                 [imageio.imread(img) for img in imgs],
-    #                 fps=10, macro_block_size=1)
     imageio.mimsave(video_file,
                     [imageio.imread(img) for img in imgs],
                     fps=10, macro_block_size=1)
-
     print("Done.")
 
 def optimize_camera_embedding(image, pose, H, W, intrinsic, args, render_kwargs_test):
@@ -1047,6 +1049,10 @@ def run_nerf():
 
     i_train, i_val, i_test, i_video = i_split
 
+    # ## Just check for the number of training images
+    # print(len(i_train))
+    # exit()
+
     # Compute boundaries of 3D space
     max_xyz = torch.full((3,), -1e6)
     min_xyz = torch.full((3,), 1e6)
@@ -1082,14 +1088,141 @@ def run_nerf():
     for param in nerf_grad_vars:
         param.requires_grad = False
 
-    vposes = torch.Tensor(poses[i_video]).to(device)
-    vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
+    ### Get the poses from the test images
+    test_poses = poses[i_test]
+    test_intrinsics = intrinsics[i_test]
+    # render_video(vposes, H, W, vintrinsics, "demo", args, render_kwargs_test)
 
-    print("Number of video poses:")
-    print(vposes.shape)
-    print(vintrinsics.shape)
+    ## For the video sequence
+    video_poses = []
+    video_intrinsics = []
+    frames = []
 
-    render_video(vposes, H, W, vintrinsics, "demo2", args, render_kwargs_test)
+    ### Church subsample2
+    # indices_selected = [10, 11, 8, 1, 0, 4, 3, 2]
+    # all_num_samples = [10, 10, 10, 10, 10, 10, 10]
+
+    # ### Lounge v3
+    # indices_selected = [4, 5, 7, 10, 8, 11, 14, 15]
+    # all_num_samples = [20, 20, 20, 20, 20, 20, 20]
+
+    # ### Lounge v3 sample2
+    # indices_selected = [17, 16, 3, 11, 4, 5, 7, 10, 8, 11, 14, 15]
+    # all_num_samples = [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]
+
+    # ### Lounge v3 sample3
+    # indices_selected = [4, 5, 7, 10, 8, 11, 14, 8, 5, 11, 15]
+    # all_num_samples = [20, 20, 20, 20, 20, 20, 20, 20, 20, 20]
+
+    # # Auditorium
+    # indices_selected = [0, 13, 1, 35, 34, 5, 7, 9, 40, 41]
+    # all_num_samples = [10, 10, 10, 10, 10, 10, 10, 10, 10]    
+
+    # # Kitchen
+    # indices_selected = [16, 14, 20, 27, 10, 29, 4, 7]
+    # all_num_samples = [10, 10, 10, 10, 10, 10, 10]  
+
+    # # Courtroom
+    # indices_selected = [18, 20, 15, 2, 8, 6, 23, 27, 31, 37, 38, 19]
+    # all_num_samples = [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]  
+
+
+    ### Church subsample2 v2
+    indices_selected = [10, 11, 8, 1, 0, 4, 3, 9, 2, 7, 14, 13]
+    all_num_samples = [20, 20, 20, 20, 20, 20, 5, 20, 20, 20, 20]
+
+
+    ### Get poses and interpolate
+    ### Select key frames --> initial set
+    for k in range(len(all_num_samples)):
+
+        idx1 = indices_selected[k]
+        idx2 = indices_selected[k+1]
+
+        pose1 = test_poses[idx1]
+        pose2 = test_poses[idx2]
+
+        num_samples = all_num_samples[k]
+        times = np.linspace(0.0, 1.0, num=num_samples)
+
+        print(pose1)
+        print()
+        print(pose2)
+        print()
+
+        r1 = R.from_matrix(pose1[:3, :3])
+        t1 = pose1[:3,-1]
+
+        r2 = R.from_matrix(pose2[:3, :3])
+        t2 = pose2[:3,-1]
+
+        # print(r1)
+        # print(t1)
+        # print()
+        # print(r2)
+        # print(t2)
+        # print()
+
+        ### Interpolate rotation
+        key_rots = R.from_matrix([pose1[:3, :3], pose2[:3, :3]])
+        key_times = [0, 1]
+        slerp = Slerp(key_times, key_rots)
+
+        interp_rots = slerp(times)
+        interp_rots = interp_rots.as_matrix()
+        # print(interp_rots.shape)
+        # print(interp_rots[0])
+        # print(interp_rots[1])
+        # print(interp_rots[-1])
+        # print()
+
+        ### Interpolate translation
+        f = interpolate.interp1d([0,1], np.vstack([t1, t2]), axis=0)
+        interp_trans = f(times)
+
+        # print(interp_trans.shape)
+        # print(interp_trans.shape)
+        # print(interp_trans[0])
+        # print(interp_trans[1])
+        # print(interp_trans[-1])
+        # print()
+
+        ### Desired poses
+        for j in range(num_samples):
+            # print(interp_rots[j].shape)
+            # print(np.expand_dims(interp_trans[j], axis=1).shape)
+            c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+            c2w = np.vstack((c2w, np.array([0,0,0,1])))
+            # print(c2w)
+            video_poses.append(c2w.astype(float))
+            video_intrinsics.append(test_intrinsics[idx1].astype(float))
+
+        
+    ### Output to json
+    for j in range(len(video_poses)):
+        vpose = video_poses[j]
+        curr_intrinsic = video_intrinsics[j]
+
+        curr_frame = {"file_path": "", "depth_file_path":"", \
+                    "fx":  curr_intrinsic[0], "fy": curr_intrinsic[1], "cx": curr_intrinsic[2], "cy": curr_intrinsic[3],\
+                    "transform_matrix": vpose.tolist()}
+
+        frames.append(curr_frame)
+
+    data = {"near": near, "far": far, "depth_scaling_factor": 1000., "frames": frames}
+    print(json.dumps(data, indent=4))
+
+    with open(os.path.join(scene_data_dir, "transforms_video2.json"), "w") as outfile:
+        json.dump(data, outfile)
+
+    print()
+    print("Num frames: ")
+    print(len(frames))
+    print("Done")
+
+    exit()
+
+
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')

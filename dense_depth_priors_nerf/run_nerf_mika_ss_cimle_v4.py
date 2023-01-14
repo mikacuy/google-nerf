@@ -1035,23 +1035,27 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     ########################################
     #### Load pretrained model w/o cIMLE ###
     ########################################
-    path = os.path.join("log_1011_scene0710", "1011_scene0710_optssbig_01_joint")
+    path = os.path.join("Scannet/scene758", "scene0758_00_sc007_sslr1e-07")
     ckpts = [os.path.join(path, f) for f in sorted(os.listdir(path)) if '000.tar' in f]
     print('Found ckpts', ckpts)
     ckpt_path = ckpts[-1]
     print('Reloading pretrained model from', ckpt_path)
 
-    # ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path)
 
-    # coarse_model_dict = render_kwargs_train["network_fn"].state_dict()
-    # coarse_keys = {k: v for k, v in ckpt['network_fn_state_dict'].items() if k in coarse_model_dict} 
+    coarse_model_dict = render_kwargs_train["network_fn"].state_dict()
+    coarse_keys = {k: v for k, v in ckpt['network_fn_state_dict'].items() if k in coarse_model_dict} 
 
-    # fine_model_dict = render_kwargs_train["network_fine"].state_dict()
-    # fine_keys = {k: v for k, v in ckpt['network_fine_state_dict'].items() if k in fine_model_dict} 
+    fine_model_dict = render_kwargs_train["network_fine"].state_dict()
+    fine_keys = {k: v for k, v in ckpt['network_fine_state_dict'].items() if k in fine_model_dict} 
 
-    # ### Load weights from pretrained model without cIMLE
-    # coarse_model_dict.update(coarse_keys)
-    # fine_model_dict.update(fine_keys)
+    print(len(coarse_keys.keys()))
+    print(len(fine_keys.keys()))
+
+    ### Load weights from pretrained model without cIMLE
+    print("Num keys loaded:")
+    coarse_model_dict.update(coarse_keys)
+    fine_model_dict.update(fine_keys)
 
     ## Load scale and shift
     DEPTH_SHIFTS = torch.load(ckpt_path)["depth_shifts"]
@@ -1064,14 +1068,15 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     print(DEPTH_SHIFTS)
 
     print("Loaded depth shift/scale from pretrained model.")
-    
-    exit()
     ########################################
     ########################################
 
 
     ### For cIMLE
-    NUM_SAMPLES = 20
+    NUM_SAMPLES = args.num_samples
+    print("Num samples for cIMLE:")
+    print(NUM_SAMPLES)
+    # exit()
 
     for i in trange(start, N_iters):
 
@@ -1159,16 +1164,16 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             img_loss0 = img2mse(extras['rgb0'], target_s)
             psnr0 = mse2psnr(img_loss0)
             
-            ### Space carving on the coarse network
-            if args.space_carving_weight>0. and i>args.warm_start_nerf:
+            # ### Space carving on the coarse network
+            # if args.space_carving_weight>0. and i>args.warm_start_nerf:
 
-                if args.coarse_space_carving_weight == -1:
-                    coarse_space_carving_weight = args.space_carving_weight
-                else:
-                    coarse_space_carving_weight = args.coarse_space_carving_weight
+            #     if args.coarse_space_carving_weight == -1:
+            #         coarse_space_carving_weight = args.space_carving_weight
+            #     else:
+            #         coarse_space_carving_weight = args.coarse_space_carving_weight
 
-                coarse_space_carving_loss = compute_space_carving_loss(extras["coarse_pred_hyp"], target_h, is_joint=args.is_joint)
-                loss = loss + coarse_space_carving_weight * coarse_space_carving_loss            
+            #     coarse_space_carving_loss = compute_space_carving_loss(extras["coarse_pred_hyp"], target_h, is_joint=args.is_joint)
+            #     loss = loss + coarse_space_carving_weight * coarse_space_carving_loss            
 
             loss = loss + img_loss0
 
@@ -1223,14 +1228,15 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             if 'rgb0' in extras:
                 tb.add_scalars('mse0', {'train': img_loss0.item()}, i)
                 tb.add_scalars('psnr0', {'train': psnr0.item()}, i)
-                tb.add_scalars('space_carving_loss0', {'train': coarse_space_carving_loss.item()}, i)
+                # tb.add_scalars('space_carving_loss0', {'train': coarse_space_carving_loss.item()}, i)
             
             scale_mean = torch.mean(DEPTH_SCALES[i_train])
             shift_mean = torch.mean(DEPTH_SHIFTS[i_train])
             tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
             tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
 
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Coarse space carving: {coarse_space_carving_loss.item()}")
+            # tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Coarse space carving: {coarse_space_carving_loss.item()}")
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()}")
             
         if i%args.i_img==0:
             # visualize 2 train images
@@ -1391,13 +1397,14 @@ def config_parser():
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
-    parser.add_argument('--scaleshift_lr', default= 0.000001, type=float)
+    parser.add_argument('--scaleshift_lr', default= 0.00000001, type=float)
     parser.add_argument('--scale_init', default= 0.5, type=float)
     parser.add_argument('--shift_init', default= 0.0, type=float)
     parser.add_argument("--freeze_ss", type=int, default=400000, 
                             help='dont update scale/shift in the last few epochs')
 
     parser.add_argument('--refresh_z', default= 50000, type=int, help='Number of iterations to recache latent code')
+    parser.add_argument('--num_samples', default= 20, type=int, help='Number samples drawn at each recache')
 
     ### u sampling is joint or not
     parser.add_argument('--is_joint', default= False, type=bool)

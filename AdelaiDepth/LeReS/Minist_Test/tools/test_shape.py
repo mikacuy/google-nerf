@@ -6,6 +6,10 @@ import torch
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
 
+import sys
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE_DIR, "../"))
+
 from lib.test_utils import refine_focal, refine_shift
 from lib.multi_depth_model_woauxi import RelDepthModel
 from lib.net_tools import load_ckpt
@@ -15,7 +19,7 @@ from lib.test_utils import reconstruct_depth
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Configs for LeReS')
-    parser.add_argument('--load_ckpt', default='./res50.pth', help='Checkpoint path to load')
+    parser.add_argument('--load_ckpt', default='./res101.pth', help='Checkpoint path to load')
     parser.add_argument('--backbone', default='resnext101', help='Checkpoint path to load')
 
     args = parser.parse_args()

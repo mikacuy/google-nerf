@@ -40,7 +40,132 @@ def compute_depth_loss(depth_map, z_vals, weights, target_depth, target_valid_de
     f = nn.GaussianNLLLoss(eps=0.001)
     return float(pred_mean.shape[0]) / float(target_valid_depth.shape[0]) * f(pred_mean, target_mean, pred_var)
 
-def compute_space_carving_loss(pred_depth, target_hypothesis, is_joint=False):
+
+################################
+##### For MiDaS-based loss #####
+################################
+def compute_scale_and_shift(prediction, target, mask):
+    # system matrix: A = [[a_00, a_01], [a_10, a_11]]
+    a_00 = torch.sum(mask * prediction * prediction, (1, 2))
+    a_01 = torch.sum(mask * prediction, (1, 2))
+    a_11 = torch.sum(mask, (1, 2))
+
+    # right hand side: b = [b_0, b_1]
+    b_0 = torch.sum(mask * prediction * target, (1, 2))
+    b_1 = torch.sum(mask * target, (1, 2))
+
+    # solution: x = A^-1 . b = [[a_11, -a_01], [-a_10, a_00]] / (a_00 * a_11 - a_01 * a_10) . b
+    x_0 = torch.zeros_like(b_0)
+    x_1 = torch.zeros_like(b_1)
+
+    det = a_00 * a_11 - a_01 * a_01
+    valid = det.nonzero()
+
+    x_0[valid] = (a_11[valid] * b_0[valid] - a_01[valid] * b_1[valid]) / det[valid]
+    x_1[valid] = (-a_01[valid] * b_0[valid] + a_00[valid] * b_1[valid]) / det[valid]
+
+    return x_0, x_1
+
+
+def compute_monosdf_styleloss(pred_depth, target_depth, mask=None):
+    if mask is None:
+        mask = torch.ones_like(pred_depth)
+
+    # target_depth = target_depth.squeeze(0)
+    pred_depth = pred_depth.unsqueeze(0).unsqueeze(-1)
+    mask = mask.unsqueeze(0).unsqueeze(-1)
+
+    # print(pred_depth.shape)
+    # print(target_depth.shape)
+
+    scale, shift = compute_scale_and_shift(pred_depth, target_depth, mask)
+
+    # print(scale.shape)
+    # print(shift.shape)
+
+    prediction_ssi = scale.view(-1, 1, 1) * pred_depth + shift.view(-1, 1, 1)
+    # print(prediction_ssi.shape)
+
+    loss = torch.norm(prediction_ssi - target_depth, p=2, dim=-1)
+    loss = torch.mean(loss)
+
+    # print(loss)
+    # print(loss.shape)
+
+    return loss
+
+################################
+
+def get_space_carving_idx(pred_depth, target_hypothesis, is_joint=False, mask=None, norm_p=2, threshold=0.0):
+    H, W, n_points = pred_depth.shape
+    num_hypothesis = target_hypothesis.shape[0]
+
+    # print(target_hypothesis.squeeze())
+
+    target_hypothesis_repeated = target_hypothesis.repeat(1, 1, 1, n_points)
+
+    ## L2 distance
+    # distances = torch.sqrt((pred_depth - target_hypothesis_repeated)**2)
+    distances = torch.norm(pred_depth.unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=norm_p, dim=-1)
+
+    if mask is not None:
+        mask = mask.unsqueeze(0).repeat(distances.shape[0],1).unsqueeze(-1)
+        distances = distances * mask
+
+    if threshold > 0:
+        distances = torch.where(distances < threshold, torch.tensor([0.0]).to(distances.device), distances)
+
+    if is_joint:
+        ### Take the mean for all points on all rays, hypothesis is chosen per image
+        total_loss = torch.mean(torch.mean(torch.mean(distances, axis=-1), axis=-1), axis=-1)
+        best_idx = torch.argmin(total_loss, dim=0)
+        best_idx = best_idx.unsqueeze(-1).unsqueeze(-1).repeat(H, W)
+
+    else:
+        ### Each ray selects a hypothesis
+        total_loss = torch.mean(distances, axis=-1) ## Loss per ray
+        best_idx = torch.argmin(total_loss, dim=0) 
+
+    # print(best_idx)
+    # print(best_idx.shape)
+    # exit()
+
+    return best_idx
+
+def get_space_carving_idx_corrected(pred_depth, target_hypothesis, is_joint=False, mask=None, norm_p=2, threshold=0.0):
+    H, W, n_points = pred_depth.shape
+    num_hypothesis = target_hypothesis.shape[0]
+
+    # print(target_hypothesis.squeeze())
+
+    target_hypothesis_repeated = target_hypothesis.repeat(1, 1, 1, n_points)
+
+    ## L2 distance
+    # distances = torch.sqrt((pred_depth - target_hypothesis_repeated)**2)
+    distances = torch.norm(pred_depth.unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=norm_p, dim=-1)
+
+    if mask is not None:
+        mask = mask.unsqueeze(0).repeat(distances.shape[0],1).unsqueeze(-1)
+        distances = distances * mask
+
+    if threshold > 0:
+        distances = torch.where(distances < threshold, torch.tensor([0.0]).to(distances.device), distances)
+
+
+    if is_joint:
+        ### Take the mean for all points on all rays, hypothesis is chosen per image
+        total_loss = torch.mean(torch.mean(distances, axis=1), axis=1)
+        best_idx = torch.argmin(total_loss, dim=0)
+        best_idx = best_idx.unsqueeze(0).unsqueeze(0).repeat(H, W, 1)
+
+    else:
+        ### Each ray selects a hypothesis
+        best_idx = torch.argmin(distances, dim=0) ## Loss per ray
+
+    return best_idx
+
+
+def compute_space_carving_loss(pred_depth, target_hypothesis, is_joint=False, mask=None, norm_p=2, threshold=0.0):
     n_rays, n_points = pred_depth.shape
     num_hypothesis = target_hypothesis.shape[0]
 
@@ -50,12 +175,21 @@ def compute_space_carving_loss(pred_depth, target_hypothesis, is_joint=False):
 
     ## L2 distance
     # distances = torch.sqrt((pred_depth - target_hypothesis_repeated)**2)
-    distances = torch.norm(pred_depth.unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=2, dim=-1)
+    distances = torch.norm(pred_depth.unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=norm_p, dim=-1)
+
+    if mask is not None:
+        mask = mask.unsqueeze(0).repeat(distances.shape[0],1).unsqueeze(-1)
+        distances = distances * mask
+
+    if threshold > 0:
+        distances = torch.where(distances < threshold, torch.tensor([0.0]).to(distances.device), distances)
+
 
     if is_joint:
         ### Take the mean for all points on all rays, hypothesis is chosen per image
         total_loss = torch.mean(torch.mean(distances, axis=-1), axis=-1)
         best_loss = torch.min(total_loss, dim=0)[0]
+
     else:
         ### Each ray selects a hypothesis
         total_loss = torch.mean(distances, axis=-1) ## Loss per ray
@@ -65,6 +199,42 @@ def compute_space_carving_loss(pred_depth, target_hypothesis, is_joint=False):
 
     return best_loss
 
+def compute_space_carving_loss_corrected(pred_depth, target_hypothesis, is_joint=False, mask=None, norm_p=2, threshold=0.0):
+    n_rays, n_points = pred_depth.shape
+    num_hypothesis = target_hypothesis.shape[0]
+
+    if target_hypothesis.shape[-1] == 1:
+        ### In the case where there is no caching of quantiles
+        target_hypothesis_repeated = target_hypothesis.repeat(1, 1, n_points)
+    else:
+        ### Each quantile here already picked a hypothesis
+        target_hypothesis_repeated = target_hypothesis
+
+    ## L2 distance
+    # distances = torch.sqrt((pred_depth - target_hypothesis_repeated)**2)
+    distances = torch.norm(pred_depth.unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=norm_p, dim=-1)
+
+    if mask is not None:
+        mask = mask.unsqueeze(0).repeat(distances.shape[0],1).unsqueeze(-1)
+        distances = distances * mask
+
+    if threshold > 0:
+        distances = torch.where(distances < threshold, torch.tensor([0.0]).to(distances.device), distances)
+
+    if is_joint:
+        ### Take the mean for all points on all rays, hypothesis is chosen per image
+        quantile_mean = torch.mean(distances, axis=1) ## mean for each quantile, averaged across all rays
+        samples_min = torch.min(quantile_mean, axis=0)[0]
+        loss =  torch.mean(samples_min, axis=-1)
+
+
+    else:
+        ### Each ray selects a hypothesis
+        best_hyp = torch.min(distances, dim=0)[0]   ## for each sample pick a hypothesis
+        ray_mean = torch.mean(best_hyp, dim=-1) ## average across samples
+        loss = torch.mean(ray_mean)  
+
+    return loss
 
 
 class DenseLayer(nn.Linear):
@@ -686,6 +856,59 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 
     return samples
 
+def sample_pdf_return_u(bins, weights, N_samples, det=False, pytest=False, load_u=None):
+    # Get pdf
+    weights = weights + 1e-5 # prevent nans
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    if load_u is None:
+        # Take uniform samples
+        if det:
+            u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+            u = u.expand(list(cdf.shape[:-1]) + [N_samples])
+        else:
+            u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=bins.device)
+
+        # Pytest, overwrite u with numpy's fixed random numbers
+        if pytest:
+            np.random.seed(0)
+            new_shape = list(cdf.shape[:-1]) + [N_samples]
+            if det:
+                u = np.linspace(0., 1., N_samples)
+                u = np.broadcast_to(u, new_shape)
+            else:
+                u = np.random.rand(*new_shape)
+            u = torch.Tensor(u)
+
+    ## Otherwise, take the saved u
+    else:
+        u = load_u
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[...,1]-cdf_g[...,0])
+    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    t = (u-cdf_g[...,0])/denom
+    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    return samples, u
+
 
 def sample_pdf_joint(bins, weights, N_samples, det=False, pytest=False):
     # Get pdf
@@ -735,6 +958,58 @@ def sample_pdf_joint(bins, weights, N_samples, det=False, pytest=False):
     samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
 
     return samples
+
+def sample_pdf_joint_return_u(bins, weights, N_samples, det=False, pytest=False, load_u=None):
+    # Get pdf
+    weights = weights + 1e-5 # prevent nans
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    # Take uniform samples
+    if load_u is None:
+        if det:
+            u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+            u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+        else:
+            ## Joint samples
+            u = torch.rand(N_samples, device=bins.device)
+            u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+
+        # Pytest, overwrite u with numpy's fixed random numbers
+        if pytest:
+            np.random.seed(0)
+            new_shape = list(cdf.shape[:-1]) + [N_samples]
+            if det:
+                u = np.linspace(0., 1., N_samples)
+                u = np.broadcast_to(u, new_shape)
+            else:
+                u = np.random.rand(*new_shape)
+            u = torch.Tensor(u)
+    else:
+        u = load_u
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[...,1]-cdf_g[...,0])
+    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    t = (u-cdf_g[...,0])/denom
+    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    return samples, u
 
 def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
 

@@ -150,11 +150,21 @@ class MultiDataset(Dataset):
         ins_planes_mask, sky_mask, \
         ground_mask, depth_path = self.load_training_data(anno_index, rgb)
 
+        # print("After load training data:")
+        # print(depth.shape)
+        # print(depth)
+        # print()
+
         flip_flg, resize_size, crop_size, pad, _ = 0, (cfg.DATASET.CROP_SIZE[0], cfg.DATASET.CROP_SIZE[1]), 0, 0, 0  
 
         rgb_resize = self.flip_reshape_crop_pad(rgb, flip_flg, resize_size, crop_size, pad, 0, crop=False, to_pad=False)
         depth_resize = self.flip_reshape_crop_pad(depth, flip_flg, resize_size, crop_size, pad, -1, resize_method='nearest', crop=False, to_pad=False)
         disp_resize = self.flip_reshape_crop_pad(disp, flip_flg, resize_size, crop_size, pad, -1, resize_method='nearest', crop=False, to_pad=False)
+
+        # print("Flip, reshape, crop:")
+        # print(depth_resize.shape)
+        # print(depth_resize)
+        # print()
 
         # resize sky_mask, and invalid_regions
         sky_mask_resize = self.flip_reshape_crop_pad(sky_mask.astype(np.uint8),
@@ -192,6 +202,12 @@ class MultiDataset(Dataset):
         depth_resize = depth_resize / (depth_resize.max() + 1e-8) * 10
         disp_resize = disp_resize / (disp_resize.max() + 1e-8) * 10
 
+        # print("After rescaling with *10:")
+        # print(depth_resize.shape)
+        # print(depth_resize)
+        # print()
+
+
         # invalid regions are set to -1, sky regions are set to 0 in disp and 10 in depth
         disp_resize[invalid_disp_resize.astype(np.bool) | (disp_resize > 1e7) | (disp_resize < 0)] = -1
         depth_resize[invalid_depth_resize.astype(np.bool) | (depth_resize > 1e7) | (depth_resize < 0)] = -1
@@ -204,6 +220,10 @@ class MultiDataset(Dataset):
         disp_torch = self.scale_torch(disp_resize)
         ins_planes = torch.from_numpy(ins_planes_mask_resize)
         focal_length = torch.tensor(focal_length)
+
+        # print("Torch:")
+        # print(depth_torch.shape)
+        # print(depth_torch)
 
         if ('taskonomy' in self.dataset_name.lower()) or ('3d-ken-burns' in self.dataset_name.lower()):
             quality_flg = np.array(3)
