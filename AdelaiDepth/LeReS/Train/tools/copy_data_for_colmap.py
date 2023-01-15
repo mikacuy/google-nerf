@@ -5,10 +5,10 @@ from functools import partial
 from multiprocessing.dummy import Pool
 from subprocess import call
 
-DUMP_DIR = "/orion/downloads/coordinate_mvs/taskonomy/tmp/rgbs"
+DUMP_DIR = "~/Desktop/coord-mvs/LeReS_data/taskonomy/tmp/rgbs"
 os.makedirs(DUMP_DIR, exist_ok=True)
 
-DATA_DIR = "/orion/downloads/coordinate_mvs/taskonomy/rgbs"
+DATA_DIR = "~/Desktop/coord-mvs/LeReS_data/taskonomy/rgbs"
 
 scenes = os.listdir(DATA_DIR)
 
