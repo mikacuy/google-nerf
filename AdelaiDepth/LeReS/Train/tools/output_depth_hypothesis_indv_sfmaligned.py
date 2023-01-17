@@ -33,14 +33,25 @@ import json
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
+# parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
+# parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
+
+parser.add_argument("--logdir", default="log_0928_all_dataparallel/", help="path to the log directory", type=str)
 parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
+
 # parser.add_argument('--dump_dir', default= "dump_1102_scene0710_sfmaligned_indv_visuall/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1102_scene0758_sfmaligned_indv_visuall/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1102_scene0758_sfmaligned_indv_visuall/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1102_scene0781_sfmaligned_indv_visuall/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1102_scene0708_sfmaligned_indv_visuall/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1102_scene0738_sfmaligned_indv_visuall/", type=str)
+
+# parser.add_argument('--dump_dir', default= "dump_0117_scene0710_sfmaligned_indv_big/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0117_scene0758_sfmaligned_indv_big/", type=str)
+parser.add_argument('--dump_dir', default= "dump_0117_scene0781_sfmaligned_indv_big/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0117_scene0708_sfmaligned_indv_big/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0117_scene0738_sfmaligned_indv_big/", type=str)
+
 
 # parser.add_argument('--dump_dir', default= "dump_1102_room0_sfmaligned_indv_big/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1102_room1_sfmaligned_indv_big/", type=str)
@@ -55,8 +66,8 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
 ### Scannet
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0710_00/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
-# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0758_00/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0781_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0708_00/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/', help='Root dir for dataset')
 

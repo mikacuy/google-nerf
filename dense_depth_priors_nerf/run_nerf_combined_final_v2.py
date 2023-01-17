@@ -1266,34 +1266,35 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             ###############################################
 
         ### Only start cIMLE after certain number of iterations
-        if args.cimle_nerf and i % args.refresh_z_nerf == 0 and i>100000:
+        if args.cimle_nerf and i % args.refresh_z_nerf == 0 and i>=100000:
         # if args.cimle_nerf and (i % args.refresh_z_nerf == 701 or i == 1):
             ###############################################
             #### cIMLE on NeRF for Space Carving ##########
             ###############################################
-            num_images = len(i_train)
-            SPACE_CARVING_INDICES = torch.autograd.Variable(torch.zeros((num_images, images.shape[1], images.shape[2], args.N_importance), dtype=torch.int, device=images.device), requires_grad=False)
-            CACHED_U = torch.autograd.Variable(torch.zeros((num_images, images.shape[1], images.shape[2], args.N_importance), dtype=torch.float, device=images.device), requires_grad=False)
+            with torch.no_grad():
+                
+                num_images = len(i_train)
+                SPACE_CARVING_INDICES = torch.autograd.Variable(torch.zeros((num_images, images.shape[1], images.shape[2], args.N_importance), dtype=torch.int, device=images.device), requires_grad=False)
+                CACHED_U = torch.autograd.Variable(torch.zeros((num_images, images.shape[1], images.shape[2], args.N_importance), dtype=torch.float, device=images.device), requires_grad=False)
 
-            print("Re-caching indices for space carving loss.")
-            for n, img_idx in enumerate(i_train):
-                print("Recaching image {}/{}".format(n + 1, num_images), end="")
-                target = images[img_idx]
-                pose = poses[img_idx, :3,:4]
-                intrinsic = intrinsics[img_idx, :]
-                prior_depth_hypothesis = all_depth_hypothesis[img_idx]
+                print("Re-caching indices for space carving loss.")
+                for n, img_idx in enumerate(i_train):
+                    print("Recaching image {}/{}".format(n + 1, num_images), end="")
+                    target = images[img_idx]
+                    pose = poses[img_idx, :3,:4]
+                    intrinsic = intrinsics[img_idx, :]
+                    prior_depth_hypothesis = all_depth_hypothesis[img_idx]
 
-                ### Rescale with current scale shift values
-                curr_scale = DEPTH_SCALES[img_idx]
-                curr_shift = DEPTH_SHIFTS[img_idx]
-                prior_depth_hypothesis = prior_depth_hypothesis*curr_scale + curr_shift                 
+                    ### Rescale with current scale shift values
+                    curr_scale = DEPTH_SCALES[img_idx]
+                    curr_shift = DEPTH_SHIFTS[img_idx]
+                    prior_depth_hypothesis = prior_depth_hypothesis*curr_scale + curr_shift                 
 
-                if args.input_ch_cam > 0:
-                    render_kwargs_test['embedded_cam'] = embedcam_fn[img_idx]
+                    if args.input_ch_cam > 0:
+                        render_kwargs_test['embedded_cam'] = embedcam_fn[img_idx]
 
-                with torch.no_grad():
-                    # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
-                    rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 3), c2w=pose, **render_kwargs_test)
+                    rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+                    # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 3), c2w=pose, **render_kwargs_test)
 
                     u = extras['u']
 
@@ -1316,9 +1317,9 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                     # # print(CACHED_U)
                     # exit()
 
-            ###############################################
-            # print(SPACE_CARVING_INDICES)
-            # print()
+                ###############################################
+                # print(SPACE_CARVING_INDICES)
+                # print()
 
         ### Scale the hypotheses by scale and shift
         img_i = np.random.choice(i_train)

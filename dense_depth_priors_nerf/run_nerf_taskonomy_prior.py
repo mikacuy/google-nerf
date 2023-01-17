@@ -1,3 +1,5 @@
+### Convert depth completion prior to meters completion is different
+
 import os
 import shutil
 import subprocess
@@ -21,8 +23,8 @@ from tqdm import tqdm, trange
 
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip
-from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
+from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, convert_depth_completion_scaling_to_m_taskonomy, \
+    convert_m_to_depth_completion_scaling, convert_m_to_depth_completion_scaling_taskonomy, get_pretrained_normalize, resize_sparse_depth
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -669,6 +671,7 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
         interpolation=torchvision.transforms.functional.InterpolationMode.NEAREST)
     depths_tmp, valid_depths_tmp = resize_sparse_depth(depths_tmp, valid_depths, input_size)
     normalize, _ = get_pretrained_normalize()
+
     print(depths_tmp[valid_depths_tmp])
     depths_tmp[valid_depths_tmp] = convert_m_to_depth_completion_scaling(depths_tmp[valid_depths_tmp])
     print(depths_tmp[valid_depths_tmp])
@@ -687,8 +690,11 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
             rgb = normalize['rgb'](rgb)
             input = torch.cat((rgb, depth.unsqueeze(0)), 0).unsqueeze(0)
             pred = net(input)
-            depths_out[i] = convert_depth_completion_scaling_to_m(pred[0])
-            depths_std_out[i] = convert_depth_completion_scaling_to_m(pred[1])
+            # depths_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[0])
+            # depths_std_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[1])
+            depths_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[0])
+            depths_std_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[1])
+
         depths_out = torch.stack((depths_out, depths_std_out), 1)
         depths_out = torchvision.transforms.functional.resize(depths_out, orig_size, \
             interpolation=torchvision.transforms.functional.InterpolationMode.NEAREST)
@@ -699,7 +705,7 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
     depths_out_max = max_pool(depths_out_0) + 0.01
     depths_out_min = -1. * max_pool(-1. * depths_out_0) - 0.01
     depths_out[:, 1, :, :] = torch.maximum(depths_out[:, 1, :, :], (depths_out_max - depths_out_min).squeeze(1))
-    
+
     # mask out depth with very large uncertainty
     depths_out = depths_out.permute(0, 2, 3, 1)
     valid_depths_out = torch.full_like(valid_depths, True)
@@ -711,8 +717,8 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
             100. * (1. - valid_depths_out.sum() / valid_depths_out.numel()), invalidate_large_std_threshold))
 
     print(depths_out)
-    exit()
-    
+    exit()    
+
     return depths_out, valid_depths_out
 
 def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, scene_sample_params, args):
