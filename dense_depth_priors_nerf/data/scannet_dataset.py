@@ -2,6 +2,7 @@ import os
 import random
 import math
 import sqlite3
+import json
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,8 @@ import torch
 from torchvision import transforms
 
 from .error_sources import add_missing_depth, add_quadratic_depth_noise
+
+np.seterr(divide = 'ignore') 
 
 def is_in_list(file, list_to_check):
     for h in list_to_check:
@@ -27,8 +30,13 @@ def apply_filter(files, dataset_dir, dataset_split):
     return [f for f in files if is_in_list(f, whitelist)]
 
 def read_rgb(rgb_file):
-    bgr = cv2.imread(rgb_file)
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+    try:
+        bgr = cv2.imread(rgb_file)
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    except:
+        return None
+
     assert rgb.shape[2] == 3
 
     to_tensor = transforms.ToTensor()
@@ -36,21 +44,48 @@ def read_rgb(rgb_file):
     return rgb
 
 def read_depth(depth_file):
-    depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED)
+    # depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED)
+    depth = cv2.imread(depth_file, -1)
+    depth = np.log( 1 + depth ) / ( np.log( 2. ** 16.0 ) )   #### --> Got this from the taskonomy repo
+
+    # depth = np.log( 1 + depth ) / ( np.log( 2. ** 16.0 / 4.0) )
+
     assert len(depth.shape) == 2
 
     valid_depth = depth.astype('bool')
     depth = depth.astype('float32')
 
+    # print(depth)
+    # exit()
+
     # 16bit integer range corresponds to range 0 .. 65.54m
-    # use the first quarter of this range up to 16.38m and invalidate depth values beyond
-    # scale depth, such that range 0 .. 1 corresponds to range 0 .. 16.38m
-    max_depth = np.float32(2 ** 16 - 1) / 4.
-    depth = depth / max_depth
-    invalidate_mask = depth > 1.
-    depth[invalidate_mask] = 0.
-    valid_depth[invalidate_mask] = False
+    # use the first quarter of this range up to 16.38m and invalidate depth values beyond   ---> Can't figure out how to do this for taskonomy, it seems the min depth deeper
+    # scale depth, such that range 0 .. 1 corresponds to range 0 .. 16.38m   
+    # max_depth = np.float32(2 ** 16 - 1) / 4.
+    # depth = depth / max_depth    
+
+    invalidate_mask1 = depth > 1. 
+    invalidate_mask2 = depth < 0.
+    depth[invalidate_mask1] = 0.
+    depth[invalidate_mask2] = 0.
+    valid_depth[invalidate_mask1] = False
+    valid_depth[invalidate_mask2] = False
+
+    # print(np.max(depth))
+    # print(np.min(depth[~invalidate_mask2]))
+    # exit()
+
     return transforms.functional.to_tensor(depth), transforms.functional.to_tensor(valid_depth)
+##############################
+
+def convert_depth_completion_scaling_to_m_taskonomy(depth):
+    # convert from depth completion scaling to meter, that means map range 0 .. 1 to range 0 .. 16,38m
+    return depth * np.log( 2. ** 16.0 )
+
+def convert_m_to_depth_completion_scaling_taskonomy(depth):
+    # convert from meter to depth completion scaling, which maps range 0 .. 16,38m to range 0 .. 1
+    return depth / np.log( 2. ** 16.0 )
+
 
 def convert_depth_completion_scaling_to_m(depth):
     # convert from depth completion scaling to meter, that means map range 0 .. 1 to range 0 .. 16,38m
@@ -211,6 +246,248 @@ class ScanNetDataset(torch.utils.data.dataset.Dataset):
         if self.depth_noise:
             data['rgbd'][3, :, :] = convert_m_to_depth_completion_scaling(add_quadratic_depth_noise( \
                 convert_depth_completion_scaling_to_m(data['rgbd'][3, :, :]), data['valid_depth'].squeeze()))
+
+        return data
+
+    def sample_depth_at_image_features(self, depth, valid_depth, id, scale, pad_height):
+        depth_shape = depth.shape
+        db_id = self.id2dbid[id]
+        # 6 affine coordinates
+        keypoints = [np.frombuffer(coords[0], dtype=np.float32).reshape(-1, 6) if coords[0] is not None else None for coords in self.feature_db.execute( \
+            "SELECT data FROM keypoints WHERE image_id=={}".format(db_id))]
+        if keypoints[0] is not None:
+            cols = keypoints[0][:, 0]
+            rows = keypoints[0][:, 1]
+            rows = rows + pad_height
+            cols = (cols * scale[1]).astype(int)
+            rows = (rows * scale[0]).astype(int)
+            row_col_mask = (rows >= 0) & (rows < depth_shape[1]) & (cols >= 0) & (cols < depth_shape[2])
+            rows = rows[row_col_mask]
+            cols = cols[row_col_mask]
+            keypoints_mask = torch.full(depth_shape, False)
+            keypoints_mask[0, rows, cols] = True
+            valid_depth = torch.logical_and(keypoints_mask, valid_depth)
+            depth[torch.logical_not(valid_depth)] = 0.
+        else:
+            depth = torch.zeros_like(depth)
+            valid_depth = torch.zeros_like(valid_depth)
+        return depth, valid_depth
+
+    def __len__(self):
+        return len(self.rgb_files)
+
+
+class TaskonomyDataset(torch.utils.data.dataset.Dataset):
+    def __init__(self, dataset_dir, data_split, db_path, random_rot=0, load_size=(240, 320), \
+            horizontal_flip=False, color_jitter=None, depth_noise=False, missing_depth_percent=0.998):
+        super(TaskonomyDataset, self).__init__()
+
+        ### Get the data
+        dir_anno = os.path.join(dataset_dir,
+                              'annotations',
+                              data_split + '_annotations.json')
+
+        with open(dir_anno, 'r') as load_f:
+            all_annos = json.load(load_f)
+
+        rgb_files = [
+            os.path.join(dataset_dir, "..", all_annos[i]['rgb_path']) 
+            for i in range(len(all_annos))
+        ]
+        depth_files = [
+            os.path.join(dataset_dir, "..", all_annos[i]['depth_path'])
+            if 'depth_path' in all_annos[i]
+            else None
+            for i in range(len(all_annos))
+        ]
+
+        # ### Check if file exist otherwise remove ###
+        # idx_to_remove = []
+        # filtered_rgb_files = []
+        # filtered_depth_files = []
+
+        # for i in range(len(rgb_files)):
+        #     curr_rgb_file = rgb_files[i]
+        #     curr_depth_file = depth_files[i]
+
+        #     try:
+        #         bgr = cv2.imread(curr_rgb_file)
+        #         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)                
+        #     except:
+        #         print("Error in opening the image.")
+        #         continue
+
+        #     filtered_rgb_files.append(curr_rgb_file)
+        #     filtered_depth_files.append(curr_depth_file)
+        # ############################################    
+        filtered_rgb_files = rgb_files
+        filtered_depth_files = depth_files
+
+        print(len(filtered_rgb_files))
+        print(len(filtered_depth_files))
+        # exit()
+
+        self.rgb_files = filtered_rgb_files
+        self.depth_files = filtered_depth_files
+
+        # apply train val test split
+        self.dataset_dir = dataset_dir
+        # dir_suffix = ""
+        # if data_split == "test":
+        #     dir_suffix = "_test"
+        # input_scenes_dir = "scans{}".format(dir_suffix)
+        # filtered_scenes = [os.path.join(input_scenes_dir, s) for s in 
+        #     apply_filter(os.listdir(os.path.join(dataset_dir, input_scenes_dir)), dataset_dir, data_split)]
+        
+        # # create file list
+        # self.rgb_files = []
+        # for rel_scene_path in filtered_scenes:
+        #     rel_scene_color_path = os.path.join(rel_scene_path, "color")
+        #     for rgb in os.listdir(os.path.join(dataset_dir, rel_scene_color_path)):
+        #         rel_rgb_path = os.path.join(rel_scene_color_path, rgb)
+        #         self.rgb_files.append(rel_rgb_path)
+        
+        # transformation
+        self.normalize, self.unnormalize = get_pretrained_normalize()
+        self.random_rot = random_rot
+        self.load_size = load_size
+        self.horizontal_flip = horizontal_flip
+        self.color_jitter = color_jitter
+
+        # depth sampling
+        self.missing_depth_percent = missing_depth_percent # add percentage of missing depth
+        self.depth_noise = depth_noise # add gaussian depth noise
+        # open keypoint database for sampling at image keypoints
+        self.feature_db = sqlite3.connect(db_path).cursor()
+        self.id2dbid = dict((n[:-4], id) for n, id in self.feature_db.execute("SELECT name, image_id FROM images"))
+
+    def __getitem__(self, index):
+        # rgb_file = os.path.join(self.dataset_dir, self.rgb_files[index])
+        # depth_file = rgb_file.replace("color", "depth").replace(".jpg", ".png")
+
+        rgb_file = self.rgb_files[index]
+        depth_file = self.depth_files[index]
+
+        rgb = read_rgb(rgb_file)
+
+        if rgb is None:
+            data = {'rgbd': torch.zeros([4, 240, 320], dtype=torch.float32), 'valid_depth' : torch.zeros([1, 240, 320], dtype=torch.bool),\
+             'target_depth' : torch.zeros([1, 240, 320], dtype=torch.float32), 'target_valid_depth' : torch.zeros([1, 240, 320], dtype=torch.bool), "found":False}
+            return data
+
+        depth, valid_depth = read_depth(depth_file)
+        # pad to make aspect ratio of rgb (968x1296) and depth (480x640) match
+        if rgb.shape[1] == 968 and rgb.shape[2] == 1296:
+            # pad 2 pixels on both sides in height dimension
+            pad_rgb_height = 2
+            rgb = torch.nn.functional.pad(rgb, (0, 0, pad_rgb_height, pad_rgb_height))
+            depth_shape = depth.shape
+            rgb_shape = rgb.shape
+            scale_rgb = (float(depth_shape[1]) / float(rgb_shape[1]), float(depth_shape[2]) / float(rgb_shape[2]))
+            rgb = transforms.functional.resize(rgb, (depth_shape[1], depth_shape[2]), interpolation=transforms.functional.InterpolationMode.NEAREST)
+        else:
+            pad_rgb_height = 0.
+            scale_rgb = (1., 1.)
+
+        ### Get id
+        # id = self.rgb_files[index][:-4].replace("scans_test/", "").replace("scans/", "")
+        id = self.rgb_files[index][:-4].split("/")[-3:]
+        id = '/'.join(id)
+
+        # print(self.rgb_files[index])
+        # print(id)
+        # exit()
+
+        # precompute random rotation
+        rot = random.uniform(-self.random_rot, self.random_rot)
+
+        # precompute resize and crop
+        tan_abs_rot = math.tan(math.radians(abs(rot)))
+        border_width = math.ceil(self.load_size[0] * tan_abs_rot)
+        border_height = math.ceil(self.load_size[1] * tan_abs_rot)
+        top = math.floor(0.5 * border_height)
+        left = math.floor(0.5 * border_width)
+        resize_size = (self.load_size[0] + border_height, self.load_size[1] + border_width)
+
+        # precompute random horizontal flip
+        apply_hflip = self.horizontal_flip and random.random() > 0.5
+
+        # create a sparsified depth and a complete target depth
+        target_valid_depth = valid_depth.clone()
+        target_depth = depth.clone()
+        depth, valid_depth = self.sample_depth_at_image_features(depth, valid_depth, id, scale_rgb, pad_rgb_height)
+        depth, valid_depth = add_missing_depth(depth, valid_depth, self.missing_depth_percent)
+        
+        rgbd = torch.cat((rgb, depth), 0)
+        data = {'rgbd': rgbd, 'valid_depth' : valid_depth, 'target_depth' : target_depth, 'target_valid_depth' : target_valid_depth, "found": True}
+
+        # print(rgbd)
+        # print(valid_depth)
+        # print(target_depth)
+        # print(target_valid_depth)
+
+        # print(rgbd.shape)
+        # print(valid_depth.shape)
+        # print(target_depth.shape)
+        # print(target_valid_depth.shape)
+        # exit()
+
+        # apply transformation
+        for key in data.keys():
+
+            if key == "found":
+                continue
+
+            # resize
+            if key == 'rgbd':
+                # resize such that sparse points are preserved
+                B_depth, data['valid_depth'] = resize_sparse_depth(data['rgbd'][3, :, :].unsqueeze(0), data['valid_depth'], resize_size)
+                B_rgb = transforms.functional.resize(data['rgbd'][:3, :, :], resize_size, interpolation=transforms.functional.InterpolationMode.NEAREST)
+                data['rgbd'] = torch.cat((B_rgb, B_depth), 0)
+            else:
+                # avoid blurring the depth channel with invalid values by using interpolation mode nearest
+                data[key] = transforms.functional.resize(data[key], resize_size, interpolation=transforms.functional.InterpolationMode.NEAREST)
+            
+            # augment color
+            if key == 'rgbd':
+                if self.color_jitter is not None:
+                    cj = transforms.ColorJitter(brightness=self.color_jitter, contrast=self.color_jitter, saturation=self.color_jitter, \
+                        hue=self.color_jitter)
+                    data['rgbd'][:3, :, :] = cj(data['rgbd'][:3, :, :])
+            
+            # rotate
+            if self.random_rot != 0:
+                data[key] = transforms.functional.rotate(data[key], rot)
+            
+            # crop
+            data[key] = transforms.functional.crop(data[key], top, left, self.load_size[0], self.load_size[1])
+
+            # horizontal flip
+            if apply_hflip:
+                data[key] = transforms.functional.hflip(data[key])
+            
+            # normalize
+            if key == 'rgbd':
+                data[key] = self.normalize['rgbd'](data[key])
+                # scale depth according to resizing due to rotation
+                data[key][3, :, :] /= (1. + tan_abs_rot)
+
+        # add depth noise
+        if self.depth_noise:
+            data['rgbd'][3, :, :] = convert_m_to_depth_completion_scaling_taskonomy(add_quadratic_depth_noise( \
+                convert_depth_completion_scaling_to_m_taskonomy(data['rgbd'][3, :, :]), data['valid_depth'].squeeze()))
+
+        # print(data['rgbd'])
+        # print(valid_depth)
+        # print(target_depth)
+        # print(target_valid_depth)
+
+        # print(data['rgbd'].shape)
+        # print(data['valid_depth'].shape)
+        # print(data['target_depth'].shape)
+        # print(data['target_valid_depth'].shape)
+        # exit()
+
 
         return data
 

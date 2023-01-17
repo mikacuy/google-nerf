@@ -1245,7 +1245,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                         render_kwargs_test["embedded_cam"] = all_z[s, img_idx]
 
                         with torch.no_grad():
-                            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+                            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 3), c2w=pose, **render_kwargs_test)
                         
                             # compute color metrics
                             img_loss = img2mse(rgb, target)
@@ -1292,7 +1292,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                     render_kwargs_test['embedded_cam'] = embedcam_fn[img_idx]
 
                 with torch.no_grad():
-                    rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+                    # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+                    rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 3), c2w=pose, **render_kwargs_test)
 
                     u = extras['u']
 

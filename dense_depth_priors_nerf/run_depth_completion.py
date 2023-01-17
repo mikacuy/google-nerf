@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, Subset
 from train_utils import MeanTracker
 import cv2
 
-from data import ScanNetDataset, convert_depth_completion_scaling_to_m, create_random_subsets
+from data import TaskonomyDataset, convert_depth_completion_scaling_to_m, create_random_subsets
 from train_utils import print_network_info, get_hours_mins, MeanTracker, make_image_grid, apply_max_filter, \
     update_learning_rate
 from model import resnet18_skip
@@ -114,6 +114,10 @@ class Validator:
                     shuffle=False, num_workers=4, drop_last=True)):
                 batch_start_time = time.time()
 
+                if not torch.all(data["found"]):
+                    print("Bad batch found. Skipping...")
+                    continue
+                
                 # move data to gpu and predict
                 valid_target = data['target_valid_depth'].to(self.device)
                 if valid_target.sum() <= 0:
@@ -176,12 +180,12 @@ def train_depth_completion(args):
     
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.8, patience=3, verbose=True)
     
-    tb = SummaryWriter(log_dir=os.path.join("runs", args.expname))
+    tb = SummaryWriter(log_dir=os.path.join("runs_completion", args.expname))
 
     # create datasets
-    train_dataset = ScanNetDataset(args.dataset_dir, "train", args.db_path, random_rot=args.random_rot, horizontal_flip=True, \
+    train_dataset = TaskonomyDataset(args.dataset_dir, "train", args.db_path, random_rot=args.random_rot, horizontal_flip=True, \
         color_jitter=args.color_jitter, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
-    val_dataset = ScanNetDataset(args.dataset_dir, "val", args.db_path, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
+    val_dataset = TaskonomyDataset(args.dataset_dir, "val", args.db_path, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
     unnormalize = train_dataset.unnormalize
     train_loader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=6, drop_last=True)
     args.i_val = min(args.i_val, len(train_loader))
@@ -198,6 +202,10 @@ def train_depth_completion(args):
         for i, data in enumerate(train_loader):
             batch_start_time = time.time()
             step = (epoch - 1) * train_batch_count + i + 1
+
+            if not torch.all(data["found"]):
+                print("Bad batch found. Skipping...")
+                continue
 
             # move data to gpu and predict
             valid_target = data['target_valid_depth'].to(device)
@@ -264,7 +272,7 @@ def main():
         help='random rotation in degree as data augmentation')
     parser.add_argument("--color_jitter", type=float, default=0.4, \
         help='add color jitter as data augmentation, set None to deactivate')
-    parser.add_argument("--batch_size", type=int, default=8, \
+    parser.add_argument("--batch_size", type=int, default=32, \
         help='batch size')
     parser.add_argument("--n_epochs", type=int, default=12, \
         help='number of epochs')
@@ -297,7 +305,8 @@ def main():
         os.makedirs(os.path.join(result_dir), exist_ok=True)
         
         # create dataset
-        test_dataset = ScanNetDataset(args.dataset_dir, "test", args.db_path, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
+        # test_dataset = TaskonomyDataset(args.dataset_dir, "test", args.db_path, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
+        test_dataset = TaskonomyDataset(args.dataset_dir, "val", args.db_path, depth_noise=True, missing_depth_percent=args.missing_depth_percent)
         unnormalize = test_dataset.unnormalize
         test_loader = DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=6, drop_last=True)
         print("Test on {} samples".format(len(test_dataset)))
@@ -311,7 +320,11 @@ def main():
             net.eval()
             test_metrics = MeanTracker()
             for i, data in enumerate(test_loader):
-                
+
+                if not torch.all(data["found"]):
+                    print("Bad batch found. Skipping...")
+                    continue
+                    
                 # move data to gpu and predict
                 valid_target = data['target_valid_depth'].to(device)
                 if valid_target.sum() <= 0:
