@@ -669,8 +669,10 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
         interpolation=torchvision.transforms.functional.InterpolationMode.NEAREST)
     depths_tmp, valid_depths_tmp = resize_sparse_depth(depths_tmp, valid_depths, input_size)
     normalize, _ = get_pretrained_normalize()
+    print(depths_tmp[valid_depths_tmp])
     depths_tmp[valid_depths_tmp] = convert_m_to_depth_completion_scaling(depths_tmp[valid_depths_tmp])
-    
+    print(depths_tmp[valid_depths_tmp])
+
     # run depth completion
     with torch.no_grad():
         net = resnet18_skip(pretrained=False, map_location=device, input_size=input_size).to(device)
@@ -707,6 +709,9 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
         depths_out[large_std_mask] = 0.
         print("Masked out {:.1f} percent of completed depth with standard deviation greater {:.2f}".format( \
             100. * (1. - valid_depths_out.sum() / valid_depths_out.numel()), invalidate_large_std_threshold))
+
+    print(depths_out)
+    exit()
     
     return depths_out, valid_depths_out
 
