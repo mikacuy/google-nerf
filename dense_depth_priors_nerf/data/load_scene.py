@@ -91,7 +91,7 @@ def load_ground_truth_depth(basedir, train_filenames, image_size, depth_scaling_
     return gt_depths, gt_valid_depths
 
 def load_scene(basedir, train_json = "transforms_train.json"):
-    splits = ['train', 'val', 'test', 'video2']
+    splits = ['train', 'val', 'test', 'video']
 
     all_imgs = []
     all_depths = []
@@ -537,8 +537,13 @@ def load_scene_processed(basedir, cimle_dir, num_hypothesis=20, train_json = "tr
     all_intrinsics = []
     counts = [0]
     filenames = []
+
+    # print(basedir)
+
     for s in splits:
         if os.path.exists(os.path.join(basedir, 'transforms_{}.json'.format(s))):
+
+            # print("File exists.")
 
             if s == "train":
                 json_fname =  os.path.join(basedir, train_json)

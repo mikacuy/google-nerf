@@ -38,7 +38,7 @@ parser.add_argument('--output_path', required=True, help='where to output 2d dat
 parser.add_argument('--scene_name', required=True, help='name of scene')
 parser.add_argument('--export_label_images', dest='export_label_images', action='store_true')
 parser.add_argument('--label_type', default='label-filt', help='which labels (label or label-filt)')
-parser.add_argument('--frame_skip', type=int, default=10, help='export every nth frame')
+parser.add_argument('--frame_skip', type=int, default=5, help='export every nth frame')
 parser.add_argument('--label_map_file', default='scannetv2-labels.combined.tsv',
                     help='path to scannetv2-labels.combined.tsv (required for label export only)')
 # parser.add_argument('--output_image_width', type=int, default=960, help='export image width')

@@ -1266,7 +1266,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             ###############################################
 
         ### Only start cIMLE after certain number of iterations
-        if args.cimle_nerf and i % args.refresh_z_nerf == 0 and i>=100000:
+        if args.cimle_nerf and i % args.refresh_z_nerf == 12 and i>=args.start_z_nerf:
         # if args.cimle_nerf and (i % args.refresh_z_nerf == 701 or i == 1):
             ###############################################
             #### cIMLE on NeRF for Space Carving ##########
@@ -1299,38 +1299,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
                     u = extras['u']
 
-                    print(u.shape)
-                    print(extras["pred_hyp"].shape)
-                    print(prior_depth_hypothesis.shape)
-                    print()
-
-                    ## Space carving --> get minimum index
-                    #print(torch.cuda.memory_summary())
-                    #print(torch.cuda.memory_allocated(device=None))
-                    print(extras.keys())
-                    del extras["weights"]
-                    del extras["weights0"]
-                    del extras["z_std"]
-                    del extras["rgb0"]
-                    del extras["disp0"]
-                    del extras["acc0"]
-                    del extras["z_vals0"]
-                    del extras["z_vals"]
-                    del extras["u"]
-                    torch.cuda.empty_cache()
-
                     curr_space_carving_idx = get_space_carving_idx_corrected(extras["pred_hyp"], prior_depth_hypothesis, is_joint=args.is_joint, norm_p=args.norm_p, threshold=args.space_carving_threshold)
                     
                     SPACE_CARVING_INDICES[img_idx] = curr_space_carving_idx
                     CACHED_U[img_idx] = u
 
-                    print(SPACE_CARVING_INDICES[0])
-                    print(SPACE_CARVING_INDICES[0].shape)
-                    print(SPACE_CARVING_INDICES[0][100][30])
-
-                    print()
-                    print(CACHED_U)
-                    exit()
 
                 ###############################################
                 # print(SPACE_CARVING_INDICES)
@@ -1623,6 +1596,7 @@ def config_parser():
     ### For cIMLE on nerf-prior training
     parser.add_argument('--cimle_nerf', default= False, type=bool)
     parser.add_argument('--refresh_z_nerf', default= 50000, type=int, help='Number of iterations to recache latent code')
+    parser.add_argument('--start_z_nerf', default= 100000, type=int, help='Number of iterations to recache latent code')
 
 
     ###### For cIMLE for white balancing

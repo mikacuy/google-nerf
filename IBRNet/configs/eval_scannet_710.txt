@@ -1,0 +1,18 @@
+### INPUT
+expname = eval_scannet710_singleneighbor
+rootdir = /orion/u/mikacuy/coordinate_mvs/IBRNet/  
+ckpt_path = /orion/u/mikacuy/coordinate_mvs/IBRNet/out/finetune_scannet710_singleneighbor/model_315000.pth   
+distributed = False
+
+## dataset
+eval_dataset = scannet
+eval_scenes = scene0710_00
+
+### TESTING
+chunk_size = 4096
+
+### RENDERING
+N_importance = 64
+N_samples = 64
+inv_uniform = False
+white_bkgd = False

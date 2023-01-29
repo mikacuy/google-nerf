@@ -672,9 +672,9 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
     depths_tmp, valid_depths_tmp = resize_sparse_depth(depths_tmp, valid_depths, input_size)
     normalize, _ = get_pretrained_normalize()
 
-    print(depths_tmp[valid_depths_tmp])
-    depths_tmp[valid_depths_tmp] = convert_m_to_depth_completion_scaling(depths_tmp[valid_depths_tmp])
-    print(depths_tmp[valid_depths_tmp])
+    # print(depths_tmp[valid_depths_tmp])
+    depths_tmp[valid_depths_tmp] = convert_m_to_depth_completion_scaling_taskonomy(depths_tmp[valid_depths_tmp])
+    # print(depths_tmp[valid_depths_tmp])
 
     # run depth completion
     with torch.no_grad():
@@ -716,8 +716,8 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
         print("Masked out {:.1f} percent of completed depth with standard deviation greater {:.2f}".format( \
             100. * (1. - valid_depths_out.sum() / valid_depths_out.numel()), invalidate_large_std_threshold))
 
-    print(depths_out)
-    exit()    
+    # print(depths_out)
+    # exit()    
 
     return depths_out, valid_depths_out
 

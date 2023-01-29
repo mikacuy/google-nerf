@@ -36,8 +36,14 @@ parser = argparse.ArgumentParser()
 # parser.add_argument("--logdir", default="log_0926_bigsubset_dataparallel_corrected/", help="path to the log directory", type=str)
 # parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", type=str)
 
-parser.add_argument('--dump_dir', default= "dump_in_the_wild_paper_trial2_cropped/", type=str)
-parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/paper_trial2_cropped', help='Root dir for dataset')
+# parser.add_argument('--dump_dir', default= "dump_in_the_wild_paper_trial2_cropped/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in-the-wild-compressed/paper_trial2_cropped', help='Root dir for dataset')
+
+# parser.add_argument('--dump_dir', default= "dump_scade_rebuttal_reflective_surfaces2/", type=str)
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/AdelaiDepth/LeReS/Train/scade_rebuttal_reflective_surfaces', help='Root dir for dataset')
+
+parser.add_argument('--dump_dir', default= "dump_scade_rebuttal_reflective_surfaces_v2/", type=str)
+parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/AdelaiDepth/LeReS/Train/scade_rebuttal_reflective_surfaces_v2', help='Root dir for dataset')
 
 
 parser.add_argument("--logdir", default="log_0928_all_dataparallel/", help="path to the log directory", type=str)

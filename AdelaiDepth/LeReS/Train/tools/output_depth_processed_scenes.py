@@ -43,7 +43,7 @@ parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", ty
 # parser.add_argument('--dump_dir', default= "dump_1108_Church_subsample_sfmaligned_indv_new/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1108_Church_subsample2_sfmaligned_indv_new/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1108_Courtroom_subsample_sfmaligned_indv_new/", type=str)
-parser.add_argument('--dump_dir', default= "dump_1108_Courtroom_subsample2_sfmaligned_indv_new/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_1108_Courtroom_subsample2_sfmaligned_indv_new/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1108_Meetingroom_subsample_sfmaligned_indv_new/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1108_Meetingroom_subsample_part2_sfmaligned_indv_new/", type=str)
 
@@ -60,7 +60,7 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Church_subsample/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Church_subsample2/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Courtroom_subsample/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Courtroom_subsample2/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Courtroom_subsample2/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Meetingroom_subsample/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes/Meetingroom_subsample_part2/train/', help='Root dir for dataset')
 
@@ -69,6 +69,37 @@ parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/proce
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_processed/processed/b_kitchen/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_processed/processed/basement_part2/train/', help='Root dir for dataset')
 
+
+### Sparsity experiment
+# parser.add_argument('--dump_dir', default= "dump_0128_scene0710_7_sfmaligned_indv/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0128_scene0758_1_sfmaligned_indv/", type=str)
+parser.add_argument('--dump_dir', default= "dump_0128_scene0781_7_sfmaligned_indv/", type=str)
+
+
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene710/1/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene710/2/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene710/3/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene710/4/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene710/5/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene710/6/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene710/7/train/', help='Root dir for dataset')
+
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene781/1/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene781/2/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene781/3/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene781/4/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene781/5/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene781/6/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity_v2/processed/sparsity_subsets_dense/scene781/7/train/', help='Root dir for dataset')
+
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity/processed/sparsity_subsets_dense/scene758/1/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity/processed/sparsity_subsets_dense/scene758/2/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity/processed/sparsity_subsets_dense/scene758/3/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity/processed/sparsity_subsets_dense/scene758/4/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity/processed/sparsity_subsets_dense/scene758/5/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity/processed/sparsity_subsets_dense/scene758/6/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/group/scannet_v2/dense_depth_priors/rebuttal_sparsity/processed/sparsity_subsets_dense/scene758/7/train/', help='Root dir for dataset')
+###########################
 
 
 parser.add_argument('--backbone', default= "resnext101", type=str)

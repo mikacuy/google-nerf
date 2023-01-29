@@ -655,6 +655,23 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
     rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
     target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
     target_d = target_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1) or (N_rand, 2)
+
+    if args.mask_corners:
+        ### Mask out the corners
+        num_pix_to_mask = 20
+        target_valid_depth[:num_pix_to_mask, :num_pix_to_mask] = 0
+        target_valid_depth[:num_pix_to_mask, -num_pix_to_mask:] = 0
+        target_valid_depth[-num_pix_to_mask:, :num_pix_to_mask] = 0
+        target_valid_depth[-num_pix_to_mask:, -num_pix_to_mask:] = 0
+
+    elif args.mask_edges:
+        ### Mask out the corners
+        num_pix_to_mask = 8
+        target_valid_depth[:num_pix_to_mask, :] = 0
+        target_valid_depth[-num_pix_to_mask:, :] = 0
+        target_valid_depth[:, -num_pix_to_mask:] = 0
+        target_valid_depth[:, :num_pix_to_mask] = 0
+
     target_vd = target_valid_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1)
     if args.depth_loss_weight > 0.:
         depth_range = precompute_depth_sampling(target_d)
@@ -1002,6 +1019,8 @@ def config_parser():
     parser.add_argument("--train_jsonfile", type=str, default='transforms_train.json',
                         help='json file containing training images')
 
+    parser.add_argument('--mask_corners', default= False, type=bool)
+    parser.add_argument('--mask_edges', default= False, type=bool)
 
     return parser
 

@@ -12,6 +12,12 @@ from torchvision import transforms
 
 from .error_sources import add_missing_depth, add_quadratic_depth_noise
 
+from PIL import Image 
+import PIL
+
+import skimage
+import skimage.io
+
 np.seterr(divide = 'ignore') 
 
 def is_in_list(file, list_to_check):
@@ -30,7 +36,6 @@ def apply_filter(files, dataset_dir, dataset_split):
     return [f for f in files if is_in_list(f, whitelist)]
 
 def read_rgb(rgb_file):
-
     try:
         bgr = cv2.imread(rgb_file)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
@@ -44,47 +49,38 @@ def read_rgb(rgb_file):
     return rgb
 
 def read_depth(depth_file):
-    # depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED)
-    depth = cv2.imread(depth_file, -1)
-    depth = np.log( 1 + depth ) / ( np.log( 2. ** 16.0 ) )   #### --> Got this from the taskonomy repo
 
-    # depth = np.log( 1 + depth ) / ( np.log( 2. ** 16.0 / 4.0) )
+    depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED)
+    depth[depth > 23000] = 0
+    drange = 512.0
+    depth = depth / drange ## This is in meters
 
     assert len(depth.shape) == 2
 
     valid_depth = depth.astype('bool')
     depth = depth.astype('float32')
 
-    # print(depth)
-    # exit()
-
     # 16bit integer range corresponds to range 0 .. 65.54m
-    # use the first quarter of this range up to 16.38m and invalidate depth values beyond   ---> Can't figure out how to do this for taskonomy, it seems the min depth deeper
+    # use the first quarter of this range up to 16.38m and invalidate depth values beyond  
     # scale depth, such that range 0 .. 1 corresponds to range 0 .. 16.38m   
-    # max_depth = np.float32(2 ** 16 - 1) / 4.
-    # depth = depth / max_depth    
 
-    invalidate_mask1 = depth > 1. 
-    invalidate_mask2 = depth < 0.
-    depth[invalidate_mask1] = 0.
-    depth[invalidate_mask2] = 0.
-    valid_depth[invalidate_mask1] = False
-    valid_depth[invalidate_mask2] = False
+    max_depth = 16.38
+    depth = depth / max_depth    
 
-    # print(np.max(depth))
-    # print(np.min(depth[~invalidate_mask2]))
-    # exit()
+    invalidate_mask = depth > 1. 
+    depth[invalidate_mask] = 0.
+    valid_depth[invalidate_mask] = False
 
     return transforms.functional.to_tensor(depth), transforms.functional.to_tensor(valid_depth)
 ##############################
 
 def convert_depth_completion_scaling_to_m_taskonomy(depth):
     # convert from depth completion scaling to meter, that means map range 0 .. 1 to range 0 .. 16,38m
-    return depth * np.log( 2. ** 16.0 )
+    return depth * 16.38
 
 def convert_m_to_depth_completion_scaling_taskonomy(depth):
     # convert from meter to depth completion scaling, which maps range 0 .. 16,38m to range 0 .. 1
-    return depth / np.log( 2. ** 16.0 )
+    return depth / 16.38
 
 
 def convert_depth_completion_scaling_to_m(depth):
@@ -244,8 +240,8 @@ class ScanNetDataset(torch.utils.data.dataset.Dataset):
 
         # add depth noise
         if self.depth_noise:
-            data['rgbd'][3, :, :] = convert_m_to_depth_completion_scaling(add_quadratic_depth_noise( \
-                convert_depth_completion_scaling_to_m(data['rgbd'][3, :, :]), data['valid_depth'].squeeze()))
+            data['rgbd'][3, :, :] = convert_m_to_depth_completion_scaling_taskonomy(add_quadratic_depth_noise( \
+                convert_depth_completion_scaling_to_m_taskonomy(data['rgbd'][3, :, :]), data['valid_depth'].squeeze()))
 
         return data
 
