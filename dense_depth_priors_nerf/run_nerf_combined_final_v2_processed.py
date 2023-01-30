@@ -1363,7 +1363,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         else:
             ## Mask rbg for edge pixels
             img_loss = (rgb - target_s) ** 2
-            print(space_carving_mask)
             img_loss = img_loss * space_carving_mask.unsqueeze(-1)
             img_loss = torch.mean(img_loss)
 
