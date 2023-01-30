@@ -983,7 +983,7 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
         space_carving_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
 
         ### Mask out the corners
-        num_pix_to_mask = 8
+        num_pix_to_mask = 10
         space_carving_mask[:num_pix_to_mask, :] = 0
         space_carving_mask[-num_pix_to_mask:, :] = 0
         space_carving_mask[:, -num_pix_to_mask:] = 0
@@ -1354,7 +1354,19 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         # compute loss and optimize
         optimizer.zero_grad()
         optimizer_ss.zero_grad()
-        img_loss = img2mse(rgb, target_s)
+        
+        # img_loss = img2mse(rgb, target_s)
+
+        if space_carving_mask is None:
+            img_loss = img2mse(rgb, target_s)
+
+        else:
+            ## Mask rbg for edge pixels
+            img_loss = (rgb - target_s) ** 2
+            print(space_carving_mask)
+            img_loss = img_loss * space_carving_mask.unsqueeze(-1)
+            img_loss = torch.mean(img_loss)
+
         psnr = mse2psnr(img_loss)
         
         loss = img_loss
@@ -1371,10 +1383,19 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         if args.depth_loss_weight > 0.:
             depth_loss = compute_depth_loss(extras['depth_map'], extras['z_vals'], extras['weights'], target_d, target_vd)
             loss = loss + args.depth_loss_weight * depth_loss
-        if 'rgb0' in extras:
-            img_loss0 = img2mse(extras['rgb0'], target_s)
+        if 'rgb0' in extras:            
+            if space_carving_mask is None:
+                img_loss0 = img2mse(extras['rgb0'], target_s)
+
+            else:
+                ### For edges
+                img_loss0 = (extras['rgb0'] - target_s) ** 2
+                img_loss0 = img_loss0 * space_carving_mask.unsqueeze(-1)
+                img_loss0 = torch.mean(img_loss0)
+
             psnr0 = mse2psnr(img_loss0)
             loss = loss + img_loss0
+
 
         loss.backward()
         # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)

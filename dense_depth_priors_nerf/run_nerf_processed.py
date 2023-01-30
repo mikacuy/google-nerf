@@ -657,20 +657,31 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
     target_d = target_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1) or (N_rand, 2)
 
     if args.mask_corners:
+        pixel_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
+
         ### Mask out the corners
         num_pix_to_mask = 20
-        target_valid_depth[:num_pix_to_mask, :num_pix_to_mask] = 0
-        target_valid_depth[:num_pix_to_mask, -num_pix_to_mask:] = 0
-        target_valid_depth[-num_pix_to_mask:, :num_pix_to_mask] = 0
-        target_valid_depth[-num_pix_to_mask:, -num_pix_to_mask:] = 0
+        pixel_mask[:num_pix_to_mask, :num_pix_to_mask] = 0
+        pixel_mask[:num_pix_to_mask, -num_pix_to_mask:] = 0
+        pixel_mask[-num_pix_to_mask:, :num_pix_to_mask] = 0
+        pixel_mask[-num_pix_to_mask:, -num_pix_to_mask:] = 0
+
+        pixel_mask = pixel_mask[select_coords[:, 0], select_coords[:, 1]]
 
     elif args.mask_edges:
+        pixel_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
+
         ### Mask out the corners
         num_pix_to_mask = 8
-        target_valid_depth[:num_pix_to_mask, :] = 0
-        target_valid_depth[-num_pix_to_mask:, :] = 0
-        target_valid_depth[:, -num_pix_to_mask:] = 0
-        target_valid_depth[:, :num_pix_to_mask] = 0
+        pixel_mask[:num_pix_to_mask, :] = 0
+        pixel_mask[-num_pix_to_mask:, :] = 0
+        pixel_mask[:, -num_pix_to_mask:] = 0
+        pixel_mask[:, :num_pix_to_mask] = 0
+
+        pixel_mask = pixel_mask[select_coords[:, 0], select_coords[:, 1]]
+    else: 
+        pixel_mask = None
+
 
     target_vd = target_valid_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1)
     if args.depth_loss_weight > 0.:
@@ -678,7 +689,7 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
         batch_rays = torch.stack([rays_o, rays_d, depth_range], 0)  # (3, N_rand, 3)
     else:
         batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
-    return batch_rays, target_s, target_d, target_vd, img_i
+    return batch_rays, target_s, target_d, target_vd, img_i, pixel_mask
 
 def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, invalidate_large_std_threshold=-1.):
     device = images.device
@@ -836,7 +847,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             update_learning_rate(optimizer, new_lrate)
         
         # make batch
-        batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
+        batch_rays, target_s, target_d, target_vd, img_i, pixel_mask = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
             intrinsics, args)
         if args.input_ch_cam > 0:
             render_kwargs_train['embedded_cam'] = embedcam_fn(torch.tensor(img_i, device=device))
@@ -847,14 +858,30 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         
         # compute loss and optimize
         optimizer.zero_grad()
-        img_loss = img2mse(rgb, target_s)
+
+        if pixel_mask is None:
+            img_loss = img2mse(rgb, target_s)
+
+        else:          
+            ## Mask rbg for edge pixels
+            img_loss = (rgb - target_s) ** 2
+            img_loss = img_loss * pixel_mask.unsqueeze(-1)
+            img_loss = torch.mean(img_loss)
+
         psnr = mse2psnr(img_loss)
         loss = img_loss
         if args.depth_loss_weight > 0.:
             depth_loss = compute_depth_loss(extras['depth_map'], extras['z_vals'], extras['weights'], target_d, target_vd)
             loss = loss + args.depth_loss_weight * depth_loss
         if 'rgb0' in extras:
-            img_loss0 = img2mse(extras['rgb0'], target_s)
+            if pixel_mask is None:
+                img_loss0 = img2mse(extras['rgb0'], target_s)
+            else:             
+                ### For edges
+                img_loss0 = (extras['rgb0'] - target_s) ** 2
+                img_loss0 = img_loss0 * pixel_mask.unsqueeze(-1)
+                img_loss0 = torch.mean(img_loss0)
+
             psnr0 = mse2psnr(img_loss0)
             loss = loss + img_loss0
         loss.backward()
