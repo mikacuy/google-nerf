@@ -40,5 +40,5 @@ dense_depth_priors_nerf/log*
 dense_depth_priors_nerf/depth_priors_network_weights/*
 piecewise_linear/slurm_output*
 piecewise_linear/runs/*
-piecewise_linear/log*
+piecewise_linear/log*   
 piecewise_linear/depth_priors_network_weights/*
