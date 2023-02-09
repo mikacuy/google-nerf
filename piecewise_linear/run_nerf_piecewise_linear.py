@@ -721,7 +721,7 @@ def render_rays(ray_batch,
         rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, raw_noise_std, pytest=pytest)
 
     weights = weights[..., 1:]
-    
+
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights}
     if retraw:
         ret['raw'] = raw
@@ -848,9 +848,10 @@ def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_tr
     return depths, valid_depths
 
 def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths):
-    np.random.seed(0)
-    torch.manual_seed(0)
-    torch.cuda.manual_seed(0)
+    np.random.seed(args.random_seed)
+    torch.manual_seed(args.random_seed)
+    torch.cuda.manual_seed(args.random_seed)
+    
     tb = SummaryWriter(log_dir=os.path.join("runs", args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
@@ -1101,6 +1102,8 @@ def config_parser():
     parser.add_argument("--train_jsonfile", type=str, default='transforms_train.json',
                         help='json file containing training images')
 
+    parser.add_argument("--random_seed",   type=int, default=0, 
+                        help='random seed used')
 
     return parser
 
