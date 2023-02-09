@@ -272,6 +272,29 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 depth_metrics = {"depth_rmse" : depth_rmse.item()}
                 mean_depth_metrics.add(depth_metrics)
             
+            ### Fit LSTSQ for white balancing
+            rgb_reshape = rgb.view(1, -1, 3)
+            target_reshape = target.view(1, -1, 3)
+
+            # ## No intercept          
+            # X = torch.linalg.lstsq(rgb_reshape, target_reshape).solution
+            # rgb_reshape = rgb_reshape @ X
+            # rgb_reshape = rgb_reshape.view(rgb.shape)
+            # rgb = rgb_reshape
+            
+
+            # ## With intercept
+            # rgb_reshape = rgb.view(1, -1, 3)
+            # ones = torch.ones((1, rgb_reshape.shape[1], 1))
+            # rgb_reshape = torch.concat([rgb_reshape, ones], axis=-1)
+
+            # X = torch.linalg.lstsq(rgb_reshape, target_reshape).solution
+            # rgb_reshape = rgb_reshape @ X
+            # rgb_reshape = rgb_reshape.view(rgb.shape)
+
+            # rgb = rgb_reshape
+            # ###################
+
             # compute color metrics
             img_loss = img2mse(rgb, target)
             psnr = mse2psnr(img_loss)
@@ -325,12 +348,15 @@ def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_op
     mean_metrics.print()
 
 def load_checkpoint(args):
-    path = os.path.join(args.ckpt_dir, args.expname)
+    # path = os.path.join(args.ckpt_dir, args.expname)
+    path = os.path.join("log_rebuttal_sparsity_maximal2", "scene0781_20_1_ddpoutdomain")
+
     ckpts = [os.path.join(path, f) for f in sorted(os.listdir(path)) if '000.tar' in f]
     print('Found ckpts', ckpts)
     ckpt = None
     if len(ckpts) > 0 and not args.no_reload:
         ckpt_path = ckpts[-1]
+        # ckpt_path = ckpts[-2]
         print('Reloading from', ckpt_path)
         ckpt = torch.load(ckpt_path)
     return ckpt
@@ -834,7 +860,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     # optimize nerf
     print('Begin')
-    N_iters = 500000 + 1
+    N_iters = 600000 + 1
     global_step = start
     start = start + 1
     for i in trange(start, N_iters):
@@ -1029,7 +1055,7 @@ def config_parser():
                         help='frequency of console printout and metric logging')
     parser.add_argument("--i_img",     type=int, default=20000,
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=100000,
+    parser.add_argument("--i_weights", type=int, default=10000,
                         help='frequency of weight ckpt saving')
     parser.add_argument("--ckpt_dir", type=str, default="",
                         help='checkpoint directory')
