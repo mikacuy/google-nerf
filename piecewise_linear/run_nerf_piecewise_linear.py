@@ -22,7 +22,7 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -851,7 +851,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     np.random.seed(args.random_seed)
     torch.manual_seed(args.random_seed)
     torch.cuda.manual_seed(args.random_seed)
-    
+
     tb = SummaryWriter(log_dir=os.path.join("runs", args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
@@ -874,27 +874,42 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         print("Warning: There is no validation set, test set is used instead")
         i_val = i_test
         i_relevant_for_training = np.concatenate((i_relevant_for_training, i_val), 0)
+        
     # keep test data on cpu until needed
     test_images = images[i_test]
-    test_depths = depths[i_test]
-    test_valid_depths = valid_depths[i_test]
+
+    if depths is not None:
+        test_depths = depths[i_test]
+        test_valid_depths = valid_depths[i_test]
+    else:
+        test_depths = torch.zeros((test_images.shape[0], test_images.shape[1], test_images.shape[2], 1)).to(device)
+        test_valid_depths = torch.zeros((test_images.shape[0], test_images.shape[1], test_images.shape[2], 1)).to(device)        
+    
     test_poses = poses[i_test]
     test_intrinsics = intrinsics[i_test]
     i_test = i_test - i_test[0]
 
     # move training data to gpu
     images = torch.Tensor(images[i_relevant_for_training]).to(device)
-    depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
-    valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
+    
+    if depths is not None:
+        depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
+        valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
+    else:
+        depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+        valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+
     poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
 
-    # complete and check depth
-    gt_depths_train = torch.Tensor(gt_depths[i_train]).to(device) # only used to evaluate error of completed depth
-    gt_valid_depths_train = torch.Tensor(gt_valid_depths[i_train]).bool().to(device) # only used to evaluate error of completed depth
-    depths, valid_depths = complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, \
-        scene_sample_params, args)
-    del gt_depths_train, gt_valid_depths_train
+    if gt_depths is not None:
+        # complete and check depth
+        gt_depths_train = torch.Tensor(gt_depths[i_train]).to(device) # only used to evaluate error of completed depth
+        gt_valid_depths_train = torch.Tensor(gt_valid_depths[i_train]).bool().to(device) # only used to evaluate error of completed depth
+        depths, valid_depths = complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, \
+            scene_sample_params, args)
+        del gt_depths_train, gt_valid_depths_train
+
 
     # create nerf model
     render_kwargs_train, render_kwargs_test, start, nerf_grad_vars, optimizer = create_nerf(args, scene_sample_params)
@@ -1024,6 +1039,8 @@ def config_parser():
                         help='config file path')
     parser.add_argument("--expname", type=str, default=None, 
                         help='specify the experiment, required for "test" and "video", optional for "train"')
+    parser.add_argument("--dataset", type=str, default="scannet", 
+                        help='dataset used -- selects which dataloader"')
 
     # training options
     parser.add_argument("--netdepth", type=int, default=8, 
@@ -1147,7 +1164,17 @@ def run_nerf():
 
     # Load data
     scene_data_dir = os.path.join(args.data_dir, args.scene_id)
-    images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths = load_scene(scene_data_dir, args.train_jsonfile)
+    if args.dataset == "scannet":
+        images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths = load_scene(scene_data_dir, args.train_jsonfile)
+    elif args.dataset == "llff":
+        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_llff(scene_data_dir)
+        depths = None
+        valid_depths = None
+        gt_depths = None
+        gt_valid_depths =None
+    else:
+        print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
+        exit()
 
     i_train, i_val, i_test, i_video = i_split
 
