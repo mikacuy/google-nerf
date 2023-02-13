@@ -247,7 +247,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
 
-        if depths is not None:
+        if args.dataset != "llff":
             target_depth = depths[img_idx]
             target_valid_depth = valid_depths[img_idx]
         else:
