@@ -246,12 +246,14 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     for n, img_idx in enumerate(img_i):
         print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
-        if depths is not None:
+
+        if args.dataset != "llff":
             target_depth = depths[img_idx]
             target_valid_depth = valid_depths[img_idx]
         else:
             target_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
-            target_valid_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
+            target_valid_depth = torch.zeros((target.shape[0], target.shape[1], 1), dtype=bool).to(device)
+            
         pose = poses[img_idx, :3,:4]
         intrinsic = intrinsics[img_idx, :]
 
@@ -878,7 +880,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         print("Warning: There is no validation set, test set is used instead")
         i_val = i_test
         i_relevant_for_training = np.concatenate((i_relevant_for_training, i_val), 0)
-        
+
     # keep test data on cpu until needed
     test_images = images[i_test]
 
