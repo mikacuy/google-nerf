@@ -231,6 +231,8 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         img_i = indices
     else:
         # take random images
+        if count > len(indices):
+            count = len(indices)
         img_i = np.random.choice(indices, size=count, replace=False)
 
     rgbs_res = torch.empty(count, 3, H, W)
