@@ -246,8 +246,15 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     for n, img_idx in enumerate(img_i):
         print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
-        target_depth = depths[img_idx]
-        target_valid_depth = valid_depths[img_idx]
+
+        if depths is not None:
+            target_depth = depths[img_idx]
+            target_valid_depth = valid_depths[img_idx]
+        else:
+            target_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
+            target_valid_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
+
+        
         pose = poses[img_idx, :3,:4]
         intrinsic = intrinsics[img_idx, :]
 
