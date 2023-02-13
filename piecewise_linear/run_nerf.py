@@ -252,7 +252,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             target_valid_depth = valid_depths[img_idx]
         else:
             target_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
-            target_valid_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
+            target_valid_depth = torch.zeros((target.shape[0], target.shape[1], 1), dtype=bool).to(device)
 
         
         pose = poses[img_idx, :3,:4]
