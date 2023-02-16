@@ -198,7 +198,8 @@ def load_scene_nogt(basedir, train_json = "transforms_train.json"):
             
             for frame in meta['frames']:
                 if len(frame['file_path']) != 0 or len(frame['depth_file_path']) != 0:
-                    img, depth = read_files(basedir, frame['file_path'], frame['depth_file_path'])
+                    # img, depth = read_files(basedir, frame['file_path'], frame['depth_file_path'])
+                    img, depth = read_files(basedir, frame['file_path'], frame['depth_file_path'].split(".")[0]+".png")
                     
                     if depth.ndim == 2:
                         depth = np.expand_dims(depth, -1)
@@ -422,7 +423,8 @@ def load_scene_processed(basedir, cimle_dir, num_hypothesis=20, train_json = "tr
             
             for frame in meta['frames']:
                 if len(frame['file_path']) != 0 or len(frame['depth_file_path']) != 0:
-                    img, depth = read_files(basedir, frame['file_path'], frame['depth_file_path'])
+                    # img, depth = read_files(basedir, frame['file_path'], frame['depth_file_path'])
+                    img, depth = read_files(basedir, frame['file_path'], frame['depth_file_path'].split(".")[0]+".png")
                     
                     if depth.ndim == 2:
                         depth = np.expand_dims(depth, -1)

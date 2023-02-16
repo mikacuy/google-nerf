@@ -1,3 +1,5 @@
+### Convert depth completion prior to meters completion is different
+
 import os
 import shutil
 import subprocess
@@ -21,8 +23,8 @@ from tqdm import tqdm, trange
 
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip
-from data import create_random_subsets, load_scene_nogt, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
+from data import create_random_subsets, load_scene_nogt, convert_depth_completion_scaling_to_m, convert_depth_completion_scaling_to_m_taskonomy, \
+    convert_m_to_depth_completion_scaling, convert_m_to_depth_completion_scaling_taskonomy, get_pretrained_normalize, resize_sparse_depth
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -244,7 +246,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
     for n, img_idx in enumerate(img_i):
-        print("Render image {}/{}".format(n + 1, len(img_i)), end="")
+        print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
         target_depth = depths[img_idx]
         target_valid_depth = valid_depths[img_idx]
@@ -272,43 +274,14 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 depth_metrics = {"depth_rmse" : depth_rmse.item()}
                 mean_depth_metrics.add(depth_metrics)
             
-            ### Fit LSTSQ for white balancing
-            rgb_reshape = rgb.view(1, -1, 3)
-            target_reshape = target.view(1, -1, 3)
-
-            # ## No intercept          
-            # X = torch.linalg.lstsq(rgb_reshape, target_reshape).solution
-            # rgb_reshape = rgb_reshape @ X
-            # rgb_reshape = rgb_reshape.view(rgb.shape)
-            # rgb = rgb_reshape
-            
-
-            # ## With intercept
-            # rgb_reshape = rgb.view(1, -1, 3)
-            # ones = torch.ones((1, rgb_reshape.shape[1], 1))
-            # rgb_reshape = torch.concat([rgb_reshape, ones], axis=-1)
-
-            # X = torch.linalg.lstsq(rgb_reshape, target_reshape).solution
-            # rgb_reshape = rgb_reshape @ X
-            # rgb_reshape = rgb_reshape.view(rgb.shape)
-
-            # rgb = rgb_reshape
-            # ###################
-
             # compute color metrics
             img_loss = img2mse(rgb, target)
             psnr = mse2psnr(img_loss)
+            print("PSNR: {}".format(psnr))
             rgb = torch.clamp(rgb, 0, 1)
             ssim = structural_similarity(rgb.cpu().numpy(), target.cpu().numpy(), data_range=1., channel_axis=-1)
             lpips = lpips_alex(rgb.permute(2, 0, 1).unsqueeze(0), target.permute(2, 0, 1).unsqueeze(0), normalize=True)[0]
             
-            print(n)
-            print(img_idx)
-            print("PSNR: {}".format(psnr))
-            print("SSIM: {}".format(ssim))
-            print("LPIPS: {}".format(lpips[0, 0, 0]))
-            print()
-
             # store result
             rgbs_res[n] = rgb.clamp(0., 1.).permute(2, 0, 1).cpu()
             target_rgbs_res[n] = target.permute(2, 0, 1).cpu()
@@ -349,13 +322,11 @@ def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_op
 
 def load_checkpoint(args):
     path = os.path.join(args.ckpt_dir, args.expname)
-
     ckpts = [os.path.join(path, f) for f in sorted(os.listdir(path)) if '000.tar' in f]
     print('Found ckpts', ckpts)
     ckpt = None
     if len(ckpts) > 0 and not args.no_reload:
         ckpt_path = ckpts[-1]
-        # ckpt_path = ckpts[-2]
         print('Reloading from', ckpt_path)
         ckpt = torch.load(ckpt_path)
     return ckpt
@@ -680,41 +651,13 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
     rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
     target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
     target_d = target_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1) or (N_rand, 2)
-
-    if args.mask_corners:
-        pixel_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
-
-        ### Mask out the corners
-        num_pix_to_mask = 20
-        pixel_mask[:num_pix_to_mask, :num_pix_to_mask] = 0
-        pixel_mask[:num_pix_to_mask, -num_pix_to_mask:] = 0
-        pixel_mask[-num_pix_to_mask:, :num_pix_to_mask] = 0
-        pixel_mask[-num_pix_to_mask:, -num_pix_to_mask:] = 0
-
-        pixel_mask = pixel_mask[select_coords[:, 0], select_coords[:, 1]]
-
-    elif args.mask_edges:
-        pixel_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
-
-        ### Mask out the corners
-        num_pix_to_mask = 8
-        pixel_mask[:num_pix_to_mask, :] = 0
-        pixel_mask[-num_pix_to_mask:, :] = 0
-        pixel_mask[:, -num_pix_to_mask:] = 0
-        pixel_mask[:, :num_pix_to_mask] = 0
-
-        pixel_mask = pixel_mask[select_coords[:, 0], select_coords[:, 1]]
-    else: 
-        pixel_mask = None
-
-
     target_vd = target_valid_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1)
     if args.depth_loss_weight > 0.:
         depth_range = precompute_depth_sampling(target_d)
         batch_rays = torch.stack([rays_o, rays_d, depth_range], 0)  # (3, N_rand, 3)
     else:
         batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
-    return batch_rays, target_s, target_d, target_vd, img_i, pixel_mask
+    return batch_rays, target_s, target_d, target_vd, img_i
 
 def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, invalidate_large_std_threshold=-1.):
     device = images.device
@@ -728,8 +671,11 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
         interpolation=torchvision.transforms.functional.InterpolationMode.NEAREST)
     depths_tmp, valid_depths_tmp = resize_sparse_depth(depths_tmp, valid_depths, input_size)
     normalize, _ = get_pretrained_normalize()
-    depths_tmp[valid_depths_tmp] = convert_m_to_depth_completion_scaling(depths_tmp[valid_depths_tmp])
-    
+
+    # print(depths_tmp[valid_depths_tmp])
+    depths_tmp[valid_depths_tmp] = convert_m_to_depth_completion_scaling_taskonomy(depths_tmp[valid_depths_tmp])
+    # print(depths_tmp[valid_depths_tmp])
+
     # run depth completion
     with torch.no_grad():
         net = resnet18_skip(pretrained=False, map_location=device, input_size=input_size).to(device)
@@ -744,8 +690,11 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
             rgb = normalize['rgb'](rgb)
             input = torch.cat((rgb, depth.unsqueeze(0)), 0).unsqueeze(0)
             pred = net(input)
-            depths_out[i] = convert_depth_completion_scaling_to_m(pred[0])
-            depths_std_out[i] = convert_depth_completion_scaling_to_m(pred[1])
+            # depths_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[0])
+            # depths_std_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[1])
+            depths_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[0])
+            depths_std_out[i] = convert_depth_completion_scaling_to_m_taskonomy(pred[1])
+
         depths_out = torch.stack((depths_out, depths_std_out), 1)
         depths_out = torchvision.transforms.functional.resize(depths_out, orig_size, \
             interpolation=torchvision.transforms.functional.InterpolationMode.NEAREST)
@@ -756,7 +705,7 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
     depths_out_max = max_pool(depths_out_0) + 0.01
     depths_out_min = -1. * max_pool(-1. * depths_out_0) - 0.01
     depths_out[:, 1, :, :] = torch.maximum(depths_out[:, 1, :, :], (depths_out_max - depths_out_min).squeeze(1))
-    
+
     # mask out depth with very large uncertainty
     depths_out = depths_out.permute(0, 2, 3, 1)
     valid_depths_out = torch.full_like(valid_depths, True)
@@ -766,7 +715,10 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
         depths_out[large_std_mask] = 0.
         print("Masked out {:.1f} percent of completed depth with standard deviation greater {:.2f}".format( \
             100. * (1. - valid_depths_out.sum() / valid_depths_out.numel()), invalidate_large_std_threshold))
-    
+
+    # print(depths_out)
+    # exit()    
+
     return depths_out, valid_depths_out
 
 def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, scene_sample_params, args):
@@ -840,11 +792,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
 
+    # complete and check depth
     ### GT here does not exist 
     ### complete and check depth
     gt_depths_train = depths[i_train] # only used to evaluate error of completed depth
     gt_valid_depths_train = valid_depths[i_train] # only used to evaluate error of completed depth
-
+    
     depths, valid_depths = complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, \
         scene_sample_params, args)
     del gt_depths_train, gt_valid_depths_train
@@ -859,7 +812,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     # optimize nerf
     print('Begin')
-    N_iters = 600000 + 1
+    N_iters = 500000 + 1
     global_step = start
     start = start + 1
     for i in trange(start, N_iters):
@@ -872,7 +825,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             update_learning_rate(optimizer, new_lrate)
         
         # make batch
-        batch_rays, target_s, target_d, target_vd, img_i, pixel_mask = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
+        batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
             intrinsics, args)
         if args.input_ch_cam > 0:
             render_kwargs_train['embedded_cam'] = embedcam_fn(torch.tensor(img_i, device=device))
@@ -883,30 +836,14 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         
         # compute loss and optimize
         optimizer.zero_grad()
-
-        if pixel_mask is None:
-            img_loss = img2mse(rgb, target_s)
-
-        else:          
-            ## Mask rbg for edge pixels
-            img_loss = (rgb - target_s) ** 2
-            img_loss = img_loss * pixel_mask.unsqueeze(-1)
-            img_loss = torch.mean(img_loss)
-
+        img_loss = img2mse(rgb, target_s)
         psnr = mse2psnr(img_loss)
         loss = img_loss
         if args.depth_loss_weight > 0.:
             depth_loss = compute_depth_loss(extras['depth_map'], extras['z_vals'], extras['weights'], target_d, target_vd)
             loss = loss + args.depth_loss_weight * depth_loss
         if 'rgb0' in extras:
-            if pixel_mask is None:
-                img_loss0 = img2mse(extras['rgb0'], target_s)
-            else:             
-                ### For edges
-                img_loss0 = (extras['rgb0'] - target_s) ** 2
-                img_loss0 = img_loss0 * pixel_mask.unsqueeze(-1)
-                img_loss0 = torch.mean(img_loss0)
-
+            img_loss0 = img2mse(extras['rgb0'], target_s)
             psnr0 = mse2psnr(img_loss0)
             loss = loss + img_loss0
         loss.backward()
@@ -1054,7 +991,7 @@ def config_parser():
                         help='frequency of console printout and metric logging')
     parser.add_argument("--i_img",     type=int, default=20000,
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=10000,
+    parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
     parser.add_argument("--ckpt_dir", type=str, default="",
                         help='checkpoint directory')
@@ -1071,8 +1008,6 @@ def config_parser():
     parser.add_argument("--train_jsonfile", type=str, default='transforms_train.json',
                         help='json file containing training images')
 
-    parser.add_argument('--mask_corners', default= False, type=bool)
-    parser.add_argument('--mask_edges', default= False, type=bool)
 
     return parser
 
