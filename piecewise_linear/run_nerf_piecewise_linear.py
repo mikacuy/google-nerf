@@ -249,7 +249,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
 
-        if args.dataset != "llff":
+        if args.dataset == "scannet":
             target_depth = depths[img_idx]
             target_valid_depth = valid_depths[img_idx]
         else:
@@ -564,7 +564,7 @@ def raw2outputs(raw, z_vals, near, far, rays_d, raw_noise_std=0, pytest=False, w
 
     if white_bkgd:
         rgb_map = rgb_map + (1.-acc_map[...,None])
-        
+
     return rgb_map, disp_map, acc_map, weights, depth_map, tau, T
 
 def sample_3sigma(low_3sigma, high_3sigma, N, det, near, far):
