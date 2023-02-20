@@ -22,7 +22,7 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -431,7 +431,7 @@ def raw2depth(raw, z_vals, rays_d):
     std = (((z_vals - depth.unsqueeze(-1)).pow(2) * weights).sum(-1)).sqrt()
     return depth, std
 
-def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, pytest=False):
+def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, pytest=False, white_bkgd=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -462,6 +462,9 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, pytest=False):
     depth_map = torch.sum(weights * z_vals, -1)
     disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
     acc_map = torch.sum(weights, -1)
+
+    if white_bkgd:
+        rgb_map = rgb_map + (1.-acc_map[...,None])
 
     return rgb_map, disp_map, acc_map, weights, depth_map
 
@@ -522,7 +525,8 @@ def render_rays(ray_batch,
                 network_fine=None,
                 raw_noise_std=0.,
                 verbose=False,
-                pytest=False):
+                pytest=False,
+                white_bkgd=False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -608,7 +612,7 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
 
     if N_importance > 0:
 
@@ -624,7 +628,7 @@ def render_rays(ray_batch,
         run_fn = network_fn if network_fine is None else network_fine
         raw = network_query_fn(pts, viewdirs, embedded_cam, run_fn)
 
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
+        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
 
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights}
     if retraw:
@@ -1022,6 +1026,19 @@ def config_parser():
     parser.add_argument("--train_jsonfile", type=str, default='transforms_train.json',
                         help='json file containing training images')
 
+    ### For Blender dataset ###
+    #### training options --> not implemented yet
+    parser.add_argument("--precrop_iters", type=int, default=0,
+                        help='number of steps to train on central crops')
+    parser.add_argument("--precrop_frac", type=float,
+                        default=.5, help='fraction of img taken for central crops') 
+
+    parser.add_argument("--white_bkgd", action='store_true', 
+                        help='set to render synthetic data on a white bkgd (always use for dvoxels)')
+    parser.add_argument("--half_res", action='store_true', 
+                        help='load blender synthetic data at 400x400 instead of 800x800')    
+    #########
+
     parser.add_argument("--random_seed",   type=int, default=0, 
                         help='random seed used')
 
@@ -1070,12 +1087,26 @@ def run_nerf():
 
     if args.dataset == "scannet":
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths = load_scene(scene_data_dir, args.train_jsonfile)
+
     elif args.dataset == "llff":
         images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_llff(scene_data_dir)
         depths = None
         valid_depths = None
         gt_depths = None
         gt_valid_depths =None
+
+    elif args.dataset == "blender":
+        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender(scene_data_dir, half_res=args.half_res)
+        depths = None
+        valid_depths = None
+        gt_depths = None
+        gt_valid_depths =None
+
+        if args.white_bkgd:
+            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+        else:
+            images = images[...,:3]    
+
     else:
         print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
         exit()

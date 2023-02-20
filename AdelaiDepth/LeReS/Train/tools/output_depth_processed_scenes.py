@@ -78,13 +78,15 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_corrected_v2_two_components_component1/train/', help='Root dir for dataset')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_corrected_v2_two_components_component2/train/', help='Root dir for dataset')
 
-## These are broken I think
-# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/lounge_corrected/train/', help='Root dir for dataset')
+## Lounge is fixed
+parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/lounge_corrected/train/', help='Root dir for dataset')
+
+
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_corrected/train/', help='Root dir for dataset')
 
 ### Fixed basement data
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_0213/train/', help='Root dir for dataset')
-parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_0213_v2/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_0213_v2/train/', help='Root dir for dataset')
 
 # parser.add_argument('--dump_dir', default= "dump_0213_lounge_corrected_v2_sfmaligned_indv_new/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_corrected_v2_sfmaligned_indv_new/", type=str)
@@ -92,12 +94,13 @@ parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_th
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_corrected_v2_two_components_component1_sfmaligned_indv_new/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_corrected_v2_two_components_component2_sfmaligned_indv_new/", type=str)
 
-# parser.add_argument('--dump_dir', default= "dump_0213_lounge_corrected_sfmaligned_indv_new/", type=str)
+parser.add_argument('--dump_dir', default= "dump_0213_lounge_corrected_sfmaligned_indv_new/", type=str)
+
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_corrected_sfmaligned_indv_new/", type=str)
 
 ### Fixed basement data
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_0213_sfmaligned_indv_new/", type=str)
-parser.add_argument('--dump_dir', default= "dump_0213_basement_0213_v2_sfmaligned_indv_new/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0213_basement_0213_v2_sfmaligned_indv_new/", type=str)
 
 
 #############################

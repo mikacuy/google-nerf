@@ -146,7 +146,7 @@ print()
 
 ### 1. Check T(s_k) > (u - c_k) --> for increasing case
 print("#######################################")
-print("Check if T(s_k) > (u - c_k) for increasing case.")
+print("Check if T(s_k) > (u - c_k)")
 print()
 
 C_diff = C_si[1:] - C_si[:-1]
@@ -160,26 +160,33 @@ print(T_minus_C_Diff)
 print()
 print("#######################################")
 
-print("#######################################")
-print("Check if T(s_k) * W > (u - c_k) for decreasing case.")
-print()
-### 2. Check T(s_k) * W > (u - c_k) --> for decreasing case
-### W = exp(-\frac{tau_k^2*(s_{k+1}-s_k)}{tau_k-tau_{k+1}})
-nume = tau_i[:-1]**2 * (dists)
-denom = tau_i[:-1] + tau_i[1:]
-W = np.exp(-nume/denom)
-print("11. W")
-print(W)
-print()
 
-print("12. T(s_k)*W")
-print(W*T_si[:-1])
-print()
 
-TW_minus_C_Diff = W*T_si[:-1] - C_diff
-print("13. T(s_k)*W - C_diff")
-print(TW_minus_C_Diff)
-print()
+
+#####################################################
+####### This is wrong --> fixed math error ##########
+#####################################################
+
+# print("#######################################")
+# print("Check if T(s_k) * W > (u - c_k) for decreasing case.")
+# print()
+# ### 2. Check T(s_k) * W > (u - c_k) --> for decreasing case
+# ### W = exp(-\frac{tau_k^2*(s_{k+1}-s_k)}{tau_k-tau_{k+1}})
+# nume = tau_i[:-1]**2 * (dists)
+# denom = tau_i[:-1] + tau_i[1:]
+# W = np.exp(-nume/denom)
+# print("11. W")
+# print(W)
+# print()
+
+# print("12. T(s_k)*W")
+# print(W*T_si[:-1])
+# print()
+
+# TW_minus_C_Diff = W*T_si[:-1] - C_diff
+# print("13. T(s_k)*W - C_diff")
+# print(TW_minus_C_Diff)
+# print()
 
 ### 3. Check solution equivalence for positive and negative cases
 ### 3.1 Positive

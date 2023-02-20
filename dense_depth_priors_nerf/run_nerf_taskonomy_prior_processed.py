@@ -246,7 +246,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
     for n, img_idx in enumerate(img_i):
-        print("Render image {}/{}".format(n + 1, count), end="")
+        # print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
         target_depth = depths[img_idx]
         target_valid_depth = valid_depths[img_idx]
@@ -277,10 +277,14 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             # compute color metrics
             img_loss = img2mse(rgb, target)
             psnr = mse2psnr(img_loss)
+            print(n)
             print("PSNR: {}".format(psnr))
             rgb = torch.clamp(rgb, 0, 1)
             ssim = structural_similarity(rgb.cpu().numpy(), target.cpu().numpy(), data_range=1., channel_axis=-1)
             lpips = lpips_alex(rgb.permute(2, 0, 1).unsqueeze(0), target.permute(2, 0, 1).unsqueeze(0), normalize=True)[0]
+            print("LPIPS: {}".format(lpips[0, 0, 0]))
+            print("SSIM: {}".format(ssim))
+            print()
             
             # store result
             rgbs_res[n] = rgb.clamp(0., 1.).permute(2, 0, 1).cpu()

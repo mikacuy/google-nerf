@@ -745,7 +745,7 @@ def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_tr
 
     ### Output to LeReS Dir
     # hypothesis_outdir = os.path.join("/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/", "leres_cimle", args.ckpt_dir)
-    hypothesis_outdir = os.path.join(os.path.join(args.data_dir, args.scene_id, "train"), "leres_cimle", args.ckpt_dir)
+    hypothesis_outdir = os.path.join(os.path.join(args.data_dir, args.scene_id, "train"), "leres_cimle", args.expname)
     if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
 
     ## Dump_dir for sanity check

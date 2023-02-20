@@ -1068,6 +1068,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     print(DEPTH_SHIFTS)
 
     print("Loaded depth shift/scale from pretrained model.")
+    
     ########################################
     ########################################
 

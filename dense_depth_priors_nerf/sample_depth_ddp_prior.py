@@ -744,62 +744,62 @@ def complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_tr
 
     ### Output to LeReS Dir
     # hypothesis_outdir = os.path.join("/orion/group/scannet_v2/dense_depth_priors/scenes/scene0738_00/train/", "leres_cimle", args.ckpt_dir)
-    hypothesis_outdir = os.path.join(os.path.join(args.data_dir, args.scene_id, "train"), "leres_cimle", args.ckpt_dir)
+    hypothesis_outdir = os.path.join(os.path.join(args.data_dir, args.scene_id, "train"), "leres_cimle", args.expname)
     if not os.path.exists(hypothesis_outdir): os.makedirs(hypothesis_outdir)
 
     ## Dump_dir for sanity check
-    DUMP_DIR = args.ckpt_dir
+    DUMP_DIR = os.path.join(args.ckpt_dir, args.expname)
     if not os.path.exists(DUMP_DIR): os.mkdir(DUMP_DIR)
 
     num_samples = 20
 
 
     ### This is for single point estimate
-    for j in i_train:
-        curr_depth = depths[j][:,:,0].to("cpu").detach().numpy().squeeze()
+    # for j in i_train:
+    #     curr_depth = depths[j][:,:,0].to("cpu").detach().numpy().squeeze()
 
-        curr_rbg_name = all_fnames[j]
-        fname = curr_rbg_name + "_" + str(0) + ".npy"
+    #     curr_rbg_name = all_fnames[j]
+    #     fname = curr_rbg_name + "_" + str(0) + ".npy"
 
-        outfname = os.path.join(hypothesis_outdir, fname)
+    #     outfname = os.path.join(hypothesis_outdir, fname)
 
-        np.save(outfname, np.array(curr_depth))                
+    #     np.save(outfname, np.array(curr_depth))                
 
-        ## Check output --> debug
-        depth = np.load(outfname).astype(np.float64)
-        print(depth)
-        print(depth.shape)
-        print(outfname)
-        print()
+    #     ## Check output --> debug
+    #     depth = np.load(outfname).astype(np.float64)
+    #     print(depth)
+    #     print(depth.shape)
+    #     print(outfname)
+    #     print()
 
-        plt.imsave(os.path.join(DUMP_DIR, curr_rbg_name+'-depth.png'), curr_depth, cmap='rainbow')    
+    #     plt.imsave(os.path.join(DUMP_DIR, curr_rbg_name+'-depth.png'), curr_depth, cmap='rainbow')    
 
 
 
     ####### Sample
 
-    # for i in range(num_samples):
-    #     sample = torch.normal(depths[i_train][:,:,:,0], depths[i_train][:,:,:,1])
-    #     sample = sample.to("cpu").detach().numpy().squeeze()
+    for i in range(num_samples):
+        sample = torch.normal(depths[i_train][:,:,:,0], depths[i_train][:,:,:,1])
+        sample = sample.to("cpu").detach().numpy().squeeze()
 
-    #     for j in i_train:
-    #         curr_depth = sample[j]
+        for j in i_train:
+            curr_depth = sample[j]
 
-    #         curr_rbg_name = all_fnames[j]
-    #         fname = curr_rbg_name + "_" + str(i) + ".npy"
+            curr_rbg_name = all_fnames[j]
+            fname = curr_rbg_name + "_" + str(i) + ".npy"
 
-    #         outfname = os.path.join(hypothesis_outdir, fname)
+            outfname = os.path.join(hypothesis_outdir, fname)
 
-    #         np.save(outfname, np.array(curr_depth))                
+            np.save(outfname, np.array(curr_depth))                
 
-    #         ## Check output --> debug
-    #         depth = np.load(outfname).astype(np.float64)
-    #         print(depth)
-    #         print(depth.shape)
-    #         print(outfname)
-    #         print()
+            ## Check output --> debug
+            depth = np.load(outfname).astype(np.float64)
+            print(depth)
+            print(depth.shape)
+            print(outfname)
+            print()
 
-    #         plt.imsave(os.path.join(DUMP_DIR, curr_rbg_name+ "_" + str(i)+'-depth.png'), curr_depth, cmap='rainbow')
+            plt.imsave(os.path.join(DUMP_DIR, curr_rbg_name+ "_" + str(i)+'-depth.png'), curr_depth, cmap='rainbow')
 
     exit()
 
