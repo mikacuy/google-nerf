@@ -438,49 +438,48 @@ def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., r
     z_vals = torch.cat([near, z_vals, far], -1)
 
     ### Make the far plane very far --> force T(last_bin) = 0
-    z_vals[..., -1] = 1e10
+    # z_vals[..., -1] = 1e10
 
     dists = z_vals[...,1:] - z_vals[...,:-1]
 
     ### Original code
     dists = dists * torch.norm(rays_d[...,None,:], dim=-1)
 
-    ### Scale to be within [0,1]  --> the interval is 
-    # dists = dists * torch.norm(rays_d[...,None,:], dim=-1) / (far-near)
+    if DEBUG:
+        print("dist min max")
+        print(torch.min(dists))
+        print(torch.max(dists))
 
-    # print(dists)
-    # print(dists.sum(dim=-1))
-    # print(dists.sum(dim=-1).shape)
-    # exit()
-    
-    # print(z_vals.shape)
-    # print(dists.shape)
-    # print(raw.shape)
-    # print((torch.ones((raw.shape[0], 1), device=device)*1e-10).shape)
-    # print((raw[...,3]).shape)
-    # print(raw[...,3][...,-1].shape)
-    # exit()
-
-    tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise, raw[...,3][...,-1].unsqueeze(-1)], -1) ### tau(near) = 0, tau(far) = tau(last_sample)
-    # tau = raw[...,3] + noise
+    # tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise, raw[...,3][...,-1].unsqueeze(-1)], -1) ### tau(near) = 0, tau(far) = tau(last_sample)
+    tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise, torch.ones((raw.shape[0], 1), device=device)*1e10], -1) ### tau(near) = 0, tau(far) = very big (will hit an opaque surface)
 
     tau = F.relu(tau) ## Make positive from proof of DS-NeRF
 
     interval_ave_tau = 0.5 * (tau[...,1:] + tau[...,:-1])
     
-    # print(dists.shape)
-    # print(tau.shape)
-    # print(interval_ave_tau.shape)
-    # exit()
+    if DEBUG:
+        print("Tau min max")
+        print(torch.min(tau))
+        print(torch.max(tau))
 
     '''
     Evaluating exp(-0.5 (tau_{i+1}+tau_i) (s_{i+1}-s_i) )
     '''
     expr = raw2expr(interval_ave_tau, dists)  # [N_rays, N_samples+1]
+    
+    if DEBUG:
+        print("expr min max")
+        print(torch.min(expr))
+        print(torch.max(expr))
 
     ### Transmittance until s_n
     # T = torch.cumprod(expr, -1)[:, :-1]
-    T = torch.cumprod(torch.cat([torch.ones((expr.shape[0], 1), device=device), expr], -1), -1) # [N_rays, N_samples+2]
+    T = torch.cumprod(torch.cat([torch.ones((expr.shape[0], 1), device=device), expr], -1), -1) # [N_rays, N_samples+2], T(near)=1, starts off at 1
+
+    if DEBUG:
+        print("T min max")
+        print(torch.min(T))
+        print(torch.max(T))
 
     ### Factor to multiply transmittance with
     # factor = (1 - expr)[:, 1:]
@@ -488,18 +487,21 @@ def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., r
 
     weights = factor * T[:, :-1] # [N_rays, N_samples+1]
 
-    ### Remove tau for near and far plane
-    # tau = tau[..., 1:-1]
-
-    ### TODO: currently, weights don't sum to 1 --> find a fix to this
+    # ### TODO: currently, weights don't sum to 1 --> find a fix to this
     # print(weights)
-    # print()
-    # print(T[..., -1])
-    # print()
-    # print(torch.sum(weights, axis=-1))
-    # print()
-    # print(torch.sum(weights, axis=-1)+T[..., -1])
-    # print()
+    # # print()
+    # # print(T[..., -1])
+    # # print()
+    if DEBUG:
+        print("==========")
+        print("Weights min max")
+        print(torch.min(weights))
+        print(torch.max(weights))
+        print("Weights all sum, min sum, max sum:")
+        print(torch.sum(weights, axis=-1))
+        print(torch.min(torch.sum(weights, axis=-1)))
+        print(torch.max(torch.sum(weights, axis=-1)))
+        print("==========")
     # print()
     # print(torch.sum(weights, axis=-1).shape)
     # print(torch.sum(weights, axis=-1))
@@ -559,11 +561,24 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=Fa
 
     if mode == "linear":
         weights, tau, T = compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise, return_tau=True)
+
+        if DEBUG:
+            print("===============")
+            print("In raw2outputs:")
+            print("Does nan/inf exist in weights")
+            print(torch.isnan(weights).any())
+            print(torch.isinf(weights).any())
+            print("Does nan exist in per point rgb")
+            print(torch.isnan(rgb).any())        
     
         ### Skip the first bin weights [near, s_0]
         weights_to_aggregate = weights[..., 1:]
 
         rgb_map = torch.sum(weights_to_aggregate[...,None] * rgb, -2)  # [N_rays, 3]
+
+        if DEBUG:
+            print("Does nan exist in per point rgb_map")
+            print(torch.isnan(rgb_map).any())
 
         ### Piecewise linear means take the midpoint
         z_vals = torch.cat([z_vals, far], -1)
@@ -584,8 +599,21 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=Fa
     disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
     acc_map = torch.sum(weights, -1)
 
+    if DEBUG:
+        print("Does nan exist in per point rgb_map")
+        print(torch.isnan(rgb_map).any())
+
     if white_bkgd:
         rgb_map = rgb_map + (1.-acc_map[...,None])
+
+    if DEBUG:
+        print("white bkgd: "+str(white_bkgd))
+        print(torch.isnan(weights_to_aggregate).any())
+        print(torch.isnan(acc_map).any())
+        print(torch.isnan(1.-acc_map[...,None]).any())
+        print(torch.isnan(rgb_map + (1.-acc_map[...,None])).any())
+        print(torch.isnan(rgb_map).any())
+        print("===============")
 
     return rgb_map, disp_map, acc_map, weights, depth_map, tau, T
 
@@ -751,13 +779,30 @@ def render_rays(ray_batch,
 
         z_samples = z_samples.detach()
 
+        ### Debugging: There was some error on the intervals, left was not always < right
+        z_samples = torch.clamp(z_samples, near, far)
+
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
 
         run_fn = network_fn if network_fine is None else network_fine
+
+        if DEBUG:
+            print("Does nan exist in pts")
+            print(torch.isnan(pts).any())
+
         raw = network_query_fn(pts, viewdirs, embedded_cam, run_fn)
+        
+        if DEBUG:
+            print("Does nan exist in forward")
+            print(torch.isnan(raw).any())
 
         rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+        
+        if DEBUG:
+            print("Does nan/inf exist after converting to rgb outputs")
+            print(torch.isnan(rgb_map).any())
+            print(torch.isinf(rgb_map).any())
 
     if mode == "linear":
         weights = weights[..., 1:]
@@ -779,6 +824,7 @@ def render_rays(ray_batch,
     for k in ret:
         if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
             print(f"! [Numerical Error] {k} contains nan or inf.")
+            exit()
 
     return ret
 
@@ -965,6 +1011,9 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     global_step = start
     start = start + 1
     for i in trange(start, N_iters):
+
+        if i == 41 and DEBUG:
+            exit()
 
         # update learning rate
         if i > args.start_decay_lrate and i <= args.end_decay_lrate:

@@ -1069,6 +1069,33 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
 
     return samples, T_below, tau_below, bin_below
 
+def pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u_diff):
+    
+    ln_term = torch.log(T_left) - torch.log(T_left - u_diff)
+    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , s_right - s_left)
+    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.zeros_like(discriminant), discriminant))) , tau_right - tau_left)
+
+    # print("Inside increasing case")
+    # print(torch.isnan(ln_term).any())
+    # print(torch.sum(discriminant<0))
+    # print(discriminant[discriminant<0])
+    # print(torch.isnan(t).any())
+    # print("---------")
+
+    sample = s_left + t
+
+    return sample
+
+
+def pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u_diff):
+    
+    ln_term = torch.log(T_left) - torch.log(T_left - u_diff)
+    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , s_right - s_left)
+    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.zeros_like(discriminant), discriminant))) , tau_left - tau_right)
+    sample = s_left + t
+
+    return sample
+
 
 def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
     
@@ -1078,32 +1105,38 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # print(weights.shape)
     # print(bins.shape)
 
+    ### bins = z_vals, ie bin boundaries, input does not include near and far plane yet ## N_samples, with near and far it will become N_samples+2
+    ### weights is the PMF of each bin ## N_samples + 1
+
     bins = torch.cat([near, bins, far], -1)
     
-    curr_sum = torch.sum(weights, axis=-1)
+    ### Debug that it will integrate to 1, we made it a way that the far plane is always opaque
+    # curr_sum = torch.sum(weights, axis=-1)
     # print(curr_sum)
-    # pdf = torch.cat([1-curr_sum, weights], -1) # make into a probability distribution, assign what is left to the first bin
+    # exit()
     
-    pdf = weights # make into a probability distribution, assign what is left to the first bin
-    # print(pdf.shape)
+    pdf = weights # make into a probability distribution
 
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
 
-    # print(cdf.shape)
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] + tau[...,:-1]
 
-    ### Concat bins --> Now this was done explicitly
-    # bins = torch.cat([near, bins, far], -1)
-    # print(bins.shape)
-    # exit()
+    ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
+    cdf[:,-1] = 1.0
 
     # print("Current shapes")
+    # # print(cdf.shape)
+    # # print(bins.shape)
+    # # print(tau.shape)
+    # # print(T.shape)
+    # print(tau_diff.shape)
     # print(cdf.shape)
-    # print(bins.shape)
-    # print(tau.shape)
-    # print(T.shape)
+    # print(torch.min(cdf[:,-1]))
     # exit()
-
+    # print()
+    # exit()
 
     # Take uniform samples
     if det:
@@ -1132,17 +1165,72 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
     inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
     
-    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
-    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+
     matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
     cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
     bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
-    denom = (cdf_g[...,1]-cdf_g[...,0])
-    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
-    t = (u-cdf_g[...,0])/denom
-    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
 
+    matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
+    tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
+
+    s_left = bins_g[...,0]
+    s_right = bins_g[...,1]
+    T_left = T_g[...,0]
+    tau_left = tau_g[...,0]
+    tau_right = tau_g[...,1]
+
+    ### Debug
+    # print(tau_diff_g)
+    # print(tau_diff_g.shape)
+    # print(s_left.shape)
+    # print(s_right.shape)
+    # print(T_left.shape)
+    # print(tau_left.shape)
+    # print(tau_right.shape)
+    # exit()
+    ####
+    zero_threshold = 1e-4
+
+    dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
+
+    ### Constant interval, take the left bin
+    samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
+    # print("Number of constant cases")
+    # print(torch.sum(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold)))
+    # print()
+
+    ### Increasing
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
+    # print("Number of increasing cases")
+    # print(torch.sum(tau_diff_g > zero_threshold))
+    # print()
+
+    ### Decreasing
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+    # print("Number of decreasing cases")
+    # print(torch.sum(tau_diff_g < -zero_threshold))
+
+
+    ## Check for nan --> need to figure out why
+    samples = torch.where(torch.isnan(samples3), s_left, samples3)
+
+    # print(samples)
+    # print("Does nan exist in samples selected")
+    # print(torch.isnan(samples3).any())
+    # print(torch.isnan(samples).any())
+
+    #### Buggy version from piecewise constant
+    # denom = (cdf_g[...,1]-cdf_g[...,0])
+    # denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    # t = (u-cdf_g[...,0])/denom
+    # samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    ###################################
+    ############## TODO ###############
+    ###################################
     ### Also return these for custom autograd
     ### T_below, tau_below, bin_below
     tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
@@ -1151,6 +1239,8 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     T_below = T_g[...,0]
     tau_below = tau_g[...,0]
     bin_below = bins_g[...,0]
+    ###################################
+
 
     return samples, T_below, tau_below, bin_below
 
