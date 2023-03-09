@@ -31,6 +31,7 @@ from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = "cpu"
 DEBUG = False
 
 def batchify(fn, chunk):
@@ -276,7 +277,9 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 render_kwargs_test["embedded_cam"] = embedcam_fn(torch.tensor(img_idx, device=device))
         
         with torch.no_grad():
-            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+            # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+            # print(render_kwargs_test)
+            rgb, _, _, extras = render(H, W, intrinsic, chunk=args.chunk, c2w=pose, **render_kwargs_test)
             
             # compute depth rmse
             depth_rmse = compute_rmse(extras['depth_map'][target_valid_depth], target_depth[:, :, 0][target_valid_depth])
@@ -413,7 +416,15 @@ def create_nerf(args, scene_render_params):
     render_kwargs_train['lindisp'] = args.lindisp
 
     render_kwargs_test = {k : render_kwargs_train[k] for k in render_kwargs_train}
-    render_kwargs_test['perturb'] = False
+    
+    ######################
+    ### FIX THIS MIKA  ###
+    ######################
+    ### To fix current implementation --> perturb at test time too
+    # render_kwargs_test['perturb'] = False
+    render_kwargs_test['perturb'] = True
+    ######################
+
     render_kwargs_test['raw_noise_std'] = 0.
 
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
@@ -434,8 +445,22 @@ def compute_weights(raw, z_vals, rays_d, noise=0.):
 def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., return_tau=False):
     raw2expr = lambda raw, dists: torch.exp(-raw*dists)
 
+    if DEBUG:
+        print("In compute piecewise linear.")
+        print(raw.shape)
+        print(z_vals.shape)
+        print(near)
+        print(far)
+        print(rays_d.shape)
+        print()
+
     ### Concat
     z_vals = torch.cat([near, z_vals, far], -1)
+
+    if DEBUG:
+        print("z_vals")
+        print(z_vals)
+        print()
 
     ### Make the far plane very far --> force T(last_bin) = 0
     # z_vals[..., -1] = 1e10
@@ -719,7 +744,7 @@ def render_rays(ray_batch,
             depth_range = ray_batch[:,8:11]
     bounds = torch.reshape(ray_batch[...,6:8], [-1,1,2])
     near, far = bounds[...,0], bounds[...,1] # [-1,1]
-    t_vals = torch.linspace(0., 1., steps=N_samples)
+    t_vals = torch.linspace(0., 1., steps=N_samples, device=device)
 
     # sample and render rays for dense depth priors for nerf
     N_samples_half = N_samples // 2
@@ -821,10 +846,10 @@ def render_rays(ray_batch,
         ret['weights0'] = weights_0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
 
-    for k in ret:
-        if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
-            print(f"! [Numerical Error] {k} contains nan or inf.")
-            exit()
+    # for k in ret:
+    #     if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
+    #         print(f"! [Numerical Error] {k} contains nan or inf.")
+    #         exit()
 
     return ret
 
@@ -1015,39 +1040,43 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         if i == 41 and DEBUG:
             exit()
 
-        # update learning rate
-        if i > args.start_decay_lrate and i <= args.end_decay_lrate:
-            portion = (i - args.start_decay_lrate) / (args.end_decay_lrate - args.start_decay_lrate)
-            decay_rate = 0.1
-            new_lrate = args.lrate * (decay_rate ** portion)
-            update_learning_rate(optimizer, new_lrate)
-        
-        # make batch
-        batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
-            intrinsics, args)
-        if args.input_ch_cam > 0:
-            render_kwargs_train['embedded_cam'] = embedcam_fn(torch.tensor(img_i, device=device))
-        target_d = target_d.squeeze(-1)
+        ##### For debugging #####
+        if args.i_img != 1:
+            #### Commenting out for debugging #####
+            # update learning rate
+            if i > args.start_decay_lrate and i <= args.end_decay_lrate:
+                portion = (i - args.start_decay_lrate) / (args.end_decay_lrate - args.start_decay_lrate)
+                decay_rate = 0.1
+                new_lrate = args.lrate * (decay_rate ** portion)
+                update_learning_rate(optimizer, new_lrate)
+            
+            # make batch
+            batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
+                intrinsics, args)
+            if args.input_ch_cam > 0:
+                render_kwargs_train['embedded_cam'] = embedcam_fn(torch.tensor(img_i, device=device))
+            target_d = target_d.squeeze(-1)
 
-        # render
-        rgb, _, _, extras = render(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, **render_kwargs_train)
-        
-        # compute loss and optimize
-        optimizer.zero_grad()
-        img_loss = img2mse(rgb, target_s)
-        psnr = mse2psnr(img_loss)
-        loss = img_loss
-        if args.depth_loss_weight > 0.:
-            depth_loss = compute_depth_loss(extras['depth_map'], extras['z_vals'], extras['weights'], target_d, target_vd)
-            loss = loss + args.depth_loss_weight * depth_loss
-        if 'rgb0' in extras:
-            img_loss0 = img2mse(extras['rgb0'], target_s)
-            psnr0 = mse2psnr(img_loss0)
-            loss = loss + img_loss0
-        loss.backward()
-        # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
-        optimizer.step()
-                
+            # render
+            rgb, _, _, extras = render(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True, **render_kwargs_train)
+            
+            # compute loss and optimize
+            optimizer.zero_grad()
+            img_loss = img2mse(rgb, target_s)
+            psnr = mse2psnr(img_loss)
+            loss = img_loss
+            if args.depth_loss_weight > 0.:
+                depth_loss = compute_depth_loss(extras['depth_map'], extras['z_vals'], extras['weights'], target_d, target_vd)
+                loss = loss + args.depth_loss_weight * depth_loss
+            if 'rgb0' in extras:
+                img_loss0 = img2mse(extras['rgb0'], target_s)
+                psnr0 = mse2psnr(img_loss0)
+                loss = loss + img_loss0
+            loss.backward()
+            # nn.utils.clip_grad_value_(nerf_grad_vars, 0.1)
+            optimizer.step()
+            #######################################
+
         # write logs
         if i%args.i_weights==0:
             path = os.path.join(args.ckpt_dir, args.expname, '{:06d}.tar'.format(i))
@@ -1297,10 +1326,10 @@ def run_nerf():
     i_train, i_val, i_test, i_video = i_split
 
     # Compute boundaries of 3D space
-    max_xyz = torch.full((3,), -1e6)
-    min_xyz = torch.full((3,), 1e6)
+    max_xyz = torch.full((3,), -1e6, device=device)
+    min_xyz = torch.full((3,), 1e6, device=device)
     for idx_train in i_train:
-        rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics[idx_train]), torch.Tensor(poses[idx_train])) # (H, W, 3), (H, W, 3)
+        rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics[idx_train]).to(device), torch.Tensor(poses[idx_train]).to(device)) # (H, W, 3), (H, W, 3)
         points_3D = rays_o + rays_d * far # [H, W, 3]
         max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
         min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)

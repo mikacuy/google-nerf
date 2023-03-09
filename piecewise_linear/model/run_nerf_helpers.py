@@ -278,7 +278,7 @@ class Embedder:
         self.out_dim = out_dim
         
     def embed(self, inputs):
-        return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
+        return torch.cat([fn(inputs).to(inputs.device) for fn in self.embed_fns], -1)
 
 def get_embedder(multires, i=0):
     if i == -1:
@@ -1117,8 +1117,18 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     
     pdf = weights # make into a probability distribution
 
+    # print("PDF of a ray")
+    # print(pdf)
+    # print(pdf.shape)
+    # exit()
+
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    # print("Computed for CDF")
+    # print(cdf)
+    # print(cdf.shape)
+    # exit()
 
     ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
     tau_diff = tau[...,1:] + tau[...,:-1]
@@ -1127,15 +1137,19 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     cdf[:,-1] = 1.0
 
     # print("Current shapes")
-    # # print(cdf.shape)
-    # # print(bins.shape)
-    # # print(tau.shape)
-    # # print(T.shape)
-    # print(tau_diff.shape)
+    # print(near)
+    # print(far)
     # print(cdf.shape)
-    # print(torch.min(cdf[:,-1]))
-    # exit()
+    # print(bins.shape)
+    # print(tau.shape)
+    # print(T.shape)
     # print()
+    # # print(tau_diff.shape)
+    # # # print(cdf.shape)
+    # # # print(torch.min(cdf))
+    # # # print(torch.max(cdf))
+    # # # exit()
+    # # print()
     # exit()
 
     # Take uniform samples
@@ -1174,7 +1188,27 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
 
     matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
+    
+    # print("Debugging tau_diff")
+    # print("matched tau shape")
+    # print(matched_shape_tau)
+    # print("tau shape")
+    # print(tau.shape)
+    # print("cdf shape")
+    # print(cdf.shape)
+    # print("below shape")
+    # print(below.shape)
+
     tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
+    # print("tau diff shape")
+    # print(tau_diff_g.shape)
+
+    # print("=====================")
+    # print("CDF")
+    # print(cdf)
+    # print()
+    # print(below)
+    # exit()
 
     s_left = bins_g[...,0]
     s_right = bins_g[...,1]
@@ -1182,16 +1216,19 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     tau_left = tau_g[...,0]
     tau_right = tau_g[...,1]
 
-    ### Debug
-    # print(tau_diff_g)
-    # print(tau_diff_g.shape)
+    # ### Debug
+    # print("Importance sampling")
+    # # print(tau_diff_g)
+    # # print(tau_diff_g.shape)
     # print(s_left.shape)
     # print(s_right.shape)
     # print(T_left.shape)
     # print(tau_left.shape)
     # print(tau_right.shape)
+    # # print()
     # exit()
-    ####
+    # ####
+    
     zero_threshold = 1e-4
 
     dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0

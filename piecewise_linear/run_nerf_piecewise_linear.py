@@ -407,7 +407,10 @@ def create_nerf(args, scene_render_params):
     render_kwargs_train['lindisp'] = args.lindisp
 
     render_kwargs_test = {k : render_kwargs_train[k] for k in render_kwargs_train}
+    # render_kwargs_test['perturb'] = False
+
     render_kwargs_test['perturb'] = False
+
     render_kwargs_test['raw_noise_std'] = 0.
 
     return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
