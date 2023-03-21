@@ -47,7 +47,8 @@ class MipNeRF(nn.Module):
                  viewdirs_max_deg=4,
                  device=torch.device("cpu"),
                  return_raw=False,
-                 mode="constant"
+                 mode="constant",
+                 correct_hier=False
                  ):
         super(MipNeRF, self).__init__()
         self.use_viewdirs = use_viewdirs
@@ -113,6 +114,7 @@ class MipNeRF(nn.Module):
         self.to(device)
 
         self.mode = mode
+        self.correct_hier = correct_hier
 
     def forward(self, rays):
         comp_rgbs = []
@@ -133,11 +135,19 @@ class MipNeRF(nn.Module):
                                                               stop_grad=True, resample_padding=self.resample_padding,
                                                               ray_shape=self.ray_shape)
                 elif self.mode == "linear":
-                    t_vals, (mean, var) = resample_along_rays_piecewise_linear(rays.origins, rays.directions, rays.radii,
-                                                              t_vals.to(rays.origins.device),
-                                                              weights.to(rays.origins.device), randomized=self.randomized,
-                                                              stop_grad=True, resample_padding=self.resample_padding,
-                                                              ray_shape=self.ray_shape, tau=tau, T=T, near=rays.near, far=rays.far)
+                    if self.correct_hier:
+                        t_vals, (mean, var) = resample_along_rays_piecewise_linear(rays.origins, rays.directions, rays.radii,
+                                                                  t_vals.to(rays.origins.device),
+                                                                  weights.to(rays.origins.device), randomized=self.randomized,
+                                                                  stop_grad=True, resample_padding=self.resample_padding,
+                                                                  ray_shape=self.ray_shape, tau=tau, T=T, near=rays.near, far=rays.far)
+                    else:
+                        t_vals, (mean, var) = resample_along_rays(rays.origins, rays.directions, rays.radii,
+                                                                  t_vals.to(rays.origins.device),
+                                                                  weights[...,1:].to(rays.origins.device), randomized=self.randomized,
+                                                                  stop_grad=True, resample_padding=self.resample_padding,
+                                                                  ray_shape=self.ray_shape)                        
+
             # do integrated positional encoding of samples
             samples_enc = self.positional_encoding(mean, var)[0]
             samples_enc = samples_enc.reshape([-1, samples_enc.shape[-1]])

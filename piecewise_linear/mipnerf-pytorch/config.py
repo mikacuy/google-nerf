@@ -60,6 +60,7 @@ def get_config():
                         help='rendering aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
     config.add_argument("--data_dir", type=str, default="../nerf_llff_data/",
                     help='directory containing the scenes')
+    config.add_argument("--correct_hier", action="store_true")
 
 
     config = config.parse_args()

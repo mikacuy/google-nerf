@@ -39,8 +39,12 @@ def train_model(config):
         viewdirs_min_deg=config.viewdirs_min_deg,
         viewdirs_max_deg=config.viewdirs_max_deg,
         device=config.device,
-        mode=config.mode
+        mode=config.mode,
+        correct_hier=config.correct_hier
     )
+
+    print("Using correct hierarchical sampling: "+str(config.correct_hier))
+
     optimizer = optim.AdamW(model.parameters(), lr=config.lr_init, weight_decay=config.weight_decay)
     if config.continue_training:
         model.load_state_dict(torch.load(model_save_path))
