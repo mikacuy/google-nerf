@@ -79,7 +79,8 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_corrected_v2_two_components_component2/train/', help='Root dir for dataset')
 
 ## Lounge is fixed
-parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/lounge_corrected/train/', help='Root dir for dataset')
+# parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/lounge_corrected/train/', help='Root dir for dataset')
+parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/processed_scenes_wild_cleaned0218/lounge_corrected_v2/train/', help='Root dir for dataset')
 
 
 # parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_the_wild_corrected/processed/basement_corrected/train/', help='Root dir for dataset')
@@ -94,7 +95,7 @@ parser.add_argument('--dataroot', default='/orion/u/mikacuy/coordinate_mvs/in_th
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_corrected_v2_two_components_component1_sfmaligned_indv_new/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_corrected_v2_two_components_component2_sfmaligned_indv_new/", type=str)
 
-parser.add_argument('--dump_dir', default= "dump_0213_lounge_corrected_sfmaligned_indv_new/", type=str)
+parser.add_argument('--dump_dir', default= "dump_0213_lounge_corrected_v2_sfmaligned_indv_new_visu/", type=str)
 
 # parser.add_argument('--dump_dir', default= "dump_0213_basement_corrected_sfmaligned_indv_new/", type=str)
 
@@ -148,7 +149,7 @@ parser.add_argument('--rescaled', default=False, type=bool)
 parser.add_argument('--ada_version', default= "v2", type=str)
 parser.add_argument('--cimle_version', default= "enc", type=str)
 parser.add_argument('--import_from_logdir', default=False, type=bool)
-parser.add_argument('--visu_all', default=False, type=bool)
+parser.add_argument('--visu_all', default=True, type=bool)
 parser.add_argument('--seed_num', default= 0, type=int)
 
 parser.add_argument('--default_scale', default= 0.5, type=float)
