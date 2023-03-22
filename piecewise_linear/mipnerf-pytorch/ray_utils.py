@@ -82,9 +82,9 @@ def pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u_
     return sample
 
 def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-4
+    EPSILON = 1e-3
 
-    ln_term = torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
     discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , s_right - s_left)
     t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_right - tau_left)
 
@@ -94,9 +94,9 @@ def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right,
 
 
 def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-4
+    EPSILON = 1e-3
 
-    ln_term = torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
     discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , s_right - s_left)
     t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_left - tau_right)
     sample = s_left + t
@@ -113,9 +113,6 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     pdf = weights 
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
-
-    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
-    tau_diff = tau[...,1:] + tau[...,:-1]
 
     ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
     cdf[:,-1] = 1.0
@@ -154,9 +151,9 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
     tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
-
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
     matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
-
     tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
 
     s_left = bins_g[...,0]
@@ -441,7 +438,9 @@ def resample_along_rays_piecewise_linear(origins, directions, radii, t_vals, wei
 
             z_vals = 0.5 * (t_vals[...,:-1] + t_vals[...,1:])
             new_t_vals, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, t_vals.shape[-1], det= (not randomized), pytest=False)
-
+            new_t_vals = torch.clamp(new_t_vals, near, far)
+            z_vals, _ = torch.sort(new_t_vals, -1)
+            
             # new_t_vals = sorted_piecewise_constant_pdf(
             #     t_vals,
             #     weights,
@@ -460,6 +459,8 @@ def resample_along_rays_piecewise_linear(origins, directions, radii, t_vals, wei
 
         z_vals = 0.5 * (t_vals[...,:-1] + t_vals[...,1:])
         new_t_vals, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, t_vals.shape[-1], det= (not randomized), pytest=False)
+        new_t_vals = torch.clamp(new_t_vals, near, far)
+        z_vals, _ = torch.sort(new_t_vals, -1)
 
         # new_t_vals = sorted_piecewise_constant_pdf(
         #     t_vals,

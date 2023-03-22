@@ -1039,9 +1039,10 @@ def pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u_
     return sample
 
 def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-2
+    EPSILON = 1e-3
 
-    ln_term = torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
+    ### Fix this, need negative sign
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
     discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , s_right - s_left)
     t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_right - tau_left)
 
@@ -1051,9 +1052,10 @@ def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right,
 
 
 def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-2
+    EPSILON = 1e-3
 
-    ln_term = torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
+    ### Fix this, need negative sign
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
     discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , s_right - s_left)
     t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_left - tau_right)
     sample = s_left + t
@@ -1092,9 +1094,6 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # print(cdf)
     # print(cdf.shape)
     # exit()
-
-    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
-    tau_diff = tau[...,1:] + tau[...,:-1]
 
     ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
     cdf[:,-1] = 1.0
@@ -1149,7 +1148,8 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
     tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
-
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
     matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
     
     # print("Debugging tau_diff")
@@ -1203,15 +1203,15 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # print()
 
     ### Increasing
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
+    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
     # print("Number of increasing cases")
     # print(torch.sum(tau_diff_g > zero_threshold))
     # print()
 
     ### Decreasing
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
     # print("Number of decreasing cases")
     # print(torch.sum(tau_diff_g < -zero_threshold))
 
@@ -1223,12 +1223,6 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # print("Does nan exist in samples selected")
     # print(torch.isnan(samples3).any())
     # print(torch.isnan(samples).any())
-
-    #### Buggy version from piecewise constant
-    # denom = (cdf_g[...,1]-cdf_g[...,0])
-    # denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
-    # t = (u-cdf_g[...,0])/denom
-    # samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
 
     ###################################
     ############## TODO ###############
@@ -1254,9 +1248,6 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
 
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
-
-    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
-    tau_diff = tau[...,1:] + tau[...,:-1]
 
     ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
     cdf[:,-1] = 1.0
@@ -1298,7 +1289,8 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
     T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
     tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
-
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
     matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
     tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
 
@@ -1316,12 +1308,12 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
 
     ### Increasing
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
+    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
 
     ### Decreasing
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
@@ -1345,9 +1337,6 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
 
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
-
-    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
-    tau_diff = tau[...,1:] + tau[...,:-1]
 
     ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
     cdf[:,-1] = 1.0
@@ -1387,7 +1376,8 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
     T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
     tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
-
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
     matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
 
     tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
@@ -1406,12 +1396,12 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
 
     ### Increasing
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
+    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
 
     ### Decreasing
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
@@ -1435,9 +1425,6 @@ def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_
 
     cdf = torch.cumsum(pdf, -1)
     cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
-
-    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
-    tau_diff = tau[...,1:] + tau[...,:-1]
 
     ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
     cdf[:,-1] = 1.0
@@ -1482,8 +1469,9 @@ def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_
     tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
 
 
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
     matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
-
     tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
 
     s_left = bins_g[...,0]
@@ -1500,12 +1488,12 @@ def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
 
     ### Increasing
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
+    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
 
     ### Decreasing
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)

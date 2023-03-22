@@ -56,7 +56,7 @@ def read_files(rgb_file, downsample_scale=None):
     return img
 
 def load_scene_blender(basedir, train_json = "transforms_train.json", half_res=True):
-    splits = ['train', 'val', 'test', 'video']
+    splits = ['train', 'val', 'test', 'video2']
 
     all_imgs = []
 
@@ -83,8 +83,10 @@ def load_scene_blender(basedir, train_json = "transforms_train.json", half_res=T
 
             if s=='train':
                 skip = 1
-            else:
+            elif s =="test":
                 skip = 8
+            elif "video" in s:
+                skip = 1
             
             for frame in meta['frames'][::skip]:
                 if len(frame['file_path']) != 0 :
