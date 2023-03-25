@@ -1753,7 +1753,7 @@ def config_parser():
                         help='sampling linearly in disparity rather than depth')
 
     # logging/saving options
-    parser.add_argument("--i_print",   type=int, default=1, 
+    parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric logging')
     parser.add_argument("--i_img",     type=int, default=20000,
                         help='frequency of tensorboard image logging')

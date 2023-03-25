@@ -28,7 +28,12 @@ def visualize(config):
         viewdirs_min_deg=config.viewdirs_min_deg,
         viewdirs_max_deg=config.viewdirs_max_deg,
         device=config.device,
+        mode=config.mode,
+        correct_hier=config.correct_hier
     )
+
+    print("Using correct hierarchical sampling: "+str(config.correct_hier))
+
     model.load_state_dict(torch.load(config.model_weight_path))
     model.eval()
 

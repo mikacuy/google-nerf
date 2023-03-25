@@ -52,7 +52,6 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
 ## Piecewise Linear Reformulation ##
 ####################################
 
-### This was the original implementation:
 def pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u_diff):
     
     ln_term = torch.log(T_left) - torch.log(T_left - u_diff)
@@ -72,16 +71,14 @@ def pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u_
     sample = s_left + t
 
     return sample
-#####
 
-### Version 2 after our conversation:
 def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
     EPSILON = 1e-3
 
     ### Fix this, need negative sign
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
-    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_right - tau_left)
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, torch.max(torch.ones_like(T_left)*EPSILON,T_left) ) ))
+    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*EPSILON, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , torch.max(torch.ones_like(tau_left)*EPSILON, tau_left - tau_right))
 
     sample = s_left + t
 
@@ -92,13 +89,12 @@ def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right,
     EPSILON = 1e-3
 
     ### Fix this, need negative sign
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
-    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_left - tau_right)
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, torch.max(torch.ones_like(T_left)*EPSILON,T_left) ) ))
+    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*EPSILON, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , torch.max(torch.ones_like(tau_left)*EPSILON, tau_left - tau_right))
     sample = s_left + t
 
     return sample
-########
 
 def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
 
