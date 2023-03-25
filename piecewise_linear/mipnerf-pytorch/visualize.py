@@ -34,7 +34,7 @@ def visualize(config):
 
     print("Using correct hierarchical sampling: "+str(config.correct_hier))
 
-    model.load_state_dict(torch.load(config.model_weight_path))
+    model.load_state_dict(torch.load(os.path.join(config.log_dir, config.model_weight_path)))
     model.eval()
 
     print("Generating Video using", len(data), "different view points")

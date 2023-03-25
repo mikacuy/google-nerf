@@ -45,7 +45,7 @@ def get_config():
     config.add_argument("--device", type=str, default="cuda")
     # visualization hyperparams
     config.add_argument("--chunks", type=int, default=8192)
-    config.add_argument("--model_weight_path", default="log/model.pt")
+    config.add_argument("--model_weight_path", default="model.pt")
     config.add_argument("--visualize_depth", action="store_true")
     config.add_argument("--visualize_normals", action="store_true")
     # extracting mesh hyperparams
