@@ -1,6 +1,6 @@
 '''
-March 10, 2023
-Sparse view nerf with space carving
+March 24, 2023
+Sparse View with constant color by taking the midpoint
 '''
 import os
 import shutil
@@ -814,20 +814,20 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=Fa
             print("Does nan exist in per point rgb")
             print(torch.isnan(rgb).any())        
     
-        ### Skip the first bin weights [near, s_0]
-        weights_to_aggregate = weights[..., 1:]
+        rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+        rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
 
-        rgb_map = torch.sum(weights_to_aggregate[...,None] * rgb, -2)  # [N_rays, 3]
+        rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
 
         if DEBUG:
             print("Does nan exist in per point rgb_map")
             print(torch.isnan(rgb_map).any())
 
         ### Piecewise linear means take the midpoint
-        z_vals = torch.cat([z_vals, far], -1)
+        z_vals = torch.cat([near, z_vals, far], -1)
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
 
-        depth_map = torch.sum(weights_to_aggregate * z_vals_mid, -1)
+        depth_map = torch.sum(weights * z_vals_mid, -1)
 
     elif mode == "constant":
         weights = compute_weights(raw, z_vals, rays_d, noise)
@@ -1552,8 +1552,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         ## Feed cached quantiles into the renderer
         render_kwargs_train["cached_u"] = curr_cached_u
 
-        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint, \
-            quad_solution_v2=args.quad_solution_v2, scale_sample_gradient = args.scale_sample_gradient, **render_kwargs_train)
+        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint,\
+        quad_solution_v2=args.quad_solution_v2, scale_sample_gradient = args.scale_sample_gradient, **render_kwargs_train)
 
         # compute loss and optimize
         optimizer.zero_grad()
@@ -1753,7 +1753,7 @@ def config_parser():
                         help='sampling linearly in disparity rather than depth')
 
     # logging/saving options
-    parser.add_argument("--i_print",   type=int, default=1, 
+    parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric logging')
     parser.add_argument("--i_img",     type=int, default=20000,
                         help='frequency of tensorboard image logging')

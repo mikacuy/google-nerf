@@ -1042,9 +1042,9 @@ def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right,
     EPSILON = 1e-3
 
     ### Fix this, need negative sign
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
-    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_right - tau_left)
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, torch.max(torch.ones_like(T_left)*EPSILON,T_left) ) ))
+    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*EPSILON, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , torch.max(torch.ones_like(tau_left)*EPSILON, tau_left - tau_right))
 
     sample = s_left + t
 
@@ -1055,14 +1055,14 @@ def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right,
     EPSILON = 1e-3
 
     ### Fix this, need negative sign
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
-    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_left - tau_right)
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, torch.max(torch.ones_like(T_left)*EPSILON,T_left) ) ))
+    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*EPSILON, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , torch.max(torch.ones_like(tau_left)*EPSILON, tau_left - tau_right))
     sample = s_left + t
 
     return sample
 
-def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
+def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False):
     
     ### This needs to be fixed...
     ### Get pdf
@@ -1202,18 +1202,31 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # print(torch.sum(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold)))
     # print()
 
-    ### Increasing
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
-    # print("Number of increasing cases")
-    # print(torch.sum(tau_diff_g > zero_threshold))
-    # print()
+    if not quad_solution_v2:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
+        # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+        # print("Number of increasing cases")
+        # print(torch.sum(tau_diff_g > zero_threshold))
+        # print()
 
-    ### Decreasing
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
-    # print("Number of decreasing cases")
-    # print(torch.sum(tau_diff_g < -zero_threshold))
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+        # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        # print("Number of decreasing cases")
+        # print(torch.sum(tau_diff_g < -zero_threshold))
+
+    else:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+        # print("Number of increasing cases")
+        # print(torch.sum(tau_diff_g > zero_threshold))
+        # print()
+
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        # print("Number of decreasing cases")
+        # print(torch.sum(tau_diff_g < -zero_threshold))
 
 
     ## Check for nan --> need to figure out why
@@ -1240,7 +1253,7 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
     return samples, T_below, tau_below, bin_below
 
-def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None):
+def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False):
     
 
     bins = torch.cat([near, bins, far], -1)   
@@ -1307,13 +1320,19 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
     ### Constant interval, take the left bin
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
 
-    ### Increasing
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    if not quad_solution_v2:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
 
-    ### Decreasing
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+
+    else:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
@@ -1329,7 +1348,7 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
 
     return samples, T_below, tau_below, bin_below, u
 
-def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
+def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False):
 
     bins = torch.cat([near, bins, far], -1)
     
@@ -1395,13 +1414,19 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
     ### Constant interval, take the left bin
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
 
-    ### Increasing
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    if not quad_solution_v2:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
 
-    ### Decreasing
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+
+    else:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
@@ -1417,7 +1442,7 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
 
     return samples, T_below, tau_below, bin_below
 
-def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None):
+def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False):
 
     bins = torch.cat([near, bins, far], -1)
     
@@ -1487,13 +1512,19 @@ def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_
     ### Constant interval, take the left bin
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
 
-    ### Increasing
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    if not quad_solution_v2:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
 
-    ### Decreasing
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+
+    else:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
