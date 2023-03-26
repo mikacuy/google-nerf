@@ -1038,31 +1038,69 @@ def pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u_
 
     return sample
 
-def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-3
-
+def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
     ### Fix this, need negative sign
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, torch.max(torch.ones_like(T_left)*EPSILON,T_left) ) ))
-    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*EPSILON, s_right - s_left) )
-    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , torch.max(torch.ones_like(tau_left)*EPSILON, tau_left - tau_right))
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+
+    ### Printing to debug ###
+    print("====Increasing case=====")
+    print("ln term")
+    print(ln_term)
+    print("(1-u)/T_left")
+    print(torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ))
+    print()
+    print("discriminant")
+    print(discriminant)
+    print("s_right - s_left")
+    print(torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left))
+    print("div term in discriminant")
+    print(torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) ))
+    print()
+    print("t")
+    print(t)
+    print("denominator: tau_left - tau_right")
+    print(torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+    print("================")
+    #########################
 
     sample = s_left + t
 
     return sample
 
 
-def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-3
-
+def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
     ### Fix this, need negative sign
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, torch.max(torch.ones_like(T_left)*EPSILON,T_left) ) ))
-    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*EPSILON, s_right - s_left) )
-    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , torch.max(torch.ones_like(tau_left)*EPSILON, tau_left - tau_right))
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
     sample = s_left + t
+
+    ### Printing to debug ###
+    print("====Decreasing case=====")
+    print("ln term")
+    print(ln_term)
+    print("(1-u)/T_left")
+    print(torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ))
+    print()
+    print("discriminant")
+    print(discriminant)
+    print("s_right - s_left")
+    print(torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left))
+    print("div term in discriminant")
+    print(torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) ))
+    print()
+    print("t")
+    print(t)
+    print("denominator: tau_left - tau_right")
+    print(torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+    print("================")
+    #########################
 
     return sample
 
-def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False):
+def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
     
     ### This needs to be fixed...
     ### Get pdf
@@ -1179,6 +1217,14 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     tau_left = tau_g[...,0]
     tau_right = tau_g[...,1]
 
+
+    print("=======Begin iteration=========")
+    print("tau_left - tau_right")
+    print(tau_left - tau_right)
+    print("tau_diff_g")
+    print(tau_diff_g)
+
+
     # ### Debug
     # print("Importance sampling")
     # # print(tau_diff_g)
@@ -1192,7 +1238,7 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # exit()
     # ####
 
-    zero_threshold = 1e-4
+    # zero_threshold = 1e-4
 
     dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
 
@@ -1218,19 +1264,27 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
     else:
         ### Increasing
-        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
         # print("Number of increasing cases")
         # print(torch.sum(tau_diff_g > zero_threshold))
         # print()
 
         ### Decreasing
-        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
         # print("Number of decreasing cases")
         # print(torch.sum(tau_diff_g < -zero_threshold))
 
-
+    print("Samples 1")
+    print(samples1)
+    print("Samples 2")
+    print(samples2)
+    print("Samples 3")
+    print(samples3)
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
+
+    print("Samples")
+    print(samples)
 
     # print(samples)
     # print("Does nan exist in samples selected")
@@ -1253,7 +1307,7 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
     return samples, T_below, tau_below, bin_below
 
-def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False):
+def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon=1e-3):
     
 
     bins = torch.cat([near, bins, far], -1)   
@@ -1313,7 +1367,7 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
     tau_left = tau_g[...,0]
     tau_right = tau_g[...,1]
 
-    zero_threshold = 1e-4
+    # zero_threshold = 1e-4
 
     dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
 
@@ -1329,10 +1383,10 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
 
     else:
         ### Increasing
-        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
 
         ### Decreasing
-        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
@@ -1348,7 +1402,7 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
 
     return samples, T_below, tau_below, bin_below, u
 
-def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False):
+def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon=1e-3):
 
     bins = torch.cat([near, bins, far], -1)
     
@@ -1407,7 +1461,7 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
     tau_left = tau_g[...,0]
     tau_right = tau_g[...,1]
 
-    zero_threshold = 1e-4
+    # zero_threshold = 1e-4
 
     dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
 
@@ -1423,10 +1477,10 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
 
     else:
         ### Increasing
-        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
 
         ### Decreasing
-        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
@@ -1442,7 +1496,7 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
 
     return samples, T_below, tau_below, bin_below
 
-def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False):
+def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon=1e-3):
 
     bins = torch.cat([near, bins, far], -1)
     
@@ -1505,7 +1559,7 @@ def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_
     tau_left = tau_g[...,0]
     tau_right = tau_g[...,1]
 
-    zero_threshold = 1e-4
+    # zero_threshold = 1e-4
 
     dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
 
@@ -1521,10 +1575,10 @@ def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_
 
     else:
         ### Increasing
-        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
 
         ### Decreasing
-        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
 
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
