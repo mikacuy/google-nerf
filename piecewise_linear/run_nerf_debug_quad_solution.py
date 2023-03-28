@@ -895,10 +895,10 @@ def render_rays(ray_batch,
 
         ### Debugging: There was some error on the intervals, left was not always < right
         z_samples = torch.clamp(z_samples, near, far)
-        print("z_samples")
-        print(z_samples)
-        print()
-        print()
+        # print("z_samples")
+        # print(z_samples)
+        # print()
+        # print()
 
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
