@@ -1311,7 +1311,7 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
     return samples, T_below, tau_below, bin_below
 
-def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon=1e-3):
+def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
     
 
     bins = torch.cat([near, bins, far], -1)   
@@ -1406,7 +1406,7 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
 
     return samples, T_below, tau_below, bin_below, u
 
-def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon=1e-3):
+def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
 
     bins = torch.cat([near, bins, far], -1)
     
@@ -1500,7 +1500,7 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
 
     return samples, T_below, tau_below, bin_below
 
-def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon=1e-3):
+def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
 
     bins = torch.cat([near, bins, far], -1)
     
