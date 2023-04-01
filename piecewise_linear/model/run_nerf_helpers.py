@@ -1248,35 +1248,37 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
     ### Constant interval, take the left bin
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
-    # print("Number of constant cases")
-    # print(torch.sum(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold)))
-    # print()
+    print("Number of constant cases")
+    print(torch.sum(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold)))
+    print()
 
     if not quad_solution_v2:
         ### Increasing
         samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
         # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
-        # print("Number of increasing cases")
-        # print(torch.sum(tau_diff_g > zero_threshold))
-        # print()
+        print("Number of increasing cases")
+        print(torch.sum(tau_diff_g > zero_threshold))
+        print()
 
         ### Decreasing
         samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
         # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
-        # print("Number of decreasing cases")
-        # print(torch.sum(tau_diff_g < -zero_threshold))
+        print("Number of decreasing cases")
+        print(torch.sum(tau_diff_g < -zero_threshold))
+        print()
 
     else:
         ### Increasing
         samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
-        # print("Number of increasing cases")
-        # print(torch.sum(tau_diff_g > zero_threshold))
-        # print()
+        print("Number of increasing cases")
+        print(torch.sum(tau_diff_g > zero_threshold))
+        print()
 
         ### Decreasing
         samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
-        # print("Number of decreasing cases")
-        # print(torch.sum(tau_diff_g < -zero_threshold))
+        print("Number of decreasing cases")
+        print(torch.sum(tau_diff_g < -zero_threshold))
+        print()
 
     # print("Samples 1")
     # print(samples1)
@@ -1291,7 +1293,9 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # print(samples)
 
     # print(samples)
-    # print("Does nan exist in samples selected")
+    print("Number of nan samples")
+    print(torch.sum(torch.isnan(samples3)))
+    print()
     # print(torch.isnan(samples3).any())
     # print(torch.isnan(samples).any())
 
