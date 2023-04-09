@@ -1038,36 +1038,88 @@ def pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u_
 
     return sample
 
+################################
+# def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
+#     ### Fix this, need negative sign
+#     ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+#     discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+
+#     ## This was the bug
+#     # t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+    
+#     t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_right - tau_left))
+
+#     # ### Printing to debug ###
+#     # print("====Increasing case=====")
+#     # print("ln term")
+#     # print(ln_term)
+#     # print("(1-u)/T_left")
+#     # print(torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ))
+#     # print()
+#     # print("discriminant")
+#     # print(discriminant)
+#     # print("s_right - s_left")
+#     # print(torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left))
+#     # print("div term in discriminant")
+#     # print(torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) ))
+#     # print()
+#     # print("t")
+#     # print(t)
+#     # print("denominator: tau_left - tau_right")
+#     # print(torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+#     # print("================")
+#     # #########################
+
+#     sample = s_left + t
+
+#     return sample
+
+
+# def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
+#     ### Fix this, need negative sign
+#     ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+#     discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+#     t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+#     sample = s_left + t
+
+#     # ### Printing to debug ###
+#     # print("====Decreasing case=====")
+#     # print("ln term")
+#     # print(ln_term)
+#     # print("(1-u)/T_left")
+#     # print(torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ))
+#     # print()
+#     # print("discriminant")
+#     # print(discriminant)
+#     # print("s_right - s_left")
+#     # print(torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left))
+#     # print("div term in discriminant")
+#     # print(torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) ))
+#     # print()
+#     # print("t")
+#     # print(t)
+#     # print("denominator: tau_left - tau_right")
+#     # print(torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+#     # print("================")
+#     # #########################
+
+#     return sample
+#######################################
+
+
 def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
     ### Fix this, need negative sign
     ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
     discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
 
-    ## This was the bug
-    # t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
-    
     t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_right - tau_left))
 
-    # ### Printing to debug ###
-    # print("====Increasing case=====")
-    # print("ln term")
-    # print(ln_term)
-    # print("(1-u)/T_left")
-    # print(torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ))
+    ### clamp t to [0, s_right - s_left]
+    # print("t clamping")
+    # print(torch.max(t))
+    t = torch.clamp(t, torch.ones_like(t, device=t.device)*epsilon, s_right - s_left)
+    # print(torch.max(t))
     # print()
-    # print("discriminant")
-    # print(discriminant)
-    # print("s_right - s_left")
-    # print(torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left))
-    # print("div term in discriminant")
-    # print(torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) ))
-    # print()
-    # print("t")
-    # print(t)
-    # print("denominator: tau_left - tau_right")
-    # print(torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
-    # print("================")
-    # #########################
 
     sample = s_left + t
 
@@ -1079,30 +1131,19 @@ def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right,
     ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
     discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
     t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+
+    ### clamp t to [0, s_right - s_left]
+    # print("t clamping")
+    # print(torch.max(t))
+    t = torch.clamp(t, torch.ones_like(t, device=t.device)*epsilon, s_right - s_left)
+    # print(torch.max(t))
+    # print()
+
     sample = s_left + t
 
-    # ### Printing to debug ###
-    # print("====Decreasing case=====")
-    # print("ln term")
-    # print(ln_term)
-    # print("(1-u)/T_left")
-    # print(torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ))
-    # print()
-    # print("discriminant")
-    # print(discriminant)
-    # print("s_right - s_left")
-    # print(torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left))
-    # print("div term in discriminant")
-    # print(torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) ))
-    # print()
-    # print("t")
-    # print(t)
-    # print("denominator: tau_left - tau_right")
-    # print(torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
-    # print("================")
-    # #########################
-
     return sample
+
+
 
 def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
     
@@ -1248,37 +1289,37 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
     ### Constant interval, take the left bin
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
-    print("Number of constant cases")
-    print(torch.sum(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold)))
-    print()
+    # print("Number of constant cases")
+    # print(torch.sum(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold)))
+    # print()
 
     if not quad_solution_v2:
         ### Increasing
         samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
         # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
-        print("Number of increasing cases")
-        print(torch.sum(tau_diff_g > zero_threshold))
-        print()
+        # print("Number of increasing cases")
+        # print(torch.sum(tau_diff_g > zero_threshold))
+        # print()
 
         ### Decreasing
         samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
         # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
-        print("Number of decreasing cases")
-        print(torch.sum(tau_diff_g < -zero_threshold))
-        print()
+        # print("Number of decreasing cases")
+        # print(torch.sum(tau_diff_g < -zero_threshold))
+        # print()
 
     else:
         ### Increasing
         samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
-        print("Number of increasing cases")
-        print(torch.sum(tau_diff_g > zero_threshold))
-        print()
+        # print("Number of increasing cases")
+        # print(torch.sum(tau_diff_g > zero_threshold))
+        # print()
 
         ### Decreasing
         samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
-        print("Number of decreasing cases")
-        print(torch.sum(tau_diff_g < -zero_threshold))
-        print()
+        # print("Number of decreasing cases")
+        # print(torch.sum(tau_diff_g < -zero_threshold))
+        # print()
 
     # print("Samples 1")
     # print(samples1)
@@ -1293,9 +1334,9 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     # print(samples)
 
     # print(samples)
-    print("Number of nan samples")
-    print(torch.sum(torch.isnan(samples3)))
-    print()
+    # print("Number of nan samples")
+    # print(torch.sum(torch.isnan(samples3)))
+    # print()
     # print(torch.isnan(samples3).any())
     # print(torch.isnan(samples).any())
 
@@ -1643,7 +1684,9 @@ class Scale_Gradient_PDF(torch.autograd.Function):
         # print(torch.exp(-0.5*(tau_samples+tau_below)(samples-bin_below)))
 
         f_s = T_below*tau_samples*torch.exp(-0.5*(tau_samples+tau_below)*(samples-bin_below))
+
         grad_scale = 1./torch.max(f_s, torch.ones_like(f_s, device=f_s.device)*1e-3) ### prevent nan
+
         # grad_scale = 1./torch.max(f_s, torch.ones_like(f_s, device=f_s.device)*1e-2) ### prevent nan
 
         # print("=========")
@@ -1672,6 +1715,38 @@ class Scale_Gradient_PDF(torch.autograd.Function):
         #     grad_weight = grad_output.t().mm(input)
         # if bias is not None and ctx.needs_input_grad[2]:
         #     grad_bias = grad_output.sum(0)
+        print("f_s")
+        # print("exp expression max:")
+        # print(torch.max(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
+        # print("exp expression min:")
+        # print(torch.min(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
+        # print("exp expression average:")
+        # print(torch.mean(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
+
+        # print("tau samples:")
+        # print(torch.max(tau_samples))
+        print("Min")
+        print(torch.min(f_s))
+        print("Max")
+        print(torch.max(f_s))
+        print("Average")
+        print(torch.mean(f_s))        
+        print()
+        print("Grad scale:")
+        # print(grad_scale)
+        print("Min")
+        print(torch.min(grad_scale))
+        print("Max")
+        print(torch.max(grad_scale))
+        print("Average")
+        print(torch.mean(grad_scale))
+
+        grad_scale_filtered = torch.where(torch.abs(grad_scale-1000)<=1e-3, torch.ones_like(grad_scale, device=grad_scale.device)*1e-3, grad_scale)
+        print("Max filtered")
+        print(torch.max(grad_scale_filtered))        
+        print("Average filtered")
+        print(torch.mean(grad_scale_filtered))
+        print("============")       
 
         scaled_grad_samples = grad_scale * grad_samples
 
@@ -1753,12 +1828,6 @@ def sample_pdf_scratch(bins, weights, N_samples, det=False, pytest=False):
     # exit()
 
     return samples
-
-
-
-
-
-
 
 
 
