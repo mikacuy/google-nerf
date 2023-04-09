@@ -1144,7 +1144,7 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
         batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     return batch_rays, target_s, target_d, target_vd, img_i
 
-def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args, space_carving_idx=None, cached_u=None):
+def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args, space_carving_idx=None, cached_u=None, gt_valid_depths=None):
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W), indexing='ij'), -1)  # (H, W, 2)
     # img_i = np.random.choice(i_train)
     
@@ -1182,21 +1182,23 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
     else:
         curr_cached_u = None
 
-    if args.mask_corners:
-        ### Initialize a masked image
-        space_carving_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
+    # if args.mask_corners:
+    #     ### Initialize a masked image
+    #     space_carving_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
 
-        ### Mask out the corners
-        num_pix_to_mask = 20
-        space_carving_mask[:num_pix_to_mask, :num_pix_to_mask] = 0
-        space_carving_mask[:num_pix_to_mask, -num_pix_to_mask:] = 0
-        space_carving_mask[-num_pix_to_mask:, :num_pix_to_mask] = 0
-        space_carving_mask[-num_pix_to_mask:, -num_pix_to_mask:] = 0
+    #     ### Mask out the corners
+    #     num_pix_to_mask = 20
+    #     space_carving_mask[:num_pix_to_mask, :num_pix_to_mask] = 0
+    #     space_carving_mask[:num_pix_to_mask, -num_pix_to_mask:] = 0
+    #     space_carving_mask[-num_pix_to_mask:, :num_pix_to_mask] = 0
+    #     space_carving_mask[-num_pix_to_mask:, -num_pix_to_mask:] = 0
 
-        space_carving_mask = space_carving_mask[select_coords[:, 0], select_coords[:, 1]]
-    else:
-        space_carving_mask = None
+    #     space_carving_mask = space_carving_mask[select_coords[:, 0], select_coords[:, 1]]
+    # else:
+    #     space_carving_mask = None
 
+    space_carving_mask = gt_valid_depths[img_i].squeeze()
+    space_carving_mask = space_carving_mask[select_coords[:, 0], select_coords[:, 1]]
 
     if args.depth_loss_weight > 0.:
         depth_range = precompute_depth_sampling(target_d)
@@ -1350,7 +1352,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         gt_valid_depths_train = torch.Tensor(gt_valid_depths[i_train]).bool().to(device) # only used to evaluate error of completed depth
         depths, valid_depths = complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, \
             scene_sample_params, args)
-        del gt_depths_train, gt_valid_depths_train
+        # del gt_depths_train, gt_valid_depths_train
+
+    #### Use GT depth for space carving --> overriding all_depth_hypothesis ###
+    gt_depths_train = gt_depths_train.unsqueeze(1)
+    gt_valid_depths_train = gt_valid_depths_train.unsqueeze(1)
 
     ##### Initialize depth scale and shift
     DEPTH_SCALES = torch.autograd.Variable(torch.ones((images.shape[0], 1), dtype=torch.float, device=images.device)*args.scale_init, requires_grad=True)
@@ -1507,7 +1513,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                     target = images[img_idx]
                     pose = poses[img_idx, :3,:4]
                     intrinsic = intrinsics[img_idx, :]
-                    prior_depth_hypothesis = all_depth_hypothesis[img_idx]
+                    prior_depth_hypothesis = gt_depths_train[img_idx]
 
                     ### Rescale with current scale shift values
                     curr_scale = DEPTH_SCALES[img_idx]
@@ -1541,7 +1547,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         ## Scale and shift
         batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
-            intrinsics, all_depth_hypothesis, args, SPACE_CARVING_INDICES, CACHED_U)
+            intrinsics, gt_depths_train, args, SPACE_CARVING_INDICES, CACHED_U, gt_valid_depths_train)
 
         target_h = target_h*curr_scale + curr_shift        
 

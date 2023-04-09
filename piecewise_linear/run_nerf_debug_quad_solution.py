@@ -1357,6 +1357,9 @@ def config_parser():
     parser.add_argument("--epsilon", type=float, default=0.0, 
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
+    parser.add_argument('--set_near_zero', default= False, type=bool)
+
+
 
     return parser
 
@@ -1449,6 +1452,11 @@ def run_nerf():
     else:
         print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
         exit()
+
+    if args.set_near_zero:
+        near = 1e-4
+        print("Set near plane to zero (1e-4).")
+
 
     i_train, i_val, i_test, i_video = i_split
 
