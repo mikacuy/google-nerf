@@ -1409,6 +1409,8 @@ def run_nerf():
         tmp_task = args.task
         tmp_data_dir = args.data_dir
         tmp_ckpt_dir = args.ckpt_dir
+        tmp_set_near_zero = args.set_near_zero
+        
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
         with open(args_file, 'r') as af:
@@ -1419,6 +1421,7 @@ def run_nerf():
         args.data_dir = tmp_data_dir
         args.ckpt_dir = tmp_ckpt_dir
         args.train_jsonfile = 'transforms_train.json'
+        args.set_near_zero = tmp_set_near_zero
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
