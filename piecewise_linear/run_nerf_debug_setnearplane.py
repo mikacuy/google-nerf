@@ -675,18 +675,12 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=
         # weights_to_aggregate = weights[..., 1:]
 
         if color_mode == "midpoint":
-            print("Aggregating color with midpoint.")
-            exit()
-
             rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
             rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
 
             rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
 
         elif color_mode == "left":
-            print("Aggregating color with left.")
-            exit()
-
             rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
             rgb_map = torch.sum(weights[...,None] * rgb_concat, -2)
 
