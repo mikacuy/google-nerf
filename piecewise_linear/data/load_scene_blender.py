@@ -57,6 +57,7 @@ def read_files(rgb_file, downsample_scale=None):
 
 def load_scene_blender(basedir, train_json = "transforms_train.json", half_res=True):
     splits = ['train', 'val', 'test', 'video']
+    # splits = ['test']
 
     all_imgs = []
 
