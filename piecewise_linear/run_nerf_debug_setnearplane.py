@@ -1351,7 +1351,7 @@ def config_parser():
     parser.add_argument("--color_mode", type=str, default="left", 
                         help='rendering color aggregation mode -- whether to use left bin or midpoint."')
 
-    parser.add_argument('--quad_solution_v2', default= False, type=bool)
+    parser.add_argument('--quad_solution_v2', default= True, type=bool)
 
     ### Epsilon and zero tol in quadratic solution
     parser.add_argument("--zero_tol", type=float, default=1e-4, 
