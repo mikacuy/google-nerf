@@ -1,7 +1,7 @@
 '''
 April 11, 2023
-Debugging numerical instability to quad solution
-Select whether color is left or midpoint
+From set near plane script
+But explicitly use midpointcolor for coarse nerf --> results seem to be better here
 '''
 import os
 import shutil
@@ -878,7 +878,9 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+
+    ## This is the coarse nerf
+    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, "midpoint", raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
 
     if N_importance > 0:
 

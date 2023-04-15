@@ -1,7 +1,7 @@
 '''
 April 11, 2023
-Debugging numerical instability to quad solution
-Select whether color is left or midpoint
+From set near plane script
+But explicitly use midpointcolor for coarse nerf --> results seem to be better here
 '''
 import os
 import shutil
@@ -27,7 +27,7 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender_multidist
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -394,9 +394,9 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
 def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False):
     
     if not test_samples:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(args.test_dist) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     else:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples"  + str(args.test_dist) + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
 
     # if not test_samples:
     #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
@@ -878,7 +878,9 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+
+    ## This is the coarse nerf
+    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, "midpoint", raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
 
     if N_importance > 0:
 
@@ -1360,6 +1362,8 @@ def config_parser():
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
     parser.add_argument('--set_near_plane', default= 2.0, type=float)
+    parser.add_argument('--train_dist', default= 1.0, type=float)
+    parser.add_argument('--test_dist', default= 0.75, type=float)
 
     return parser
 
@@ -1387,6 +1391,8 @@ def run_nerf():
         tmp_ckpt_dir = args.ckpt_dir
         tmp_N_samples = args.N_samples
         tmp_N_importance = args.N_importance
+        tmp_test_dist = args.test_dist
+        tmp_set_near_zero = args.set_near_zero
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
@@ -1401,6 +1407,8 @@ def run_nerf():
 
         args.N_samples = tmp_N_samples
         args.N_importance = tmp_N_importance
+        args.test_dist = tmp_test_dist
+        args.set_near_zero = tmp_set_near_zero
 
     else:
         if args.expname is None:
@@ -1410,6 +1418,7 @@ def run_nerf():
         tmp_data_dir = args.data_dir
         tmp_ckpt_dir = args.ckpt_dir
         tmp_set_near_zero = args.set_near_zero
+        tmp_test_dist = args.test_dist
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
@@ -1422,6 +1431,7 @@ def run_nerf():
         args.ckpt_dir = tmp_ckpt_dir
         args.train_jsonfile = 'transforms_train.json'
         args.set_near_zero = tmp_set_near_zero
+        args.test_dist = tmp_test_dist
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
@@ -1441,7 +1451,7 @@ def run_nerf():
         gt_valid_depths =None
 
     elif args.dataset == "blender":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender(scene_data_dir, half_res=args.half_res)
+        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=args.train_dist, test_dist=args.test_dist)
         depths = None
         valid_depths = None
         gt_depths = None
