@@ -1,7 +1,7 @@
 '''
-March 26, 2023
+April 11, 2023
 Debugging numerical instability to quad solution
-This uses midpoint piecewise constant color
+Select whether color is left or midpoint
 '''
 import os
 import shutil
@@ -393,15 +393,15 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
 
 def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False):
     
-    # if not test_samples:
-    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
-    # else:
-    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
-
     if not test_samples:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     else:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+
+    # if not test_samples:
+    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+    # else:
+    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
 
     os.makedirs(result_dir, exist_ok=True)
     for n, (rgb, depth, gt_rgb) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
@@ -496,7 +496,8 @@ def create_nerf(args, scene_render_params):
         'use_viewdirs' : args.use_viewdirs,
         'raw_noise_std' : args.raw_noise_std,
         'white_bkgd' : args.white_bkgd,
-        'mode' : args.mode
+        'mode' : args.mode,
+        'color_mode': args.color_mode
     }
     render_kwargs_train.update(scene_render_params)
 
@@ -600,11 +601,6 @@ def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., r
 
     weights = factor * T[:, :-1] # [N_rays, N_samples+1]
 
-    # ### TODO: currently, weights don't sum to 1 --> find a fix to this
-    # print(weights)
-    # # print()
-    # # print(T[..., -1])
-    # # print()
     if DEBUG:
         print("==========")
         print("Weights min max")
@@ -615,16 +611,6 @@ def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., r
         print(torch.min(torch.sum(weights, axis=-1)))
         print(torch.max(torch.sum(weights, axis=-1)))
         print("==========")
-    # print()
-    # print(torch.sum(weights, axis=-1).shape)
-    # print(torch.sum(weights, axis=-1))
-    # print(torch.max(torch.sum(weights, axis=-1)))
-    # print(torch.min(torch.sum(weights, axis=-1)))
-    # print()
-    # print(weights.shape)
-    # print(T.shape)
-    # print(tau.shape)
-    # exit()
 
     '''
     We will need to return tau and T for backprop later
@@ -648,7 +634,7 @@ def raw2depth(raw, z_vals, near, far, rays_d, mode):
     std = (((z_vals - depth.unsqueeze(-1)).pow(2) * weights).sum(-1)).sqrt()
     return depth, std
 
-def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=False, white_bkgd=False):
+def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=0, pytest=False, white_bkgd=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -688,11 +674,18 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=Fa
         ### Skip the first bin weights [near, s_0]
         # weights_to_aggregate = weights[..., 1:]
 
+        if color_mode == "midpoint":
+            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+            rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
 
-        rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
-        rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
+            rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
 
-        rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
+        elif color_mode == "left":
+            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
+            rgb_map = torch.sum(weights[...,None] * rgb_concat, -2)
+
+        else:
+            print("ERROR: Color mode unimplemented, please select left or midpoint.")
 
         if DEBUG:
             print("Does nan exist in per point rgb_map")
@@ -762,21 +755,21 @@ def perturb_z_vals(z_vals, pytest):
 
     return z_vals
 
-def compute_samples_around_depth(raw, z_vals, rays_d, N_samples, perturb, lower_bound, near, far, mode):
-    sampling_depth, sampling_std = raw2depth(raw, near, far, z_vals, rays_d, mode)
+def compute_samples_around_depth(raw, z_vals, rays_d, N_samples, perturb, lower_bound, near, far, mode, color_mode):
+    sampling_depth, sampling_std = raw2depth(raw, near, far, z_vals, rays_d, mode, color_mode)
     sampling_std = sampling_std.clamp(min=lower_bound)
     depth_min = sampling_depth - 3. * sampling_std
     depth_max = sampling_depth + 3. * sampling_std
     return sample_3sigma(depth_min, depth_max, N_samples, perturb == 0., near, far)
 
-def forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode):
+def forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode):
     pts_2 = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_2[...,:,None]
     raw_2 = network_query_fn(pts_2, viewdirs, embedded_cam, network_fn)
     z_vals = torch.cat((z_vals, z_vals_2), -1)
     raw = torch.cat((raw, raw_2), 1)
     z_vals, indices = z_vals.sort()
     raw = torch.gather(raw, 1, indices.unsqueeze(-1).expand_as(raw))
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std, pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest)
     return {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights}
 
 def render_rays(ray_batch,
@@ -785,6 +778,7 @@ def render_rays(ray_batch,
                 network_query_fn,
                 N_samples,
                 mode,
+                color_mode,
                 precomputed_z_samples=None,
                 embedded_cam=None,
                 retraw=False,
@@ -863,14 +857,14 @@ def render_rays(ray_batch,
         z_vals_2[invalid_depth] = compute_samples_around_depth(raw.detach()[invalid_depth], z_vals[invalid_depth], rays_d[invalid_depth], N_samples_half, perturb, lower_bound, near[0, 0], far[0, 0], mode)
         # sample with in 3 sigma of the input depth, if it is valid
         z_vals_2[valid_depth] = sample_3sigma(depth_range[valid_depth, 1], depth_range[valid_depth, 2], N_samples_half, perturb == 0., near[0, 0], far[0, 0])
-        return forward_with_additonal_samples(z_vals, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode)
+        return forward_with_additonal_samples(z_vals, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode)
     # test time: use precomputed samples along the whole ray and additionally sample around the predicted depth from the first half of samples
     elif precomputed_z_samples is not None:
         z_vals = precomputed_z_samples.unsqueeze(0).expand((N_rays, N_samples_half))
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
         raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-        z_vals_2 = compute_samples_around_depth(raw, z_vals, rays_d, N_samples_half, perturb, lower_bound, near[0, 0], far[0, 0], mode)
-        return forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode)
+        z_vals_2 = compute_samples_around_depth(raw, z_vals, rays_d, N_samples_half, perturb, lower_bound, near[0, 0], far[0, 0], mode, color_mode)
+        return forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode)
     
     # sample and render rays for nerf
     elif not lindisp:
@@ -884,7 +878,7 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
 
     if N_importance > 0:
 
@@ -901,12 +895,9 @@ def render_rays(ray_batch,
 
         z_samples = z_samples.detach()
 
-        ### Debugging: There was some error on the intervals, left was not always < right
+        ######## Clamping in quad solution should have fixed this
         z_samples = torch.clamp(z_samples, near, far)
-        # print("z_samples")
-        # print(z_samples)
-        # print()
-        # print()
+        ########
 
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
@@ -923,7 +914,7 @@ def render_rays(ray_batch,
             print("Does nan exist in forward")
             print(torch.isnan(raw).any())
 
-        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
         
         if DEBUG:
             print("Does nan/inf exist after converting to rgb outputs")
@@ -1356,18 +1347,19 @@ def config_parser():
                         help='random seed used')
 
     parser.add_argument("--mode", type=str, default="constant", 
-                        help='rendering aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
-    parser.add_argument('--quad_solution_v2', default= False, type=bool)
+                        help='rendering opacity aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
+    parser.add_argument("--color_mode", type=str, default="left", 
+                        help='rendering color aggregation mode -- whether to use left bin or midpoint."')
+
+    parser.add_argument('--quad_solution_v2', default= True, type=bool)
 
     ### Epsilon and zero tol in quadratic solution
     parser.add_argument("--zero_tol", type=float, default=1e-4, 
                         help='zero tol to revert to piecewise constant assumption')    
-    parser.add_argument("--epsilon", type=float, default=0.0, 
+    parser.add_argument("--epsilon", type=float, default=1e-3, 
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
-    parser.add_argument('--set_near_zero', default= False, type=bool)
-
-
+    parser.add_argument('--set_near_plane', default= 2.0, type=float)
 
     return parser
 
@@ -1464,9 +1456,9 @@ def run_nerf():
         print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
         exit()
 
-    if args.set_near_zero:
-        near = 1e-4
-        print("Set near plane to zero (1e-4).")
+
+    near = args.set_near_plane
+    print("Set near plane to: " + str(near))
 
 
     i_train, i_val, i_test, i_video = i_split
@@ -1518,22 +1510,12 @@ def run_nerf():
  
         images = torch.Tensor(images[i_test]).to(device)
 
-        # if gt_depths is None:
-        #     depths = torch.Tensor(depths[i_test]).to(device)
-        #     valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
-        # else:
-        #     depths = torch.Tensor(gt_depths[i_test]).to(device)
-        #     valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
         poses = torch.Tensor(poses[i_test]).to(device)
         intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
         i_test = i_test - i_test[0]
 
         mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
-
-        # ### Debug
-        # mean_metrics_test, images_test = render_images_with_metrics(10, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
-        #     render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
 
         if "samples" in args.task:
             write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization, test_samples=True)
