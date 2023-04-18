@@ -13,10 +13,11 @@ parser.add_argument('views', type=int, help='Number of views')
 parser.add_argument('near', type=float, help='Distance ratio (near)')
 parser.add_argument('far', type=float, help='Distance ratio (far)')
 parser.add_argument('n_smp', type=int, default=5, help='Number of different distance samples')
-parser.add_argument('--seed', type=int, default=666, help='RAndom seed.')
+parser.add_argument('--seed', type=int, default=None, help='RAndom seed.')
 sep_idx = sys.argv.index("--")
 args = parser.parse_args(sys.argv[(sep_idx+1):])
-np.random.seed(args.seed)
+if args.seed is not None:
+    np.random.seed(args.seed)
 
 
 
@@ -40,7 +41,7 @@ COLOR_DEPTH = 8
 FORMAT = 'PNG'
 RANDOM_VIEWS = True
 UPPER_VIEWS = True
-
+CIRCLE_FIXED_START = (.3, 0, 0)
 
 fp = bpy.path.abspath(f"//{RESULTS_PATH}")
 
@@ -135,6 +136,9 @@ if not DEBUG:
 
 for r in sample_ratios:
     out_data[r]['frames'] = []
+
+if not RANDOM_VIEWS:
+    b_empty.rotation_euler = CIRCLE_FIXED_START
 
 for i in range(0, VIEWS):
     assert RANDOM_VIEWS
