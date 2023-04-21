@@ -1,39 +1,40 @@
-# A simple script that uses blender to render views of a single object by rotation the camera around it.
+# A simple script that uses blender to render views of a single object by
+# Zooming in the camera.
 # Also produces depth map at the same time.
 
+from math import radians
+import bpy
 import argparse, sys, os
 import json
 import numpy as np
 import argparse
-sep_idx = sys.argv.index("--")
 
 parser = argparse.ArgumentParser(description='NeRF training set.')
 parser.add_argument('name', type=str, help='Name')
-parser.add_argument('views', type=int, help='Number of views')
+parser.add_argument('n_smp', type=int, help='Number of different distance samples')
 parser.add_argument('near', type=float, help='Distance ratio (near)')
 parser.add_argument('far', type=float, help='Distance ratio (far)')
-
+parser.add_argument('--nviews', type=int, default=10, help='Number of views')
+parser.add_argument('--seed', type=int, default=666, help='RAndom seed.')
+sep_idx = sys.argv.index("--")
 args = parser.parse_args(sys.argv[(sep_idx+1):])
-
-import bpy
+np.random.seed(args.seed)
 
 
 DEBUG = False
 
-VIEWS = {
-    "train": 2 * args.views,
-    "val": args.views,
-    "test": args.views,
-}
+VIEWS = args.nviews
 RESOLUTION = 800
-DISTANCE_RATIO_NEAR = args.near
-DISTANCE_RATIO_FAR = args.far
-RESULTS_PATH = '%s_randdist_nv%d_dist%s-%s' \
-            % (args.name, args.views, DISTANCE_RATIO_NEAR, DISTANCE_RATIO_FAR)
+R_NEAR = args.near
+R_FAR = args.far
+R_delta = (R_FAR - R_NEAR) / float(args.n_smp - 1.)
+sample_ratios = [R_NEAR + R_delta * i for i in range(args.n_smp)]
+RESULTS_PATH = '%s_zoomin_nv%d_dist%s-%s-%s' \
+            % (args.name, VIEWS, R_NEAR, R_FAR, args.n_smp)
+os.makedirs(RESULTS_PATH, exist_ok=True)
 DEPTH_SCALE = 1.4
 COLOR_DEPTH = 8
 FORMAT = 'PNG'
-RANDOM_VIEWS = True
 UPPER_VIEWS = True
 
 
@@ -45,6 +46,7 @@ def listify_matrix(matrix):
     for row in matrix:
         matrix_list.append(list(row))
     return matrix_list
+
 
 if not os.path.exists(fp):
     os.makedirs(fp)
@@ -95,6 +97,7 @@ bpy.context.scene.render.film_transparent = True
 objs = [ob for ob in bpy.context.scene.objects if ob.type in ('EMPTY') and 'Empty' in ob.name]
 bpy.ops.object.delete({"selected_objects": objs})
 
+
 def parent_obj_to_camera(b_camera):
     origin = (0, 0, 0)
     b_empty = bpy.data.objects.new("Empty", None)
@@ -114,8 +117,8 @@ scene.render.resolution_y = RESOLUTION
 scene.render.resolution_percentage = 100
 scene.render.image_settings.file_format = 'PNG'  # set output format to .png
 
-from math import radians
 
+stepsize = 360.0 / VIEWS
 rotation_mode = 'XYZ'
 
 if not DEBUG:
@@ -123,41 +126,35 @@ if not DEBUG:
         output_node.base_path = ''
 
 
-# for i in range(0, VIEWS):
-for split, views in VIEWS.items():
-    stepsize = 360.0 / views
-    # Data to store in JSON file
+for i in range(0, VIEWS):
+    if UPPER_VIEWS:
+        rot = np.random.uniform(0, 1, size=3) * (1,0,2*np.pi)
+        rot[0] = np.abs(np.arccos(1 - 2 * rot[0]) - np.pi/2)
+    else:
+        rot = np.random.uniform(0, 2*np.pi, size=3)
+
     out_data = {
         'camera_angle_x': bpy.data.objects['Camera'].data.angle_x,
+        'frames': []
     }
-    out_data['frames'] = []
-    for i in range(0, views):
+    os.makedirs(os.path.join(RESULTS_PATH, "view_{}".format(i)),
+                exist_ok=True)
+
+    for r_idx, smp_r in enumerate(sample_ratios):
         cam = scene.objects['Camera']
-        dist_ratio = (
-            np.random.uniform(0, 1) * (DISTANCE_RATIO_FAR - DISTANCE_RATIO_NEAR) +
-            DISTANCE_RATIO_NEAR)
-        cam.location = (0, 4.0 * dist_ratio, 0.5 * dist_ratio)
+        cam.location = (0, 4.0 * smp_r, 0.5 * smp_r)
         cam_constraint = cam.constraints.new(type='TRACK_TO')
         cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
         cam_constraint.up_axis = 'UP_Y'
         b_empty = parent_obj_to_camera(cam)
         cam_constraint.target = b_empty
-        if RANDOM_VIEWS:
-            if UPPER_VIEWS:
-                rot = np.random.uniform(0, 1, size=3) * (1,0,2*np.pi)
-                rot[0] = np.abs(np.arccos(1 - 2 * rot[0]) - np.pi/2)
-                b_empty.rotation_euler = rot
-            else:
-                b_empty.rotation_euler = np.random.uniform(0, 2*np.pi, size=3)
-            rfpath = '{}/r_{}'.format(split, i)
-        else:
-            print("Rotation {}, {}".format((stepsize * i), radians(stepsize * i)))
-            rfpath =  '{}/r_{}_{0:03d}'.format(split, i, int(i * stepsize))
+
+        rfpath = 'view_{}/r_{}'.format(i, r_idx)
+        b_empty.rotation_euler = rot
         scene.render.filepath = fp + "/" + rfpath
 
         # depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
         # normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
-
         if DEBUG:
             break
         else:
@@ -165,22 +162,11 @@ for split, views in VIEWS.items():
         frame_data = {
             'full_file_path': scene.render.filepath,
             'file_path': rfpath,
-            'rotation': radians(stepsize),
-            'transform_matrix': listify_matrix(cam.matrix_world)
+            'transform_matrix': listify_matrix(cam.matrix_world),
+            'dist_ratio': smp_r
         }
         out_data['frames'].append(frame_data)
 
-        if RANDOM_VIEWS:
-            if UPPER_VIEWS:
-                rot = np.random.uniform(0, 1, size=3) * (1,0,2*np.pi)
-                rot[0] = np.abs(np.arccos(1 - 2 * rot[0]) - np.pi/2)
-                b_empty.rotation_euler = rot
-            else:
-                b_empty.rotation_euler = np.random.uniform(0, 2*np.pi, size=3)
-        else:
-            b_empty.rotation_euler[2] += radians(stepsize)
-
     if not DEBUG:
-        with open(fp + '/' + '{}_transforms.json'.format(split), 'w') as out_file:
+        with open(fp + '/' + 'transforms_{}.json'.format(i), 'w') as out_file:
             json.dump(out_data, out_file, indent=4)
-
