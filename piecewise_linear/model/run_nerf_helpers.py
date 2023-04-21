@@ -1144,7 +1144,6 @@ def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right,
     return sample
 
 
-
 def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
     
     ### This needs to be fixed...
@@ -1355,6 +1354,112 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
 
     return samples, T_below, tau_below, bin_below
+
+
+def sample_pdf_reformulation_nofar(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
+
+    bins = torch.cat([near, bins], -1)
+    
+    print(weights.shape)
+    print(bins.shape)
+
+
+    weights = weights + 1e-5
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    print(cdf)
+    print(cdf.shape)
+
+    ## Renormalizing will make the solution incorrect, making this function throw an error (indexing will go out of range)
+    exit()
+
+    # Take uniform samples
+    if det:
+        u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+        u = u.expand(list(cdf.shape[:-1]) + [N_samples])
+    else:
+        u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=bins.device)
+
+    # Pytest, overwrite u with numpy's fixed random numbers
+    if pytest:
+        np.random.seed(0)
+        new_shape = list(cdf.shape[:-1]) + [N_samples]
+        if det:
+            u = np.linspace(0., 1., N_samples)
+            u = np.broadcast_to(u, new_shape)
+        else:
+            u = np.random.rand(*new_shape)
+        u = torch.Tensor(u)
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
+    matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
+
+    tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
+
+    s_left = bins_g[...,0]
+    s_right = bins_g[...,1]
+    T_left = T_g[...,0]
+    tau_left = tau_g[...,0]
+    tau_right = tau_g[...,1]
+
+    dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
+
+    ### Constant interval, take the left bin
+    samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
+
+    if not quad_solution_v2:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
+
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
+
+    else:
+        ### Increasing
+        samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
+
+        ### Decreasing
+        samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
+
+    samples = torch.where(torch.isnan(samples3), s_left, samples3)
+
+    ###################################
+    ############## TODO ###############
+    ###################################
+    ### Also return these for custom autograd
+    ### T_below, tau_below, bin_below
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    T_below = T_g[...,0]
+    tau_below = tau_g[...,0]
+    bin_below = bins_g[...,0]
+    ###################################
+
+
+    return samples, T_below, tau_below, bin_below
+
+
 
 def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
     

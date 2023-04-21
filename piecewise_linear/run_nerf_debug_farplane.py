@@ -1,7 +1,7 @@
 '''
-April 11, 2023
-Debugging numerical instability to quad solution
-Select whether color is left or midpoint
+April 18, 2023
+This regard the last bin --> the one with the far plane 
+--> debug whether the issue is overwritting of the far plane opacity for the linear setting
 '''
 import os
 import shutil
@@ -25,9 +25,9 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
-    compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
+    compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation, sample_pdf_reformulation_nofar
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender2
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -544,7 +544,7 @@ def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., r
         print()
 
     ### Concat
-    z_vals = torch.cat([near, z_vals, far], -1)
+    z_vals = torch.cat([near, z_vals], -1)
 
     if DEBUG:
         print("z_vals")
@@ -565,7 +565,7 @@ def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., r
         print(torch.max(dists))
 
     # tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise, raw[...,3][...,-1].unsqueeze(-1)], -1) ### tau(near) = 0, tau(far) = tau(last_sample)
-    tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise, torch.ones((raw.shape[0], 1), device=device)*1e10], -1) ### tau(near) = 0, tau(far) = very big (will hit an opaque surface)
+    tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise], -1) ### tau(near) = 0 (will hit an opaque surface)
 
     tau = F.relu(tau) ## Make positive from proof of DS-NeRF
 
@@ -675,14 +675,13 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=
         # weights_to_aggregate = weights[..., 1:]
 
         if color_mode == "midpoint":
-            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
             rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
 
             rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
 
         elif color_mode == "left":
-            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
-            rgb_map = torch.sum(weights[...,None] * rgb_concat, -2)
+            rgb_map = torch.sum(weights[...,None] * rgb, -2)
 
         else:
             print("ERROR: Color mode unimplemented, please select left or midpoint.")
@@ -692,7 +691,7 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=
             print(torch.isnan(rgb_map).any())
 
         ### Piecewise linear means take the midpoint
-        z_vals = torch.cat([near, z_vals, far], -1)
+        z_vals = torch.cat([near, z_vals], -1)
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
 
         depth_map = torch.sum(weights * z_vals_mid, -1)
@@ -888,10 +887,16 @@ def render_rays(ray_batch,
 
         # z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
-        if mode == "linear":
-            z_samples, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2, zero_threshold = zero_tol, epsilon_=epsilon)
-        elif mode == "constant":
-            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
+        # if mode == "linear":
+        #     z_samples, _, _, _ = sample_pdf_reformulation_nofar(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2, zero_threshold = zero_tol, epsilon_=epsilon)
+        # elif mode == "constant":
+
+        # print(weights.shape)
+        # print(z_vals.shape)
+        # exit()
+
+        ## Integration is linear so we don't need to shift the bin
+        z_samples = sample_pdf(z_vals, weights[...,1:], N_importance, det=(perturb==0.), pytest=pytest)
 
         z_samples = z_samples.detach()
 
@@ -1359,7 +1364,7 @@ def config_parser():
     parser.add_argument("--epsilon", type=float, default=1e-3, 
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
-    parser.add_argument('--set_near_plane', default= 0.5, type=float)
+    parser.add_argument('--set_near_plane', default= 2.0, type=float)
 
     return parser
 
@@ -1367,8 +1372,6 @@ def run_nerf():
     
     parser = config_parser()
     args = parser.parse_args()
-
-    
 
     if args.task == "train":
         if args.expname is None:
@@ -1432,7 +1435,7 @@ def run_nerf():
         args.set_near_plane = tmp_set_near_plane
         args.N_samples = tmp_N_samples
         args.N_importance = tmp_N_importance
-
+        
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
     # Multi-GPU
@@ -1462,17 +1465,6 @@ def run_nerf():
         else:
             images = images[...,:3]  
 
-    elif args.dataset == "blender2":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender2(scene_data_dir, half_res=args.half_res)
-        depths = None
-        valid_depths = None
-        gt_depths = None
-        gt_valid_depths =None
-
-        if args.white_bkgd:
-            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
-        else:
-            images = images[...,:3]  
     else:
         print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
         exit()

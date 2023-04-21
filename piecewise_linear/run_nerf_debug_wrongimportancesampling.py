@@ -1,7 +1,7 @@
 '''
-April 11, 2023
-Debugging numerical instability to quad solution
-Select whether color is left or midpoint
+April 18, 2023
+use wrong importance sampling (same as constant) when running with linear aggregation 
+--> debug whether the issue is the fine nerf mode
 '''
 import os
 import shutil
@@ -27,7 +27,7 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender2
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -888,10 +888,10 @@ def render_rays(ray_batch,
 
         # z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
-        if mode == "linear":
-            z_samples, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2, zero_threshold = zero_tol, epsilon_=epsilon)
-        elif mode == "constant":
-            z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
+        # if mode == "linear":
+        #     z_samples, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2, zero_threshold = zero_tol, epsilon_=epsilon)
+        # elif mode == "constant":
+        z_samples = sample_pdf(z_vals, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
         z_samples = z_samples.detach()
 
@@ -1359,7 +1359,7 @@ def config_parser():
     parser.add_argument("--epsilon", type=float, default=1e-3, 
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
-    parser.add_argument('--set_near_plane', default= 0.5, type=float)
+    parser.add_argument('--set_near_plane', default= 2.0, type=float)
 
     return parser
 
@@ -1432,7 +1432,7 @@ def run_nerf():
         args.set_near_plane = tmp_set_near_plane
         args.N_samples = tmp_N_samples
         args.N_importance = tmp_N_importance
-
+        
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
     # Multi-GPU
@@ -1462,17 +1462,6 @@ def run_nerf():
         else:
             images = images[...,:3]  
 
-    elif args.dataset == "blender2":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender2(scene_data_dir, half_res=args.half_res)
-        depths = None
-        valid_depths = None
-        gt_depths = None
-        gt_valid_depths =None
-
-        if args.white_bkgd:
-            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
-        else:
-            images = images[...,:3]  
     else:
         print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
         exit()

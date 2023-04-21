@@ -1392,7 +1392,7 @@ def run_nerf():
         tmp_N_samples = args.N_samples
         tmp_N_importance = args.N_importance
         tmp_test_dist = args.test_dist
-        tmp_set_near_zero = args.set_near_zero
+        tmp_set_near_plane = args.set_near_plane
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
@@ -1408,7 +1408,7 @@ def run_nerf():
         args.N_samples = tmp_N_samples
         args.N_importance = tmp_N_importance
         args.test_dist = tmp_test_dist
-        args.set_near_zero = tmp_set_near_zero
+        args.set_near_plane = tmp_set_near_plane
 
     else:
         if args.expname is None:
@@ -1417,7 +1417,7 @@ def run_nerf():
         tmp_task = args.task
         tmp_data_dir = args.data_dir
         tmp_ckpt_dir = args.ckpt_dir
-        tmp_set_near_zero = args.set_near_zero
+        tmp_set_near_plane = args.set_near_plane
         tmp_test_dist = args.test_dist
 
         # load nerf parameters from training
@@ -1430,7 +1430,7 @@ def run_nerf():
         args.data_dir = tmp_data_dir
         args.ckpt_dir = tmp_ckpt_dir
         args.train_jsonfile = 'transforms_train.json'
-        args.set_near_zero = tmp_set_near_zero
+        args.set_near_plane = tmp_set_near_plane
         args.test_dist = tmp_test_dist
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
@@ -1438,6 +1438,7 @@ def run_nerf():
     # Multi-GPU
     args.n_gpus = torch.cuda.device_count()
     print(f"Using {args.n_gpus} GPU(s).")
+
 
     # Load data
     scene_data_dir = os.path.join(args.data_dir, args.scene_id)

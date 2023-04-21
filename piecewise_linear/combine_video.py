@@ -3,10 +3,10 @@ import argparse
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--video_1', default= "/orion/u/mikacuy/coordinate_mvs/piecewise_linear/log_blender_vanilla_importancesample_fullres/lego_piecewise_constant/lego_zoom_v2.mp4", type=str)
-parser.add_argument('--video_2', default= "/orion/u/mikacuy/coordinate_mvs/piecewise_linear/log_blender_quad_sol_v2_clamped_setnearzero/lego_z1e-4_eps1e-3/lego_zoom_v2.mp4", type=str)
+parser.add_argument('--video_1', default= "/orion/u/mikacuy/coordinate_mvs/piecewise_linear/log_blender_closeup_v2/lego_0.5_1.25_linear_near0.5_csamples128_isamples64/lego_0.5_1.25_rgb_zoom_7.mp4", type=str)
+parser.add_argument('--video_2', default= "/orion/u/mikacuy/coordinate_mvs/piecewise_linear/log_blender_closeup_v2/lego_0.5_1.25_constant_near0.5/lego_0.5_1.25_rgb_zoom_7.mp4", type=str)
 
-parser.add_argument('--out_name', default= "lego_importancesample_fullres_constantvslinear_zoom_v2.mp4", type=str)
+parser.add_argument('--out_name', default= "lego_zoom7_constant_vs_linearc128i64.mp4", type=str)
 
 
 parser.add_argument('--video_3', default= "log_fewer_images_16v2/0830_scene0710_ddp/video_0/video.mp4", type=str)

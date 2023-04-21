@@ -1,7 +1,6 @@
 '''
-April 11, 2023
-Debugging numerical instability to quad solution
-Select whether color is left or midpoint
+April 17, 2023
+Select coarse nerf and fine nerf mode option
 '''
 import os
 import shutil
@@ -27,7 +26,7 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender2
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -394,9 +393,9 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
 def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False):
     
     if not test_samples:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     else:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
 
     # if not test_samples:
     #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
@@ -476,7 +475,7 @@ def create_nerf(args, scene_render_params):
     ckpt = load_checkpoint(args)
     if ckpt is not None:
         start = ckpt['global_step']
-        # optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
         # Load model
         model.load_state_dict(ckpt['network_fn_state_dict'])
@@ -496,7 +495,8 @@ def create_nerf(args, scene_render_params):
         'use_viewdirs' : args.use_viewdirs,
         'raw_noise_std' : args.raw_noise_std,
         'white_bkgd' : args.white_bkgd,
-        'mode' : args.mode,
+        'coarse_mode' : args.coarse_mode,
+        'fine_mode' : args.fine_mode,
         'color_mode': args.color_mode
     }
     render_kwargs_train.update(scene_render_params)
@@ -777,7 +777,8 @@ def render_rays(ray_batch,
                 network_fn,
                 network_query_fn,
                 N_samples,
-                mode,
+                coarse_mode,
+                fine_mode,
                 color_mode,
                 precomputed_z_samples=None,
                 embedded_cam=None,
@@ -878,7 +879,7 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, coarse_mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
 
     if N_importance > 0:
 
@@ -888,9 +889,9 @@ def render_rays(ray_batch,
 
         # z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
-        if mode == "linear":
+        if coarse_mode == "linear":
             z_samples, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2, zero_threshold = zero_tol, epsilon_=epsilon)
-        elif mode == "constant":
+        elif coarse_mode == "constant":
             z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
         z_samples = z_samples.detach()
@@ -914,14 +915,14 @@ def render_rays(ray_batch,
             print("Does nan exist in forward")
             print(torch.isnan(raw).any())
 
-        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, fine_mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
         
         if DEBUG:
             print("Does nan/inf exist after converting to rgb outputs")
             print(torch.isnan(rgb_map).any())
             print(torch.isinf(rgb_map).any())
 
-    if mode == "linear":
+    if fine_mode == "linear":
         weights = weights[..., 1:]
 
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights}
@@ -1346,8 +1347,12 @@ def config_parser():
     parser.add_argument("--random_seed",   type=int, default=0, 
                         help='random seed used')
 
-    parser.add_argument("--mode", type=str, default="constant", 
+    parser.add_argument("--coarse_mode", type=str, default="constant", 
                         help='rendering opacity aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
+    parser.add_argument("--fine_mode", type=str, default="constant", 
+                        help='rendering opacity aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
+     
+
     parser.add_argument("--color_mode", type=str, default="left", 
                         help='rendering color aggregation mode -- whether to use left bin or midpoint."')
 
@@ -1359,7 +1364,7 @@ def config_parser():
     parser.add_argument("--epsilon", type=float, default=1e-3, 
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
-    parser.add_argument('--set_near_plane', default= 0.5, type=float)
+    parser.add_argument('--set_near_plane', default= 2.0, type=float)
 
     return parser
 
@@ -1368,7 +1373,6 @@ def run_nerf():
     parser = config_parser()
     args = parser.parse_args()
 
-    
 
     if args.task == "train":
         if args.expname is None:
@@ -1387,8 +1391,6 @@ def run_nerf():
         tmp_ckpt_dir = args.ckpt_dir
         tmp_N_samples = args.N_samples
         tmp_N_importance = args.N_importance
-        tmp_mode = args.mode
-        tmp_set_near_plane = args.set_near_plane
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
@@ -1403,8 +1405,6 @@ def run_nerf():
 
         args.N_samples = tmp_N_samples
         args.N_importance = tmp_N_importance
-        args.mode = tmp_mode
-        args.set_near_plane = tmp_set_near_plane
 
     else:
         if args.expname is None:
@@ -1413,10 +1413,7 @@ def run_nerf():
         tmp_task = args.task
         tmp_data_dir = args.data_dir
         tmp_ckpt_dir = args.ckpt_dir
-        tmp_set_near_plane = args.set_near_plane
-        tmp_mode = args.mode
-        tmp_N_samples = args.N_samples
-        tmp_N_importance = args.N_importance
+        tmp_set_near_zero = args.set_near_zero
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
@@ -1427,11 +1424,8 @@ def run_nerf():
         args.task = tmp_task
         args.data_dir = tmp_data_dir
         args.ckpt_dir = tmp_ckpt_dir
-        args.mode = tmp_mode
         args.train_jsonfile = 'transforms_train.json'
-        args.set_near_plane = tmp_set_near_plane
-        args.N_samples = tmp_N_samples
-        args.N_importance = tmp_N_importance
+        args.set_near_zero = tmp_set_near_zero
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
@@ -1462,17 +1456,6 @@ def run_nerf():
         else:
             images = images[...,:3]  
 
-    elif args.dataset == "blender2":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender2(scene_data_dir, half_res=args.half_res)
-        depths = None
-        valid_depths = None
-        gt_depths = None
-        gt_valid_depths =None
-
-        if args.white_bkgd:
-            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
-        else:
-            images = images[...,:3]  
     else:
         print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
         exit()

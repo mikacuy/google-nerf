@@ -1042,6 +1042,8 @@ def render_rays(ray_batch,
 
         # z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
+        ### Hierarchical Sampling --> Fine NeRF
+        
         if mode == "linear":
             z_samples, T_below, tau_below, bin_below = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2)
         elif mode == "constant":
