@@ -27,23 +27,27 @@ VIEWS = args.views
 RESOLUTION = 800
 R_NEAR = args.near
 R_FAR = args.far
-R_delta = (R_FAR - R_NEAR) / float(args.n_smp - 1.)
-sample_ratios = [R_NEAR + R_delta * i for i in range(args.n_smp)]
-RESULTS_PATH = '%s_nv%d_dist%s-%s-%s' \
+
+RESULTS_PATH = 'nerf_dataset/%s_fixdist_nv%d_dist%s-%s-%s' \
             % (args.name, VIEWS, R_NEAR, R_FAR, args.n_smp)
 os.makedirs(RESULTS_PATH, exist_ok=True)
-for r in sample_ratios:
-    os.makedirs(os.path.join(RESULTS_PATH, "dist_%s" % r),
-                exist_ok=True)
+split_to_nviews = {
+    "train": args.views * 2,
+    "test": args.views,
+    "val": args.views
+}
+fp = bpy.path.abspath(f"//{RESULTS_PATH}")
+if not os.path.exists(fp):
+    os.makedirs(fp)
+
+# for r in sample_ratios:
+#     os.makedirs(os.path.join(RESULTS_PATH, "dist_%s" % r),
+#                 exist_ok=True)
 
 DEPTH_SCALE = 1.4
 COLOR_DEPTH = 8
 FORMAT = 'PNG'
-RANDOM_VIEWS = True
 UPPER_VIEWS = True
-CIRCLE_FIXED_START = (.3, 0, 0)
-
-fp = bpy.path.abspath(f"//{RESULTS_PATH}")
 
 
 def listify_matrix(matrix):
@@ -52,17 +56,9 @@ def listify_matrix(matrix):
         matrix_list.append(list(row))
     return matrix_list
 
-if not os.path.exists(fp):
-    os.makedirs(fp)
-
-# Data to store in JSON file
-out_data = {r:{
-    'camera_angle_x': bpy.data.objects['Camera'].data.angle_x,
-} for r in sample_ratios}
 
 # Render Optimizations
 bpy.context.scene.render.use_persistent_data = True
-
 
 # Set up rendering of depth map.
 bpy.context.scene.use_nodes = True
@@ -134,15 +130,17 @@ if not DEBUG:
     for output_node in [depth_file_output, normal_file_output]:
         output_node.base_path = ''
 
-for r in sample_ratios:
-    out_data[r]['frames'] = []
 
-if not RANDOM_VIEWS:
-    b_empty.rotation_euler = CIRCLE_FIXED_START
+R_delta = (R_FAR - R_NEAR) / float(args.n_smp - 1.)
+sample_ratios = [R_NEAR + R_delta * i for i in range(args.n_smp)]
+for split, nviews in split_to_nviews.items():
 
-for i in range(0, VIEWS):
-    assert RANDOM_VIEWS
-    if RANDOM_VIEWS:
+    # One transform file per ratio
+    out_data = {smp_r: {
+        'camera_angle_x': bpy.data.objects['Camera'].data.angle_x,
+        "frames": []} for smp_r in sample_ratios}
+
+    for i in range(0, nviews):
         if UPPER_VIEWS:
             rot = np.random.uniform(0, 1, size=3) * (1,0,2*np.pi)
             rot[0] = np.abs(np.arccos(1 - 2 * rot[0]) - np.pi/2)
@@ -150,47 +148,38 @@ for i in range(0, VIEWS):
         else:
             #b_empty.rotation_euler = np.random.uniform(0, 2*np.pi, size=3)
             rot = np.random.uniform(0, 2*np.pi, size=3)
-    for smp_r in sample_ratios:
-        cam = scene.objects['Camera']
-        cam.location = (0, 4.0 * smp_r, 0.5 * smp_r)
-        cam_constraint = cam.constraints.new(type='TRACK_TO')
-        cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
-        cam_constraint.up_axis = 'UP_Y'
-        b_empty = parent_obj_to_camera(cam)
-        cam_constraint.target = b_empty
 
-        if RANDOM_VIEWS:
-            # scene.render.filepath = fp + '/dist_{}/r_{}_'.format(smp_r, smp_r) + str(i)
-            rfpath = 'dist_{}/r_{}_'.format(smp_r, smp_r) + str(i)
+        # Data to store in JSON file
+        for smp_r in sample_ratios:
+            cam = scene.objects['Camera']
+            cam.location = (0, 4.0 * smp_r, 0.5 * smp_r)
+            cam_constraint = cam.constraints.new(type='TRACK_TO')
+            cam_constraint.track_axis = 'TRACK_NEGATIVE_Z'
+            cam_constraint.up_axis = 'UP_Y'
+            b_empty = parent_obj_to_camera(cam)
+            cam_constraint.target = b_empty
+            rfpath = 'radius_{}_{}/r_'.format(smp_r, split) + str(i)
             b_empty.rotation_euler = rot
-        else:
-            print("Rotation {}, {}".format((stepsize * i), radians(stepsize * i)))
-            # scene.render.filepath = fp + '/dist_{}/r_{}_{0:03d}'.format(smp_r, smp_r, int(i * stepsize))
-            rfpath =  'dist_{}/r_{}_{0:03d}'.format(smp_r, smp_r, int(i * stepsize))
-        scene.render.filepath = fp + "/" + rfpath
+            scene.render.filepath = fp + "/" + rfpath
 
-        # depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
-        # normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
+            # depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
+            # normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
 
-        if DEBUG:
-            break
-        else:
-            bpy.ops.render.render(write_still=True)  # render still
-        frame_data = {
-            'full_file_path': scene.render.filepath,
-            'file_path': rfpath,
-            'transform_matrix': listify_matrix(cam.matrix_world),
-            'dist_ratio': smp_r
-        }
-        if not RANDOM_VIEWS:
-           frame_data['rotation'] = radians(stepsize)
-        out_data[smp_r]['frames'].append(frame_data)
+            if DEBUG:
+                break
+            else:
+                bpy.ops.render.render(write_still=True)  # render still
+            frame_data = {
+                'full_file_path': scene.render.filepath,
+                'file_path': rfpath,
+                'transform_matrix': listify_matrix(cam.matrix_world),
+                'dist_ratio': smp_r
+            }
+            out_data[smp_r]['frames'].append(frame_data)
 
-    if not RANDOM_VIEWS:
-        b_empty.rotation_euler[2] += radians(stepsize)
 
-if not DEBUG:
-    for smp_r in sample_ratios:
-        with open(fp + '/' + 'transforms_%s.json' % smp_r, 'w') as out_file:
-            json.dump(out_data[smp_r], out_file, indent=4)
+    if not DEBUG:
+        for smp_r, smp_r_out_data in out_data.items():
+            with open(fp + '/' + 'transforms_radius%s_%s.json' % (smp_r, split), 'w') as out_file:
+                json.dump(smp_r_out_data, out_file, indent=4)
 
