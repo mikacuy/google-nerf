@@ -1388,8 +1388,10 @@ def run_nerf():
             exit()
         tmp_task = args.task
         tmp_data_dir = args.data_dir
+        tmp_scene_id = args.scene_id
         tmp_ckpt_dir = args.ckpt_dir
         tmp_N_samples = args.N_samples
+        tmp_dataset = args.dataset
         tmp_N_importance = args.N_importance
         # tmp_test_dist = args.test_dist
         tmp_set_near_plane = args.set_near_plane
@@ -1402,6 +1404,8 @@ def run_nerf():
         # task and paths are not overwritten
         args.task = tmp_task
         args.data_dir = tmp_data_dir
+        args.scene_id = tmp_scene_id
+        args.dataset = tmp_dataset
         args.ckpt_dir = tmp_ckpt_dir
         args.train_jsonfile = 'transforms_train.json'
 
@@ -1416,6 +1420,8 @@ def run_nerf():
             exit()
         tmp_task = args.task
         tmp_data_dir = args.data_dir
+        tmp_dataset = args.dataset
+        tmp_scene_id = args.scene_id
         tmp_ckpt_dir = args.ckpt_dir
         tmp_set_near_plane = args.set_near_plane
         # tmp_test_dist = args.test_dist
@@ -1428,7 +1434,9 @@ def run_nerf():
         # task and paths are not overwritten
         args.task = tmp_task
         args.data_dir = tmp_data_dir
+        args.scene_id = tmp_scene_id
         args.ckpt_dir = tmp_ckpt_dir
+        args.dataset = tmp_dataset
         args.train_jsonfile = 'transforms_train.json'
         args.set_near_plane = tmp_set_near_plane
         # args.test_dist = tmp_test_dist
@@ -1452,7 +1460,7 @@ def run_nerf():
         gt_valid_depths =None
 
     elif args.dataset == "blender":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender(scene_data_dir, half_res=args.half_res)
+        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=0)
         depths = None
         valid_depths = None
         gt_depths = None
@@ -1508,10 +1516,18 @@ def run_nerf():
     for param in nerf_grad_vars:
         param.requires_grad = False
 
-    scene_data_dir = os.path.join(args.data_dir, "lego_multi_dist")
+    # scene_data_dir = os.path.join(args.data_dir, "lego_multi_dist")
 
     ## render each view zooming in
-    for i in range(24):
+
+    ## Lego
+    # idx_to_take = [29, 36, 41, 96, 0]
+
+    ## Mic
+    idx_to_take = [11, 59]
+
+    for i in idx_to_take:
+        print("Processing pose idx: "+str(i))
         images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=i)
 
         i_train, i_val, i_test, i_video = i_split

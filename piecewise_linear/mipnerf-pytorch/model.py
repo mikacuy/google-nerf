@@ -48,6 +48,7 @@ class MipNeRF(nn.Module):
                  device=torch.device("cpu"),
                  return_raw=False,
                  mode="constant",
+                 color_mode="midpoint",
                  correct_hier=False
                  ):
         super(MipNeRF, self).__init__()
