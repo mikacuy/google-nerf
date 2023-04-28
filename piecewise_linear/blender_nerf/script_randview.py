@@ -28,7 +28,7 @@ VIEWS = {
 RESOLUTION = 800
 DISTANCE_RATIO_NEAR = args.near
 DISTANCE_RATIO_FAR = args.far
-RESULTS_PATH = '%s_randdist_nv%d_dist%s-%s' \
+RESULTS_PATH = 'nerf_dataset/%s_randdist_nv%d_dist%s-%s' \
             % (args.name, args.views, DISTANCE_RATIO_NEAR, DISTANCE_RATIO_FAR)
 DEPTH_SCALE = 1.4
 COLOR_DEPTH = 8
