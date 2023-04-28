@@ -15,7 +15,7 @@ def get_dataset(dataset_name, base_dir, split, factor=4, device=torch.device("cp
     return d
 
 
-def get_dataloader(dataset_name, base_dir, split, factor=4, batch_size=None, shuffle=True, device=torch.device("cpu")):
+def get_dataloader(dataset_name, base_dir, split, factor=4, batch_size=None, shuffle=True, device=torch.device("cpu"), near=2.0):
     d = get_dataset(dataset_name, base_dir, split, factor, device)
     # make the batchsize height*width, so that one "batch" from the dataloader corresponds to one
     # image used to render a video, and don't shuffle dataset
@@ -25,7 +25,8 @@ def get_dataloader(dataset_name, base_dir, split, factor=4, batch_size=None, shu
     loader = DataLoader(d, batch_size=batch_size, shuffle=shuffle)
     loader.h = d.h
     loader.w = d.w
-    loader.near = d.near
+    # loader.near = d.near
+    loader.near = near
     loader.far = d.far
     return loader
 
@@ -37,7 +38,7 @@ def cycle(iterable):
 
 
 class NeRFDataset(Dataset):
-    def __init__(self, base_dir, split, spherify=False, near=2, far=6, white_bkgd=False, factor=1, n_poses=120, radius=None, radii=None, h=None, w=None, device=torch.device("cpu")):
+    def __init__(self, base_dir, split, spherify=True, near=2, far=6, white_bkgd=False, factor=1, n_poses=120, radius=None, radii=None, h=None, w=None, device=torch.device("cpu")):
         super(Dataset, self).__init__()
         self.base_dir = base_dir
         self.split = split

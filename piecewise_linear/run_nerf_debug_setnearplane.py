@@ -497,7 +497,8 @@ def create_nerf(args, scene_render_params):
         'raw_noise_std' : args.raw_noise_std,
         'white_bkgd' : args.white_bkgd,
         'mode' : args.mode,
-        'color_mode': args.color_mode
+        'color_mode': args.color_mode,
+        'farcolorfix': args.farcolorfix
     }
     render_kwargs_train.update(scene_render_params)
 
@@ -634,7 +635,7 @@ def raw2depth(raw, z_vals, near, far, rays_d, mode):
     std = (((z_vals - depth.unsqueeze(-1)).pow(2) * weights).sum(-1)).sqrt()
     return depth, std
 
-def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=0, pytest=False, white_bkgd=False):
+def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=0, pytest=False, white_bkgd=False, farcolorfix=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -675,12 +676,35 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=
         # weights_to_aggregate = weights[..., 1:]
 
         if color_mode == "midpoint":
-            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+
+            if farcolorfix:
+                # # Make near plane color same as first sample
+                # # Make the last sample black --> remove this? this doesnt seem to converge
+                # # Make the far plane color also black
+                # ## This doesn't seem to converge
+                # rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb[: ,:-1, :], torch.zeros((rgb[:, -1].shape), device=device).unsqueeze(1), torch.zeros((rgb[:, -1].shape), device=device).unsqueeze(1)], 1)
+
+                ## Make near plane color same as first sample
+                ## Make the far plane color also black
+                rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, torch.zeros((rgb[:, -1].shape), device=device).unsqueeze(1)], 1)
+
+            else:
+                rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+
             rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
 
             rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
 
         elif color_mode == "left":
+
+            # ## hack on the last bin doesn't really work
+            # if farcolorfix:
+            #     ## Make the last sample black
+            #     rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb[: ,:-1, :], torch.zeros((rgb[:, -1].shape), device=device).unsqueeze(1)], 1)
+
+            # else:
+            #     rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
+
             rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
             rgb_map = torch.sum(weights[...,None] * rgb_concat, -2)
 
@@ -755,21 +779,21 @@ def perturb_z_vals(z_vals, pytest):
 
     return z_vals
 
-def compute_samples_around_depth(raw, z_vals, rays_d, N_samples, perturb, lower_bound, near, far, mode, color_mode):
-    sampling_depth, sampling_std = raw2depth(raw, near, far, z_vals, rays_d, mode, color_mode)
+def compute_samples_around_depth(raw, z_vals, rays_d, N_samples, perturb, lower_bound, near, far, mode):
+    sampling_depth, sampling_std = raw2depth(raw, near, far, z_vals, rays_d, mode)
     sampling_std = sampling_std.clamp(min=lower_bound)
     depth_min = sampling_depth - 3. * sampling_std
     depth_max = sampling_depth + 3. * sampling_std
     return sample_3sigma(depth_min, depth_max, N_samples, perturb == 0., near, far)
 
-def forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode):
+def forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode, farcolorfix=False):
     pts_2 = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_2[...,:,None]
     raw_2 = network_query_fn(pts_2, viewdirs, embedded_cam, network_fn)
     z_vals = torch.cat((z_vals, z_vals_2), -1)
     raw = torch.cat((raw, raw_2), 1)
     z_vals, indices = z_vals.sort()
     raw = torch.gather(raw, 1, indices.unsqueeze(-1).expand_as(raw))
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, farcolorfix=farcolorfix)
     return {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights}
 
 def render_rays(ray_batch,
@@ -792,7 +816,8 @@ def render_rays(ray_batch,
                 white_bkgd=False,
                 quad_solution_v2=False,
                 zero_tol = 1e-4,
-                epsilon = 1e-3):
+                epsilon = 1e-3,
+                farcolorfix = False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -857,14 +882,14 @@ def render_rays(ray_batch,
         z_vals_2[invalid_depth] = compute_samples_around_depth(raw.detach()[invalid_depth], z_vals[invalid_depth], rays_d[invalid_depth], N_samples_half, perturb, lower_bound, near[0, 0], far[0, 0], mode)
         # sample with in 3 sigma of the input depth, if it is valid
         z_vals_2[valid_depth] = sample_3sigma(depth_range[valid_depth, 1], depth_range[valid_depth, 2], N_samples_half, perturb == 0., near[0, 0], far[0, 0])
-        return forward_with_additonal_samples(z_vals, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode)
+        return forward_with_additonal_samples(z_vals, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode, farcolorfix=farcolorfix)
     # test time: use precomputed samples along the whole ray and additionally sample around the predicted depth from the first half of samples
     elif precomputed_z_samples is not None:
         z_vals = precomputed_z_samples.unsqueeze(0).expand((N_rays, N_samples_half))
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
         raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
         z_vals_2 = compute_samples_around_depth(raw, z_vals, rays_d, N_samples_half, perturb, lower_bound, near[0, 0], far[0, 0], mode, color_mode)
-        return forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode)
+        return forward_with_additonal_samples(z_vals, near, far, raw, z_vals_2, rays_o, rays_d, viewdirs, embedded_cam, network_fn, network_query_fn, raw_noise_std, pytest, mode, color_mode, farcolorfix=farcolorfix)
     
     # sample and render rays for nerf
     elif not lindisp:
@@ -914,7 +939,7 @@ def render_rays(ray_batch,
             print("Does nan exist in forward")
             print(torch.isnan(raw).any())
 
-        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
         
         if DEBUG:
             print("Does nan/inf exist after converting to rgb outputs")
@@ -1311,7 +1336,7 @@ def config_parser():
     # logging/saving options
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric logging')
-    parser.add_argument("--i_img",     type=int, default=20000,
+    parser.add_argument("--i_img",     type=int, default=500000,
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
@@ -1360,6 +1385,7 @@ def config_parser():
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
     parser.add_argument('--set_near_plane', default= 0.5, type=float)
+    parser.add_argument('--farcolorfix', default= False, type=bool)
 
     return parser
 

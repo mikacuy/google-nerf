@@ -58,10 +58,14 @@ def get_config():
 
     config.add_argument("--mode", type=str, default="constant", 
                         help='rendering aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
+    config.add_argument("--color_mode", type=str, default="midpoint", 
+                        help='rendering color aggregation mode -- whether to use left bin or midpoint."')
+    config.add_argument('--set_near_plane', default= 2.0, type=float)
+
+
     config.add_argument("--data_dir", type=str, default="../nerf_llff_data/",
                     help='directory containing the scenes')
     config.add_argument("--correct_hier", action="store_true")
-
 
     config = config.parse_args()
 

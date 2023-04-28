@@ -61,49 +61,43 @@ def sorted_piecewise_constant_pdf(bins, weights, num_samples, randomized):
     return samples
 
 ####### For Piecewise Linear #######
-def pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u_diff):
-    
-    ln_term = torch.log(T_left) - torch.log(T_left - u_diff)
-    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.zeros_like(discriminant), discriminant))) , tau_right - tau_left)
+def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
+    ### Fix this, need negative sign
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+
+    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_right - tau_left))
+
+    ### clamp t to [0, s_right - s_left]
+    # print("t clamping")
+    # print(torch.max(t))
+    t = torch.clamp(t, torch.ones_like(t, device=t.device)*epsilon, s_right - s_left)
+    # print(torch.max(t))
+    # print()
 
     sample = s_left + t
 
     return sample
 
 
-def pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u_diff):
-    
-    ln_term = torch.log(T_left) - torch.log(T_left - u_diff)
-    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.zeros_like(discriminant), discriminant))) , tau_left - tau_right)
-    sample = s_left + t
+def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
+    ### Fix this, need negative sign
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
 
-    return sample
-
-def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-3
-
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
-    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_right - tau_left)
+    ### clamp t to [0, s_right - s_left]
+    # print("t clamping")
+    # print(torch.max(t))
+    t = torch.clamp(t, torch.ones_like(t, device=t.device)*epsilon, s_right - s_left)
+    # print(torch.max(t))
+    # print()
 
     sample = s_left + t
 
     return sample
 
-
-def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u):
-    EPSILON = 1e-3
-
-    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*EPSILON, torch.div(1-u, T_left)))
-    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , s_right - s_left)
-    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*EPSILON, discriminant))) , tau_left - tau_right)
-    sample = s_left + t
-
-    return sample
-
-def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False):
+def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, zero_threshold = 1e-4, epsilon_=1e-3):
 
     # print(bins.shape)
     # exit()
@@ -162,7 +156,6 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     tau_left = tau_g[...,0]
     tau_right = tau_g[...,1]
 
-    zero_threshold = 1e-4
 
     dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
 
@@ -170,13 +163,16 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
     samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
 
     ### Increasing
-    # samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples1)
-    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples1)
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
+    # print("Number of increasing cases")
+    # print(torch.sum(tau_diff_g > zero_threshold))
+    # print()
 
     ### Decreasing
-    # samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing(s_left, s_right, T_left, tau_left, tau_right, u-cdf_g[...,0]), samples2)
-    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u), samples2)
-
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
+    # print("Number of decreasing cases")
+    # print(torch.sum(tau_diff_g < -zero_threshold))
+    # print()
     ## Check for nan --> need to figure out why
     samples = torch.where(torch.isnan(samples3), s_left, samples3)
 
@@ -440,7 +436,7 @@ def resample_along_rays_piecewise_linear(origins, directions, radii, t_vals, wei
             new_t_vals, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, t_vals.shape[-1], det= (not randomized), pytest=False)
             new_t_vals = torch.clamp(new_t_vals, near, far)
             z_vals, _ = torch.sort(new_t_vals, -1)
-            
+
             # new_t_vals = sorted_piecewise_constant_pdf(
             #     t_vals,
             #     weights,
@@ -460,7 +456,7 @@ def resample_along_rays_piecewise_linear(origins, directions, radii, t_vals, wei
         z_vals = 0.5 * (t_vals[...,:-1] + t_vals[...,1:])
         new_t_vals, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, t_vals.shape[-1], det= (not randomized), pytest=False)
         new_t_vals = torch.clamp(new_t_vals, near, far)
-        z_vals, _ = torch.sort(new_t_vals, -1)
+        new_t_vals, _ = torch.sort(new_t_vals, -1)
 
         # new_t_vals = sorted_piecewise_constant_pdf(
         #     t_vals,
@@ -513,7 +509,7 @@ def volumetric_rendering(rgb, density, t_vals, dirs, white_bkgd):
     return comp_rgb, distance, acc, weights, alpha
 
 
-def volumetric_rendering_piecewise_linear(rgb, density, t_vals, dirs, white_bkgd, near, far):
+def volumetric_rendering_piecewise_linear(rgb, density, t_vals, dirs, white_bkgd, near, far, color_mode="midpoint"):
     """Volumetric Rendering Function.
 
     Args:
@@ -534,11 +530,14 @@ def volumetric_rendering_piecewise_linear(rgb, density, t_vals, dirs, white_bkgd
     ### Midpoints are the bin boundaries
     z_vals = 0.5 * (t_vals[...,:-1] + t_vals[...,1:])
     z_vals = torch.cat([near, z_vals, far], -1)
+
     t_mids = 0.5 * (t_vals[..., :-1] + t_vals[..., 1:])
 
     dists = z_vals[...,1:] - z_vals[...,:-1]
     dists = dists * torch.norm(dirs[...,None,:], dim=-1)
     tau = torch.cat([torch.ones((density.shape[0], 1), device=density.device)*1e-10, density[...,0], torch.ones((density.shape[0], 1), device=density.device)*1e10], -1)
+
+    # tau = F.relu(tau)
 
     interval_ave_tau = 0.5 * (tau[...,1:] + tau[...,:-1])
 
@@ -559,14 +558,27 @@ def volumetric_rendering_piecewise_linear(rgb, density, t_vals, dirs, white_bkgd
     # print(weights.shape)
     # print(tau.shape)
     # print(T.shape)
-    # exit()
+    # print(t_vals.shape)
     # print(rgb.shape)
+    # print(density.shape)
+    # exit()
 
-    weights_to_aggregate = weights[..., 1:]
-    comp_rgb = (weights_to_aggregate[..., None] * rgb).sum(dim=-2)
-    acc = weights_to_aggregate.sum(dim=-1)
-    distance = (weights_to_aggregate * t_mids).sum(dim=-1) / acc
+    # if color_mode == "midpoint":
+
+    rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+    rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
+
+    comp_rgb = (weights[..., None] * rgb_mid).sum(dim=-2)
+    acc = weights.sum(dim=-1)
+    distance = (weights * t_vals).sum(dim=-1) / acc
     distance = torch.clamp(torch.nan_to_num(distance), t_vals[:, 0], t_vals[:, -1])
+
+    # weights_to_aggregate = weights[..., 1:]
+    # comp_rgb = (weights_to_aggregate[..., None] * rgb).sum(dim=-2)
+    # acc = weights_to_aggregate.sum(dim=-1)
+    # distance = (weights_to_aggregate * t_mids).sum(dim=-1) / acc
+    # distance = torch.clamp(torch.nan_to_num(distance), t_vals[:, 0], t_vals[:, -1])
+
     if white_bkgd:
         comp_rgb = comp_rgb + (1. - acc[..., None])
 
