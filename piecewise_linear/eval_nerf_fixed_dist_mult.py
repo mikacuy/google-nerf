@@ -1,7 +1,7 @@
 '''
 April 11, 2023
-Debugging numerical instability to quad solution
-Select whether color is left or midpoint
+From set near plane script
+But explicitly use midpointcolor for coarse nerf --> results seem to be better here
 '''
 import os
 import shutil
@@ -27,7 +27,8 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender2
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, \
+    load_scene_blender, load_scene_blender2, load_scene_blender_multidist, load_scene_blender_fixed_dist_new
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -193,14 +194,14 @@ def precompute_depth_sampling(depth):
 #     subprocess.call(["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(video_dir, "%d.jpg"), "-c:v", "libx264", "-profile:v", "high", "-crf", str(fps), video_file])
 #     print("Maximal depth in video: {}".format(max_depth_in_video))
 
-def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fps=25):
+def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fps=5):
     # video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_' + filename)
     # video_depth_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_depth_' + filename)
     # video_depth_colored_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_depth_colored' + filename)
 
-    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo_zoomed2_' + filename)
-    video_depth_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_depth_zoomed2_' + filename)
-    video_depth_colored_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo2_depth_colored_zoomed2_' + filename)
+    video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo_zoom_' + filename)
+    video_depth_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo_depth_zoom_' + filename)
+    video_depth_colored_dir = os.path.join(args.ckpt_dir, args.expname, 'video_demo_depth_colored_zoom_' + filename)
 
     if os.path.exists(video_dir):
         shutil.rmtree(video_dir)
@@ -257,7 +258,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
 
     imageio.mimsave(video_file,
                     [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
-                    fps=10, macro_block_size=1)
+                    fps=fps, macro_block_size=1)
     print("Done.")
 
 
@@ -394,9 +395,9 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
 def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False):
     
     if not test_samples:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_dist" + str(args.test_dist) + "_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     else:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples_dist"  + str(args.test_dist) + "_" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
 
     # if not test_samples:
     #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
@@ -476,7 +477,7 @@ def create_nerf(args, scene_render_params):
     ckpt = load_checkpoint(args)
     if ckpt is not None:
         start = ckpt['global_step']
-        # optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
         # Load model
         model.load_state_dict(ckpt['network_fn_state_dict'])
@@ -676,7 +677,6 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=
         # weights_to_aggregate = weights[..., 1:]
 
         if color_mode == "midpoint":
-
             if farcolorfix:
                 # # Make near plane color same as first sample
                 # # Make the last sample black --> remove this? this doesnt seem to converge
@@ -690,21 +690,11 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=
 
             else:
                 rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
-
             rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
 
             rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
 
         elif color_mode == "left":
-
-            # ## hack on the last bin doesn't really work
-            # if farcolorfix:
-            #     ## Make the last sample black
-            #     rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb[: ,:-1, :], torch.zeros((rgb[:, -1].shape), device=device).unsqueeze(1)], 1)
-
-            # else:
-            #     rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
-
             rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
             rgb_map = torch.sum(weights[...,None] * rgb_concat, -2)
 
@@ -779,8 +769,8 @@ def perturb_z_vals(z_vals, pytest):
 
     return z_vals
 
-def compute_samples_around_depth(raw, z_vals, rays_d, N_samples, perturb, lower_bound, near, far, mode):
-    sampling_depth, sampling_std = raw2depth(raw, near, far, z_vals, rays_d, mode)
+def compute_samples_around_depth(raw, z_vals, rays_d, N_samples, perturb, lower_bound, near, far, mode, color_mode):
+    sampling_depth, sampling_std = raw2depth(raw, near, far, z_vals, rays_d, mode, color_mode)
     sampling_std = sampling_std.clamp(min=lower_bound)
     depth_min = sampling_depth - 3. * sampling_std
     depth_max = sampling_depth + 3. * sampling_std
@@ -903,7 +893,9 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
+
+    ## This is the coarse nerf
+    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, "midpoint", raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
 
     if N_importance > 0:
 
@@ -939,7 +931,7 @@ def render_rays(ray_batch,
             print("Does nan exist in forward")
             print(torch.isnan(raw).any())
 
-        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
+        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
         
         if DEBUG:
             print("Does nan/inf exist after converting to rgb outputs")
@@ -1336,7 +1328,7 @@ def config_parser():
     # logging/saving options
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric logging')
-    parser.add_argument("--i_img",     type=int, default=500000,
+    parser.add_argument("--i_img",     type=int, default=20000,
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
@@ -1373,7 +1365,7 @@ def config_parser():
 
     parser.add_argument("--mode", type=str, default="constant", 
                         help='rendering opacity aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
-    parser.add_argument("--color_mode", type=str, default="midpoint", 
+    parser.add_argument("--color_mode", type=str, default="left", 
                         help='rendering color aggregation mode -- whether to use left bin or midpoint."')
 
     parser.add_argument('--quad_solution_v2', default= True, type=bool)
@@ -1385,6 +1377,8 @@ def config_parser():
                         help='epsilon value in the increasing and decreasing cases or max(x,epsilon)')
 
     parser.add_argument('--set_near_plane', default= 0.5, type=float)
+    parser.add_argument('--train_dist', default= 1.0, type=float)
+    parser.add_argument('--test_dist', default= 0.75, type=float)
     parser.add_argument('--farcolorfix', default= False, type=bool)
 
     return parser
@@ -1393,8 +1387,6 @@ def run_nerf():
     
     parser = config_parser()
     args = parser.parse_args()
-
-    
 
     if args.task == "train":
         if args.expname is None:
@@ -1410,27 +1402,39 @@ def run_nerf():
             exit()
         tmp_task = args.task
         tmp_data_dir = args.data_dir
+        tmp_scene_id = args.scene_id
         tmp_ckpt_dir = args.ckpt_dir
         tmp_N_samples = args.N_samples
         tmp_N_importance = args.N_importance
-        tmp_mode = args.mode
+        tmp_dataset = args.dataset
         tmp_set_near_plane = args.set_near_plane
+        tmp_train_dist = args.train_dist
+        tmp_test_dist = args.test_dist
+        tmp_farcolorfix = args.farcolorfix
+
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
         with open(args_file, 'r') as af:
             args_dict = json.load(af)
+        args = Namespace(**args_dict)
+
         args_loaded = Namespace(**args_dict)
+        
         # task and paths are not overwritten
         args.task = tmp_task
         args.data_dir = tmp_data_dir
+        args.scene_id = tmp_scene_id
+        args.dataset = tmp_dataset
         args.ckpt_dir = tmp_ckpt_dir
         args.train_jsonfile = 'transforms_train.json'
 
         args.N_samples = tmp_N_samples
         args.N_importance = tmp_N_importance
-        args.mode = tmp_mode
         args.set_near_plane = tmp_set_near_plane
+        args.train_dist = tmp_train_dist
+        args.test_dist = tmp_test_dist
+        args.farcolorfix = tmp_farcolorfix
 
     else:
         if args.expname is None:
@@ -1438,26 +1442,36 @@ def run_nerf():
             exit()
         tmp_task = args.task
         tmp_data_dir = args.data_dir
+        tmp_dataset = args.dataset
+        tmp_scene_id = args.scene_id
         tmp_ckpt_dir = args.ckpt_dir
         tmp_set_near_plane = args.set_near_plane
-        tmp_mode = args.mode
         tmp_N_samples = args.N_samples
         tmp_N_importance = args.N_importance
+        tmp_train_dist = args.train_dist
+        tmp_test_dist = args.test_dist
+        tmp_farcolorfix = args.farcolorfix
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
         with open(args_file, 'r') as af:
             args_dict = json.load(af)
         args = Namespace(**args_dict)
+        args_loaded = Namespace(**args_dict)
+
         # task and paths are not overwritten
         args.task = tmp_task
         args.data_dir = tmp_data_dir
+        args.scene_id = tmp_scene_id
         args.ckpt_dir = tmp_ckpt_dir
-        args.mode = tmp_mode
+        args.dataset = tmp_dataset
         args.train_jsonfile = 'transforms_train.json'
         args.set_near_plane = tmp_set_near_plane
         args.N_samples = tmp_N_samples
         args.N_importance = tmp_N_importance
+        args.train_dist = tmp_train_dist
+        args.test_dist = tmp_test_dist
+        args.farcolorfix = tmp_farcolorfix
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
@@ -1465,56 +1479,81 @@ def run_nerf():
     args.n_gpus = torch.cuda.device_count()
     print(f"Using {args.n_gpus} GPU(s).")
 
+    #### Compute scene bounds from loaded args in the trained model
+    print(args_loaded)
+
+    # Load data
+    scene_data_dir = os.path.join("nerf_synthetic/multidist_per_pose/", args_loaded.scene_id)
+    if args_loaded.dataset == "scannet":
+        images_loaded, depths_loaded, valid_depths_loaded, poses_loaded, H_loaded, W_loaded, intrinsics_loaded, near_loaded, far_loaded,\
+                 i_split_loaded, gt_depths_loaded, gt_valid_depths_loaded = load_scene(scene_data_dir, args_loaded.train_jsonfile)
+    elif args_loaded.dataset == "llff":
+        images_loaded, _, _, poses_loaded, H_loaded, W_loaded, intrinsics_loaded,\
+         near_loaded, far_loaded, i_split_loaded, _, _ = load_scene_llff(scene_data_dir)
+        depths_loaded = None
+        valid_depths_loaded = None
+        gt_depths_loaded = None
+        gt_valid_depths_loaded =None
+
+    elif args_loaded.dataset == "blender":
+        images_loaded, _, _, poses_loaded, H_loaded, W_loaded, intrinsics_loaded, \
+         near_loaded, far_loaded, i_split_loaded, _, _ = load_scene_blender(scene_data_dir, half_res=args_loaded.half_res)
+        depths_loaded = None
+        valid_depths_loaded = None
+        gt_depths_loaded = None
+        gt_valid_depths_loaded =None
+
+        if args_loaded.white_bkgd:
+            images_loaded = images_loaded[...,:3]*images_loaded[...,-1:] + (1.-images_loaded[...,-1:])
+        else:
+            images_loaded = images_loaded[...,:3]  
+
+    elif args_loaded.dataset == "blender2":
+        images_loaded, _, _, poses_loaded, H_loaded, W_loaded, intrinsics_loaded,\
+         near_loaded, far_loaded, i_split_loaded, _, _ = load_scene_blender2(scene_data_dir, half_res=args_loaded.half_res)
+        depths_loaded = None
+        valid_depths_loaded = None
+        gt_depths_loaded = None
+        gt_valid_depths_loaded =None
+
+        if args_loaded.white_bkgd:
+            images = images_loaded[...,:3]*images_loaded[...,-1:] + (1.-images_loaded[...,-1:])
+        else:
+            images = images_loaded[...,:3]  
+    else:
+        print("ERROR: Dataloader not implemented for dataset: "+args_loaded.dataset)
+        exit()
+
+    i_train_loaded, i_val_loaded, i_test_loaded, i_video_loaded = i_split_loaded
+    ##############
+
     # Load data
     scene_data_dir = os.path.join(args.data_dir, args.scene_id)
-    if args.dataset == "scannet":
-        images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, gt_depths, gt_valid_depths = load_scene(scene_data_dir, args.train_jsonfile)
-    elif args.dataset == "llff":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_llff(scene_data_dir)
-        depths = None
-        valid_depths = None
-        gt_depths = None
-        gt_valid_depths =None
 
-    elif args.dataset == "blender":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender(scene_data_dir, half_res=args.half_res)
-        depths = None
-        valid_depths = None
-        gt_depths = None
-        gt_valid_depths =None
+    images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=args.train_dist, test_dist=args.test_dist)
+    # images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=args.train_dist, test_dist=args.test_dist, video_idx=0)
 
-        if args.white_bkgd:
-            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
-        else:
-            images = images[...,:3]  
+    depths = None
+    valid_depths = None
+    gt_depths = None
+    gt_valid_depths =None
 
-    elif args.dataset == "blender2":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender2(scene_data_dir, half_res=args.half_res)
-        depths = None
-        valid_depths = None
-        gt_depths = None
-        gt_valid_depths =None
-
-        if args.white_bkgd:
-            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
-        else:
-            images = images[...,:3]  
+    if args.white_bkgd:
+        images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
     else:
-        print("ERROR: Dataloader not implemented for dataset: "+args.dataset)
-        exit()
+        images = images[...,:3]  
 
 
     near = args.set_near_plane
     print("Set near plane to: " + str(near))
-
 
     i_train, i_val, i_test, i_video = i_split
 
     # Compute boundaries of 3D space
     max_xyz = torch.full((3,), -1e6, device=device)
     min_xyz = torch.full((3,), 1e6, device=device)
-    for idx_train in i_train:
-        rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics[idx_train]).to(device), torch.Tensor(poses[idx_train]).to(device)) # (H, W, 3), (H, W, 3)
+    for idx_train in i_train_loaded:
+        rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics_loaded[idx_train]).to(device), torch.Tensor(poses_loaded[idx_train]).to(device)) # (H, W, 3), (H, W, 3)
         points_3D = rays_o + rays_d * far # [H, W, 3]
         max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
         min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)
@@ -1540,14 +1579,11 @@ def run_nerf():
 
     lpips_alex = LPIPS()
 
-    if args.task == "train":
-        train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths)
-        exit()
-
     # create nerf model for testing
     _, render_kwargs_test, _, nerf_grad_vars, _ = create_nerf(args, scene_sample_params)
     for param in nerf_grad_vars:
         param.requires_grad = False
+
 
     # render test set and compute statistics
     if "test" in args.task: 
@@ -1568,11 +1604,28 @@ def run_nerf():
             write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization, test_samples=True)
         else:
             write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
+    
     elif args.task == "video":
-        vposes = torch.Tensor(poses[i_video]).to(device)
-        vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
-        # render_video(vposes, H, W, vintrinsics, str(0), args, render_kwargs_test)
-        render_video(vposes, H, W, vintrinsics, args.scene_id+"_zoom_v2", args, render_kwargs_test)
+        # scene_data_dir = os.path.join(args.data_dir, "lego_multi_dist")
+
+        ## render each view zooming in
+
+        ## Lego
+        # idx_to_take = [29, 36, 41, 96, 0]
+
+        ## Mic
+        idx_to_take = [11, 59]
+
+        for i in idx_to_take:
+            print("Processing pose idx: "+str(i))
+            images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=i)
+
+            i_train, i_val, i_test, i_video = i_split
+
+            vposes = torch.Tensor(poses[i_video]).to(device)
+            vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
+            # render_video(vposes, H, W, vintrinsics, str(0), args, render_kwargs_test)
+            render_video(vposes, H, W, vintrinsics, args.scene_id+"_zoom_"+str(i), args, render_kwargs_test)
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
