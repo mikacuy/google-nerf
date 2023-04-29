@@ -16,6 +16,6 @@ blender -b lego.blend -y --python script_randview.py -- lego 100 0.5 1.25 # done
 To render multiple distances per pose per scene, use `script_randdist.py`:
 ```bash
 # Tempalte
-# blender -b <scene>.blend -y --python script_train_views2.py -- <name> <n_poses> <distance_ratio_near> <distance_ratio_far> <n_ratios_sampled_per_pose> <--randist?>
-blender -b lego.blend -y --python script_randdist.py -- lego 50 0.5 1.5 5 --randdist
+# blender -b <scene>.blend -y --python script_multidist.py -- <name> <n_poses> <distance_ratio_near> <distance_ratio_far> <n_ratios_sampled_per_pose> <--randist?>
+blender -b lego.blend -y --python script_multidist.py -- lego 50 0.5 1.5 5 --randdist
 ```

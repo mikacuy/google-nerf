@@ -16,6 +16,10 @@ parser.add_argument('n_smp', type=int, default=5, help='Number of different dist
 parser.add_argument('--seed', type=int, default=None, help='RAndom seed.')
 parser.add_argument('--randdist', action="store_true", default=False,
                     help='RAndomly sampled distanes.')
+
+# Split
+parser.add_argument('--train_only', action="store_true", default=False,
+                    help='Doing training data only.')
 sep_idx = sys.argv.index("--")
 args = parser.parse_args(sys.argv[(sep_idx+1):])
 if args.seed is not None:
@@ -33,11 +37,16 @@ R_FAR = args.far
 RESULTS_PATH = 'nerf_dataset/%s_multidist_nv%d_dist%s-%s-%s' \
             % (args.name, VIEWS, R_NEAR, R_FAR, args.n_smp)
 os.makedirs(RESULTS_PATH, exist_ok=True)
-split_to_nviews = {
-    "train": args.views * 2,
-    "test": args.views,
-    "val": args.views
-}
+if args.train_only:
+    split_to_nviews = {
+        "train": args.views,
+    }
+else:
+    split_to_nviews = {
+        "train": args.views * 2,
+        "test": args.views,
+        "val": args.views
+    }
 fp = bpy.path.abspath(f"//{RESULTS_PATH}")
 if not os.path.exists(fp):
     os.makedirs(fp)
