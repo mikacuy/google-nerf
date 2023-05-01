@@ -1461,7 +1461,7 @@ def sample_pdf_reformulation_nofar(bins, weights, tau, T, near, far, N_samples, 
 
 
 
-def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
+def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=True, zero_threshold = 1e-4, epsilon_=1e-3):
     
 
     bins = torch.cat([near, bins, far], -1)   
@@ -1556,7 +1556,7 @@ def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_sample
 
     return samples, T_below, tau_below, bin_below, u
 
-def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
+def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=True, zero_threshold = 1e-4, epsilon_=1e-3):
 
     bins = torch.cat([near, bins, far], -1)
     
@@ -1650,7 +1650,7 @@ def sample_pdf_reformulation_joint(bins, weights, tau, T, near, far, N_samples, 
 
     return samples, T_below, tau_below, bin_below
 
-def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
+def sample_pdf_reformulation_joint_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=True, zero_threshold = 1e-4, epsilon_=1e-3):
 
     bins = torch.cat([near, bins, far], -1)
     
@@ -1820,38 +1820,38 @@ class Scale_Gradient_PDF(torch.autograd.Function):
         #     grad_weight = grad_output.t().mm(input)
         # if bias is not None and ctx.needs_input_grad[2]:
         #     grad_bias = grad_output.sum(0)
-        print("f_s")
-        # print("exp expression max:")
-        # print(torch.max(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
-        # print("exp expression min:")
-        # print(torch.min(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
-        # print("exp expression average:")
-        # print(torch.mean(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
+        # print("f_s")
+        # # print("exp expression max:")
+        # # print(torch.max(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
+        # # print("exp expression min:")
+        # # print(torch.min(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
+        # # print("exp expression average:")
+        # # print(torch.mean(-0.5*(tau_samples+tau_below)*(samples-bin_below)))
 
-        # print("tau samples:")
-        # print(torch.max(tau_samples))
-        print("Min")
-        print(torch.min(f_s))
-        print("Max")
-        print(torch.max(f_s))
-        print("Average")
-        print(torch.mean(f_s))        
-        print()
-        print("Grad scale:")
-        # print(grad_scale)
-        print("Min")
-        print(torch.min(grad_scale))
-        print("Max")
-        print(torch.max(grad_scale))
-        print("Average")
-        print(torch.mean(grad_scale))
+        # # print("tau samples:")
+        # # print(torch.max(tau_samples))
+        # print("Min")
+        # print(torch.min(f_s))
+        # print("Max")
+        # print(torch.max(f_s))
+        # print("Average")
+        # print(torch.mean(f_s))        
+        # print()
+        # print("Grad scale:")
+        # # print(grad_scale)
+        # print("Min")
+        # print(torch.min(grad_scale))
+        # print("Max")
+        # print(torch.max(grad_scale))
+        # print("Average")
+        # print(torch.mean(grad_scale))
 
-        grad_scale_filtered = torch.where(torch.abs(grad_scale-1000)<=1e-3, torch.ones_like(grad_scale, device=grad_scale.device)*1e-3, grad_scale)
-        print("Max filtered")
-        print(torch.max(grad_scale_filtered))        
-        print("Average filtered")
-        print(torch.mean(grad_scale_filtered))
-        print("============")       
+        # grad_scale_filtered = torch.where(torch.abs(grad_scale-1000)<=1e-3, torch.ones_like(grad_scale, device=grad_scale.device)*1e-3, grad_scale)
+        # print("Max filtered")
+        # print(torch.max(grad_scale_filtered))        
+        # print("Average filtered")
+        # print(torch.mean(grad_scale_filtered))
+        # print("============")       
 
         scaled_grad_samples = grad_scale * grad_samples
 

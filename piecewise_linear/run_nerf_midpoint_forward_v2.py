@@ -1,6 +1,7 @@
 '''
-April 28, 2023
-Forward pass of midpoint of the interval and get the color from there
+April 29, 2023
+Forward pass of midpoint of the interval and get the color from there for coarse network
+Not for fine --> need to run and try 
 '''
 import os
 import shutil
@@ -675,8 +676,13 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=
         # weights_to_aggregate = weights[..., 1:]
 
         if color_mode == "midpoint":
-            rgb_midpoint = torch.sigmoid(raw_midpoint[...,:3])
-            rgb_map = torch.sum(weights[...,None] * rgb_midpoint, -2)  # [N_rays, 3]
+            if raw_midpoint is not None:
+                rgb_midpoint = torch.sigmoid(raw_midpoint[...,:3])
+                rgb_map = torch.sum(weights[...,None] * rgb_midpoint, -2)  # [N_rays, 3]
+            else:
+                rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+                rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
+                rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]                
 
         elif color_mode == "left":
 
@@ -926,12 +932,12 @@ def render_rays(ray_batch,
             print("Does nan exist in pts")
             print(torch.isnan(pts).any())
 
-        ### Additional forward for the midpoint of the interval ###
-        z_vals_concat = torch.cat([near, z_vals, far], -1)
-        z_vals_midpoint = 0.5 * (z_vals_concat[...,:-1] + z_vals_concat[...,1:])
-        pts_midpoint = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_midpoint[...,:,None] 
-        raw_midpoint = network_query_fn(pts_midpoint, viewdirs, embedded_cam, run_fn)
-        ##########
+        # ### Additional forward for the midpoint of the interval ###
+        # z_vals_concat = torch.cat([near, z_vals, far], -1)
+        # z_vals_midpoint = 0.5 * (z_vals_concat[...,:-1] + z_vals_concat[...,1:])
+        # pts_midpoint = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_midpoint[...,:,None] 
+        # raw_midpoint = network_query_fn(pts_midpoint, viewdirs, embedded_cam, network_fn)
+        # ##########
 
         raw = network_query_fn(pts, viewdirs, embedded_cam, run_fn)
         
@@ -939,7 +945,8 @@ def render_rays(ray_batch,
             print("Does nan exist in forward")
             print(torch.isnan(raw).any())
 
-        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix, raw_midpoint=raw_midpoint)
+        ### No forward pass for the fine network
+        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
         
         if DEBUG:
             print("Does nan/inf exist after converting to rgb outputs")
