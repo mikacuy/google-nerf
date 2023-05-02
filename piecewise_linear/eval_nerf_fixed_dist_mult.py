@@ -1483,7 +1483,10 @@ def run_nerf():
     print(args_loaded)
 
     # Load data
-    scene_data_dir = os.path.join("nerf_synthetic/multidist_per_pose/", args_loaded.scene_id)
+    # scene_data_dir = os.path.join("nerf_synthetic/multidist_per_pose/", args_loaded.scene_id)
+    scene_data_dir = os.path.join("nerf_synthetic/multidist-75/", args_loaded.scene_id)
+    print(scene_data_dir)
+
     if args_loaded.dataset == "scannet":
         images_loaded, depths_loaded, valid_depths_loaded, poses_loaded, H_loaded, W_loaded, intrinsics_loaded, near_loaded, far_loaded,\
                  i_split_loaded, gt_depths_loaded, gt_valid_depths_loaded = load_scene(scene_data_dir, args_loaded.train_jsonfile)

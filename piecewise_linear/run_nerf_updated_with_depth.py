@@ -411,12 +411,8 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
 
-        if args.dataset == "scannet":
-            target_depth = depths[img_idx]
-            target_valid_depth = valid_depths[img_idx]
-        else:
-            target_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
-            target_valid_depth = torch.zeros((target.shape[0], target.shape[1]), dtype=bool).to(device)
+        target_depth = depths[img_idx]
+        target_valid_depth = valid_depths[img_idx]
 
         pose = poses[img_idx, :3,:4]
         intrinsic = intrinsics[img_idx, :]
@@ -443,7 +439,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             if not torch.isnan(depth_rmse):
                 depth_metrics = {"depth_rmse" : depth_rmse.item()}
                 mean_depth_metrics.add(depth_metrics)
-            
+
             # compute color metrics
             img_loss = img2mse(rgb, target)
             psnr = mse2psnr(img_loss)

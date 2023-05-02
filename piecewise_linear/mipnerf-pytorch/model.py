@@ -137,11 +137,32 @@ class MipNeRF(nn.Module):
                                                               ray_shape=self.ray_shape)
                 elif self.mode == "linear":
                     if self.correct_hier:
+                        # t_vals, (mean, var) = resample_along_rays_piecewise_linear(rays.origins, rays.directions, rays.radii,
+                        #                                           t_vals.to(rays.origins.device),
+                        #                                           weights.to(rays.origins.device), randomized=self.randomized,
+                        #                                           stop_grad=True, resample_padding=self.resample_padding,
+                        #                                           ray_shape=self.ray_shape, tau=tau, T=T, near=rays.near, far=rays.far)
+
                         t_vals, (mean, var) = resample_along_rays_piecewise_linear(rays.origins, rays.directions, rays.radii,
                                                                   t_vals.to(rays.origins.device),
-                                                                  weights.to(rays.origins.device), randomized=self.randomized,
+                                                                  weights.to(rays.origins.device), randomized=True,
                                                                   stop_grad=True, resample_padding=self.resample_padding,
                                                                   ray_shape=self.ray_shape, tau=tau, T=T, near=rays.near, far=rays.far)
+
+                        if (torch.isnan(t_vals).any()):
+                            print("After hierarchical sampling")
+                            print("Found nan in t_vals")
+                            exit()
+
+                        if (torch.isnan(mean).any()):
+                            print("After hierarchical sampling")
+                            print("Found nan in mean")
+                            exit()
+
+                        if (torch.isnan(var).any()):
+                            print("After hierarchical sampling")
+                            print("Found nan in var")
+                            exit()
                     else:
                         t_vals, (mean, var) = resample_along_rays(rays.origins, rays.directions, rays.radii,
                                                                   t_vals.to(rays.origins.device),
@@ -152,6 +173,11 @@ class MipNeRF(nn.Module):
             # do integrated positional encoding of samples
             samples_enc = self.positional_encoding(mean, var)[0]
             samples_enc = samples_enc.reshape([-1, samples_enc.shape[-1]])
+
+            if (torch.isnan(samples_enc).any()):
+                print("After IPE")
+                print("Found nan in samples_enc")
+                exit()
 
             # predict density
             new_encodings = self.density_net0(samples_enc)
@@ -179,14 +205,31 @@ class MipNeRF(nn.Module):
             rgb = raw_rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
             density = self.density_activation(raw_density + self.density_bias)
 
+            if (torch.isnan(rgb).any()):
+                print("After forward pass")
+                print("Found nan in rgb")
+                exit()
+
+            if (torch.isnan(density).any()):
+                print("After forward pass")
+                print("Found nan in density")
+                exit()                
+
             if self.mode == "constant":
                 comp_rgb, distance, acc, weights, alpha = volumetric_rendering(rgb, density, t_vals, rays.directions.to(rgb.device), self.white_bkgd)
             elif self.mode == "linear":
                 comp_rgb, distance, acc, weights, alpha, tau, T = volumetric_rendering_piecewise_linear(rgb, density, t_vals, rays.directions.to(rgb.device), self.white_bkgd, rays.near, rays.far)
 
+            if (torch.isnan(comp_rgb).any()):
+                print("After volumetric rendering")
+                print("Found nan in comp_rgb")
+                exit()
+
             comp_rgbs.append(comp_rgb)
             distances.append(distance)
             accs.append(acc)
+
+
         if self.return_raw:
             raws = torch.cat((torch.clone(rgb).detach(), torch.clone(density).detach()), -1).cpu()
             # Predicted RGB values for rays, Disparity map (inverse of depth), Accumulated opacity (alpha) along a ray
@@ -218,6 +261,31 @@ class MipNeRF(nn.Module):
         dists = torch.cat(dists, dim=0).reshape(height, width).numpy()
         accs = torch.cat(accs, dim=0).reshape(height, width).numpy()
         return rgbs, dists, accs
+
+    def render_image_testset(self, rays, height, width, chunks=8192):
+        """
+        Return image, disparity map, accumulated opacity (shaped to height x width) created using rays as input.
+        Rays should be all of the rays that correspond to this one single image.
+        Batches the rays into chunks to not overload memory of device
+        """
+        length = rays[0].shape[0]
+        rgbs = []
+        dists = []
+        accs = []
+        with torch.no_grad():
+            for i in range(0, length, chunks):
+                # put chunk of rays on device
+                chunk_rays = namedtuple_map(lambda r: r[i:i+chunks].to(self.device), rays)
+                rgb, distance, acc = self(chunk_rays)
+                rgbs.append(rgb[-1].cpu())
+                dists.append(distance[-1].cpu())
+                accs.append(acc[-1].cpu())
+
+        rgbs = torch.cat(rgbs, dim=0).reshape(height, width, 3)
+        dists = torch.cat(dists, dim=0).reshape(height, width)
+        accs = torch.cat(accs, dim=0).reshape(height, width)
+        return rgbs, dists, accs
+
 
     def train(self, mode=True):
         self.randomized = self.init_randomized

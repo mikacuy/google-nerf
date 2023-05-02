@@ -36,18 +36,38 @@ all_test_dist = [0.5, 0.75, 1.0, 1.25]
 # 					"mode":"constant", "color_mode":"left", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4}																											
 # 				}
 
-model_params = {6: {"scene_id": "mic_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
-					"ckpt_dir":"log_multidist_perpose", "expname":"mic_linear_c128_i64_midpoint",
+# model_params = {6: {"scene_id": "mic_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+# 					"ckpt_dir":"log_multidist_perpose", "expname":"mic_linear_c128_i64_midpoint",
+# 					"mode":"linear", "color_mode":"midpoint", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},
+# 				7: {"scene_id": "mic_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+# 					"ckpt_dir":"log_multidist_perpose", "expname":"mic_constant_c128_i64 ",
+# 					"mode":"constant", "color_mode":"left", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},
+				# 8: {"scene_id": "ficus_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+				# 	"ckpt_dir":"log_multidist_perpose", "expname":"ficus_linear_c128_i64_midpoint",
+				# 	"mode":"linear", "color_mode":"midpoint", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},
+				# 9: {"scene_id": "ficus_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+				# 	"ckpt_dir":"log_multidist_perpose", "expname":"ficus_constant_c128_i64 ",
+				# 	"mode":"constant", "color_mode":"left", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},																											
+				# }
+
+model_params = {0: {"scene_id": "mic_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+					"ckpt_dir":"log_multidist_perpose_75", "expname":"mic_linear_c128_i64_midpoint",
 					"mode":"linear", "color_mode":"midpoint", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},
-				7: {"scene_id": "mic_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
-					"ckpt_dir":"log_multidist_perpose", "expname":"mic_constant_c128_i64 ",
+				1: {"scene_id": "mic_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+					"ckpt_dir":"log_multidist_perpose_75", "expname":"mic_constant_c128_i64 ",
 					"mode":"constant", "color_mode":"left", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},
-				8: {"scene_id": "ficus_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
-					"ckpt_dir":"log_multidist_perpose", "expname":"ficus_linear_c128_i64_midpoint",
+				2: {"scene_id": "chair_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+					"ckpt_dir":"log_multidist_perpose_75", "expname":"chair_linear_c128_i64_midpoint",
 					"mode":"linear", "color_mode":"midpoint", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},
-				9: {"scene_id": "ficus_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
-					"ckpt_dir":"log_multidist_perpose", "expname":"ficus_constant_c128_i64 ",
-					"mode":"constant", "color_mode":"left", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},																											
+				3: {"scene_id": "chair_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+					"ckpt_dir":"log_multidist_perpose_75", "expname":"chair_constant_c128_i64 ",
+					"mode":"constant", "color_mode":"left", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},	
+				4: {"scene_id": "hotdog_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+					"ckpt_dir":"log_multidist_perpose_75", "expname":"hotdog_linear_c128_i64_midpoint",
+					"mode":"linear", "color_mode":"midpoint", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},
+				5: {"scene_id": "hotdog_fixdist_nv100_dist0.5-1.5-5", "data_dir": "nerf_synthetic/fixed_dist_new/",\
+					"ckpt_dir":"log_multidist_perpose_75", "expname":"hotdog_constant_c128_i64 ",
+					"mode":"constant", "color_mode":"left", "N_samples": 128, "N_importance": 64, "set_near_plane": 1e-4},																															
 				}
 
 for model_idx in model_params:
