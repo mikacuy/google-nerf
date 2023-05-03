@@ -1,6 +1,5 @@
 expname = drums_linear
 ckpt_dir = logs_blender_hemisphere_reproduce
-data_dir = ../nerf_synthetic
 scene_id = drums
 dataset = blender
 

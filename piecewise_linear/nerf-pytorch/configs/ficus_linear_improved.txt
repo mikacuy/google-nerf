@@ -1,6 +1,5 @@
 expname = ficus_linear_improved
 ckpt_dir = logs_blender_hemisphere_reproduce
-data_dir = ../nerf_synthetic
 scene_id = ficus
 dataset = blender
 

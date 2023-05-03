@@ -1,6 +1,5 @@
 expname = hotdog_linear_improved
 ckpt_dir = logs_blender_hemisphere_reproduce
-data_dir = ../nerf_synthetic
 scene_id = hotdog
 dataset = blender
 

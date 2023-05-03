@@ -1111,6 +1111,8 @@ def train():
 
 
         ### Test after training
+
+
         if args.dataset == "llff":
             images = torch.Tensor(images).to(device)
             poses = torch.Tensor(poses).to(device)

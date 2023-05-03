@@ -1,6 +1,5 @@
 expname = orchids_linear
 ckpt_dir = logs_llff_reproduce
-data_dir = ../nerf_llff_data
 scene_id = orchids
 dataset = llff
 
