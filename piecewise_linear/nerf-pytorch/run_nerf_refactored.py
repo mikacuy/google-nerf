@@ -18,8 +18,6 @@ import math
 import cv2
 import shutil
 
-import matplotlib.pyplot as plt
-
 from run_nerf_helpers import *
 
 from load_llff import load_llff_data
