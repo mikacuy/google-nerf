@@ -731,7 +731,7 @@ def config_parser():
                         help='will take every 1/N images as LLFF test set, paper uses 8')
 
     # logging/saving options
-    parser.add_argument("--num_iterations", type=int, default=200, 
+    parser.add_argument("--num_iterations", type=int, default=200000, 
                         help='number of iterations for training')
 
     parser.add_argument("--i_print",   type=int, default=100, 
@@ -1111,8 +1111,6 @@ def train():
 
 
         ### Test after training
-
-
         if args.dataset == "llff":
             images = torch.Tensor(images).to(device)
             poses = torch.Tensor(poses).to(device)
