@@ -3,7 +3,7 @@ basedir = ./logs
 datadir = ./data/nerf_llff_data/trex
 dataset_type = llff
 
-factor = 8
+factor = 1
 llffhold = 8
 
 N_rand = 1024

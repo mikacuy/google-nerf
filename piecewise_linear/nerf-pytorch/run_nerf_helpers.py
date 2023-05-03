@@ -9,6 +9,7 @@ import numpy as np
 img2mse = lambda x, y : torch.mean((x - y) ** 2)
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
+to16b = lambda x : ((2**16 - 1) * np.clip(x,0,1)).astype(np.uint16)
 
 
 # Positional encoding (section 5.1)
@@ -237,3 +238,163 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
 
     return samples
+
+
+def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
+    ### Fix this, need negative sign
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+    discriminant = tau_left**2 + torch.div( 2 * (tau_right - tau_left) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+
+    t = torch.div( (s_right - s_left) * (-tau_left + torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_right - tau_left))
+
+    ### clamp t to [0, s_right - s_left]
+    # print("t clamping")
+    # print(torch.max(t))
+    t = torch.clamp(t, torch.ones_like(t, device=t.device)*epsilon, s_right - s_left)
+    # print(torch.max(t))
+    # print()
+
+    sample = s_left + t
+
+    return sample
+
+
+def pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
+    ### Fix this, need negative sign
+    ln_term = -torch.log(torch.max(torch.ones_like(T_left)*epsilon, torch.div(1-u, torch.max(torch.ones_like(T_left)*epsilon,T_left) ) ))
+    discriminant = tau_left**2 - torch.div( 2 * (tau_left - tau_right) * ln_term , torch.max(torch.ones_like(s_right)*epsilon, s_right - s_left) )
+    t = torch.div( (s_right - s_left) * (tau_left - torch.sqrt(torch.max(torch.ones_like(discriminant)*epsilon, discriminant))) , torch.max(torch.ones_like(tau_left)*epsilon, tau_left - tau_right))
+
+    ### clamp t to [0, s_right - s_left]
+    # print("t clamping")
+    # print(torch.max(t))
+    t = torch.clamp(t, torch.ones_like(t, device=t.device)*epsilon, s_right - s_left)
+    # print(torch.max(t))
+    # print()
+
+    sample = s_left + t
+
+    return sample
+
+
+def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, quad_solution_v2=False, zero_threshold = 1e-4, epsilon_=1e-3):
+
+    bins = torch.cat([near, bins, far], -1)
+    
+    pdf = weights # make into a probability distribution
+
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
+    cdf[:,-1] = 1.0
+
+    # Take uniform samples
+    if det:
+        u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+        u = u.expand(list(cdf.shape[:-1]) + [N_samples])
+    else:
+        u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=bins.device)
+
+    # Pytest, overwrite u with numpy's fixed random numbers
+    if pytest:
+        np.random.seed(0)
+        new_shape = list(cdf.shape[:-1]) + [N_samples]
+        if det:
+            u = np.linspace(0., 1., N_samples)
+            u = np.broadcast_to(u, new_shape)
+        else:
+            u = np.random.rand(*new_shape)
+        u = torch.Tensor(u)
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
+    matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
+
+    tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
+
+    s_left = bins_g[...,0]
+    s_right = bins_g[...,1]
+    T_left = T_g[...,0]
+    tau_left = tau_g[...,0]
+    tau_right = tau_g[...,1]
+
+    dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
+
+    ### Constant interval, take the left bin
+    samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
+
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
+
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
+
+    ## Check for nan --> need to figure out why
+    samples = torch.where(torch.isnan(samples3), s_left, samples3)
+
+    ### Also return these for custom autograd
+    ### T_below, tau_below, bin_below
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    T_below = T_g[...,0]
+    tau_below = tau_g[...,0]
+    bin_below = bins_g[...,0]
+    ###################################
+
+
+    return samples, T_below, tau_below, bin_below
+
+
+#### Utils for eval #####
+def compute_rmse(prediction, target):
+    return torch.sqrt((prediction - target).pow(2).mean())
+
+
+class MeanTracker(object):
+    def __init__(self):
+        self.reset()
+
+    def add(self, input, weight=1.):
+        for key, l in input.items():
+            if not key in self.mean_dict:
+                self.mean_dict[key] = 0
+            self.mean_dict[key] = (self.mean_dict[key] * self.total_weight + l) / (self.total_weight + weight)
+        self.total_weight += weight
+
+    def has(self, key):
+        return (key in self.mean_dict)
+
+    def get(self, key):
+        return self.mean_dict[key]
+    
+    def as_dict(self):
+        return self.mean_dict
+        
+    def reset(self):
+        self.mean_dict = dict()
+        self.total_weight = 0
+    
+    def print(self, f=None):
+        for key, l in self.mean_dict.items():
+            if f is not None:
+                print("{}: {}".format(key, l), file=f)
+            else:
+                print("{}: {}".format(key, l))
+
+    
