@@ -1064,8 +1064,8 @@ def train():
                 decay_rate = 0.1
                 new_lrate = args.lrate * (decay_rate ** portion)
 
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = new_lrate
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = new_lrate
             ################################
 
             dt = time.time()-time0
