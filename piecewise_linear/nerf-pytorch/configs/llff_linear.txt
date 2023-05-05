@@ -11,5 +11,7 @@ N_importance = 64
 use_viewdirs = True
 raw_noise_std = 1e0
 
+num_iterations=500000
+
 mode = linear
 color_mode = midpoint
