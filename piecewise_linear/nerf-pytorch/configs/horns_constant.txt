@@ -3,7 +3,7 @@ ckpt_dir = logs_llff_reproduce
 scene_id = horns
 dataset = llff
 
-factor = 1
+factor = 8
 llffhold = 8
 
 N_rand = 1024

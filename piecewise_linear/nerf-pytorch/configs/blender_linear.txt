@@ -1,5 +1,4 @@
 ckpt_dir = logs_blender_hemisphere_reproduce
-scene_id = chair
 dataset = blender
 
 no_batching = True
@@ -16,6 +15,8 @@ num_iterations=500000
 
 precrop_iters = 500
 precrop_frac = 0.5
+
+lrate = 3e-4
 
 mode = linear
 color_mode = midpoint

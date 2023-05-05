@@ -53,7 +53,8 @@ def run_network(inputs, viewdirs, embedded_cam, fn, embed_fn, embeddirs_fn, bb_c
     """Prepares inputs and applies network 'fn'.
     """
     inputs_flat = torch.reshape(inputs, [-1, inputs.shape[-1]])
-    inputs_flat = (inputs_flat - bb_center) * bb_scale
+    inputs_flat = (inputs_flat - bb_center) * bb_scale ### --> does this make sense for inward facing cameras?
+
     embedded = embed_fn(inputs_flat) # samples * rays, multires * 2 * 3 + 3
 
     if viewdirs is not None:
@@ -2032,7 +2033,10 @@ def run_nerf():
         max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
         min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)
     args.bb_center = (max_xyz + min_xyz) / 2.
-    args.bb_scale = 2. / (max_xyz - min_xyz).max()
+
+    ### Make scale 1.
+    # args.bb_scale = 2. / (max_xyz - min_xyz).max()
+    args.bb_scale = 1.0
     print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
 
     # Precompute scene sampling parameters

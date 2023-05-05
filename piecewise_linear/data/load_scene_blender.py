@@ -435,10 +435,10 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
             with open(json_fname, 'r') as fp:
                 meta = json.load(fp)
 
-            if 'train' in s:
-                near = 2.
-                far = 6.
-                camera_angle_x = float(meta['camera_angle_x'])
+            # if 'train' in s:
+            near = 2.
+            far = 6.
+            camera_angle_x = float(meta['camera_angle_x'])
 
             imgs = []
             poses = []
