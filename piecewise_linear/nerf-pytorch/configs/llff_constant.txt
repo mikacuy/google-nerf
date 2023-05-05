@@ -1,4 +1,4 @@
-ckpt_dir = logs_llff_reproducescene_id = horns
+ckpt_dir = logs_llff_reproduce
 dataset = llff
 
 factor = 8
