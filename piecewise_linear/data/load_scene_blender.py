@@ -568,9 +568,7 @@ def load_scene_blender_depth(basedir, train_json = "transforms_train.json", half
                     if depth.ndim == 2:
                         depth = np.expand_dims(depth, -1)
 
-                    valid_depth = depth[:, :, 0] > 0.5 # 0 values are invalid depth
-                    depth = (depth / depth_scaling_factor).astype(np.float32)
-
+                    valid_depth = np.logical_and(depth[:, :, 0] > near, depth[:, :, 0] < far) # 0 values are invalid depth
                     depth = np.clip(depth, near, far)
 
                     filenames.append(frame['file_path'])
@@ -691,7 +689,6 @@ def load_scene_blender2_depth(basedir, train_json = "transforms_train.json", hal
                         depth = np.expand_dims(depth, -1)
 
                     valid_depth = np.logical_and(depth[:, :, 0] > near, depth[:, :, 0] < far) # 0 values are invalid depth
-                    depth = (depth / depth_scaling_factor).astype(np.float32)
 
                     depth = np.clip(depth, near, far)
 

@@ -1,3 +1,7 @@
+'''
+Use a different learning rate for the coarse network
+Use constant aggregation for the first few iterations
+'''
 import os, sys
 import numpy as np
 import imageio
@@ -303,14 +307,14 @@ def create_nerf(args):
     model = NeRF(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-    grad_vars = list(model.parameters())
+    coarse_grad_vars = list(model.parameters())
 
     model_fine = None
     if args.N_importance > 0:
         model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
                           input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-        grad_vars += list(model_fine.parameters())
+        grad_vars = list(model_fine.parameters())
 
     network_query_fn = lambda inputs, viewdirs, network_fn : run_network(inputs, viewdirs, network_fn,
                                                                 embed_fn=embed_fn,
@@ -319,6 +323,7 @@ def create_nerf(args):
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+    optimizer_coarse = torch.optim.Adam(params=coarse_grad_vars, lr=args.coarse_lrate, betas=(0.9, 0.999))
 
     start = 0
 
@@ -375,7 +380,7 @@ def create_nerf(args):
 
     render_kwargs_test['raw_noise_std'] = 0.
 
-    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
+    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse
 
 def compute_weights(raw, z_vals, rays_d, noise=0.):
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
@@ -518,7 +523,8 @@ def render_rays(ray_batch,
                 quad_solution_v2=False,
                 zero_tol = 1e-4,
                 epsilon = 1e-3,
-                farcolorfix = False):
+                farcolorfix = False,
+                constant_init = False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -581,6 +587,14 @@ def render_rays(ray_batch,
 
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
+    ### If constant init then overwrite mode for coarse model to constant first
+    if constant_init:
+        # coarse_mode = "constant"
+        mode = "constant"
+    # else:
+    #     coarse_mode = mode
+
+    # print(mode)
 
 #     raw = run_network(pts)
     raw = network_query_fn(pts, viewdirs, network_fn)
@@ -664,6 +678,8 @@ def config_parser():
                         help='batch size (number of random rays per gradient step)')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
+    parser.add_argument("--coarse_lrate", type=float, default=1e-4, 
+                        help='learning rate')    
     parser.add_argument("--lrate_decay", type=int, default=250, 
                         help='exponential learning rate decay (in 1000 steps)')
     parser.add_argument("--chunk", type=int, default=1024*32, 
@@ -762,8 +778,11 @@ def config_parser():
     parser.add_argument('--set_near_plane', default= 2., type=float)
     parser.add_argument('--farcolorfix', default= False, type=bool)
 
+    parser.add_argument("--constant_init",   type=int, default=1000, 
+                        help='number of iterations to use constant aggregation')    
+
     parser.add_argument("--coarse_weight", type=float, default=1.0, 
-                        help='zero tol to revert to piecewise constant assumption')    
+                        help='zero tol to revert to piecewise constant assumption') 
     ##################
 
     return parser
@@ -909,7 +928,7 @@ def train():
             file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args)
+    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse = create_nerf(args)
     global_step = start
 
     bds_dict = {
@@ -948,6 +967,9 @@ def train():
 
     if args.task == "train":
         print("Begin training.")
+        np.random.seed(0)
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
 
         tb = SummaryWriter(log_dir=os.path.join("runs", args.ckpt_dir, args.expname))
 
@@ -1038,10 +1060,12 @@ def train():
 
             #####  Core optimization loop  #####
             rgb, disp, acc, extras = render(H, W, K, chunk=args.chunk, rays=batch_rays,
-                                                    verbose=i < 10, retraw=True,
+                                                    verbose=i < 10, retraw=True, constant_init = i < args.constant_init,
                                                     **render_kwargs_train)
 
             optimizer.zero_grad()
+            optimizer_coarse.zero_grad()
+
             img_loss = img2mse(rgb, target_s)
             trans = extras['raw'][...,-1]
             loss = img_loss
@@ -1049,16 +1073,17 @@ def train():
 
             if 'rgb0' in extras:
                 img_loss0 = img2mse(extras['rgb0'], target_s)
-
-
-                if global_step < args.precrop_iters + 500:
-                    loss = loss + args.coarse_weight * img_loss0
-                else:
-                    loss = loss + img_loss0
+                # if global_step < args.constant_init + 500:
+                #     loss = loss + args.coarse_weight * img_loss0
+                # else:
+                #     loss = loss + img_loss0
+                loss = loss + img_loss0
                 psnr0 = mse2psnr(img_loss0)
 
             loss.backward()
+
             optimizer.step()
+            optimizer_coarse.step()
 
             # NOTE: IMPORTANT!
             ###   update learning rate   ###
@@ -1067,7 +1092,12 @@ def train():
             new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
             for param_group in optimizer.param_groups:
                 param_group['lr'] = new_lrate
-            ################################
+
+            new_lrate_coarse = args.coarse_lrate * (decay_rate ** (global_step / decay_steps))
+            for param_group in optimizer_coarse.param_groups:
+                param_group['lr'] = new_lrate
+            ################################                
+
 
             dt = time.time()-time0
             # print(f"Step: {global_step}, Loss: {loss}, Time: {dt}")

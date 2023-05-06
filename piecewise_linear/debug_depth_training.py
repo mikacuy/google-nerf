@@ -455,6 +455,19 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             depths_res[n] = (extras['depth_map'] / far).unsqueeze(0).cpu()
             target_depths_res[n] = (target_depth[:, :, 0] / far).unsqueeze(0).cpu()
             target_valid_depths_res[n] = target_valid_depth.unsqueeze(0).cpu()
+
+            print("Raw depth")
+            print(extras['depth_map'])
+            print()
+            print(target_depth)
+
+            print()
+            print("outputted depth")
+            print(depths_res[n])
+            print()
+            print(target_depths_res[n])
+            exit()
+
             metrics = {"img_loss" : img_loss.item(), "psnr" : psnr.item(), "ssim" : ssim, "lpips" : lpips[0, 0, 0],}
             if 'rgb0' in extras:
                 img_loss0 = img2mse(extras['rgb0'], target)
@@ -2024,7 +2037,8 @@ def run_nerf():
 
     i_train, i_val, i_test, i_video = i_split
 
-    ####Compute boundaries of 3D space
+
+    # Compute boundaries of 3D space
     max_xyz = torch.full((3,), -1e6, device=device)
     min_xyz = torch.full((3,), 1e6, device=device)
     for idx_train in i_train:
@@ -2038,7 +2052,7 @@ def run_nerf():
     ### Make scale 1.
     # args.bb_center = 0.0
     args.bb_scale = 1.0
-    # print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
+    print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
 
     # Precompute scene sampling parameters
     if args.depth_loss_weight > 0.:
