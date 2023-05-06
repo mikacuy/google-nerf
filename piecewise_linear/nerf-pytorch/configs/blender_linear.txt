@@ -16,7 +16,5 @@ num_iterations=500000
 precrop_iters = 500
 precrop_frac = 0.5
 
-lrate = 3e-4
-
 mode = linear
 color_mode = midpoint
