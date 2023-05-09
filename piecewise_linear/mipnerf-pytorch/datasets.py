@@ -10,13 +10,15 @@ from pose_utils import normalize, look_at, poses_avg, recenter_poses, to_float, 
 from torch.utils.data import Dataset, DataLoader
 
 
-def get_dataset(dataset_name, base_dir, split, factor=4, device=torch.device("cpu")):
-    d = dataset_dict[dataset_name](base_dir, split, factor=factor, device=device)
+def get_dataset(dataset_name, base_dir, split, factor=4, device=torch.device("cpu"), mode="training_time"):
+    print(mode)
+    d = dataset_dict[dataset_name](base_dir, split, factor=factor, device=device, mode=mode)
     return d
 
 
-def get_dataloader(dataset_name, base_dir, split, factor=4, batch_size=None, shuffle=True, device=torch.device("cpu"), near=2.0):
-    d = get_dataset(dataset_name, base_dir, split, factor, device)
+def get_dataloader(dataset_name, base_dir, split, factor=4, batch_size=None, shuffle=True, device=torch.device("cpu"), near=2.0, mode="training_time"):
+    print(mode)
+    d = get_dataset(dataset_name, base_dir, split, factor, device, mode=mode)
     # make the batchsize height*width, so that one "batch" from the dataloader corresponds to one
     # image used to render a video, and don't shuffle dataset
     if split == "render":
@@ -38,7 +40,7 @@ def cycle(iterable):
 
 
 class NeRFDataset(Dataset):
-    def __init__(self, base_dir, split, spherify=True, near=2, far=6, white_bkgd=False, factor=1, n_poses=120, radius=None, radii=None, h=None, w=None, device=torch.device("cpu"), mode="train"):
+    def __init__(self, base_dir, split, mode, spherify=True, near=2, far=6, white_bkgd=False, factor=1, n_poses=120, radius=None, radii=None, h=None, w=None, device=torch.device("cpu")):
         super(Dataset, self).__init__()
         self.base_dir = base_dir
         self.split = split
@@ -56,6 +58,7 @@ class NeRFDataset(Dataset):
         self.device = device
         self.rays = None
         self.images = None
+        self.mode = mode
         self.load()
 
     def load(self):
@@ -64,13 +67,15 @@ class NeRFDataset(Dataset):
         else:
             self.generate_training_rays()
 
-        self.flatten_to_pytorch()
+        if self.mode == "training_time":
+            self.flatten_to_pytorch()
 
-        # if self.split != "test":
-        #     self.flatten_to_pytorch()
-        # else:
-        #     ## if test image keep the sizes
-        #     self.to_pytorch()
+        else:
+            if self.split != "test":
+                self.flatten_to_pytorch()
+            else:
+                ## if test image keep the sizes
+                self.to_pytorch()
 
         print('Done')
         print()
@@ -271,8 +276,8 @@ class Multicam(NeRFDataset):
 
 class Blender(NeRFDataset):
     """Blender Dataset."""
-    def __init__(self, base_dir, split, factor=1, spherify=False, white_bkgd=True, near=2, far=6, radius=4, radii=1, h=800, w=800, device=torch.device("cpu")):
-        super(Blender, self).__init__(base_dir, split, factor=factor, spherify=spherify, near=near, far=far, white_bkgd=white_bkgd, radius=radius, radii=radii, h=h, w=w, device=device)
+    def __init__(self, base_dir, split, mode, factor=1, spherify=False, white_bkgd=True, near=2, far=6, radius=4, radii=1, h=800, w=800, device=torch.device("cpu")):
+        super(Blender, self).__init__(base_dir, split, mode=mode, factor=factor, spherify=spherify, near=near, far=far, white_bkgd=white_bkgd, radius=radius, radii=radii, h=h, w=w, device=device)
 
     def generate_training_poses(self):
         """Load data from disk"""
@@ -280,7 +285,7 @@ class Blender(NeRFDataset):
 
         ### Test only with a subset --> just for speed, disable later
         if split_dir == "test":
-            skip = 20
+            skip = 10
         else:
             skip = 1
 

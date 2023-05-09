@@ -26,10 +26,11 @@ from run_nerf_helpers import *
 
 from load_llff import load_llff_data
 from load_deepvoxels import load_dv_data
-from load_blender import load_blender_data
+from load_blender import load_blender_data, load_scene_blender_fixed_dist_new, load_scene_blender2
 from load_LINEMOD import load_LINEMOD_data
 
 from natsort import natsorted 
+from argparse import Namespace
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -292,6 +293,34 @@ def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_op
         mean_metrics.print(f)
     mean_metrics.print()
 
+def write_images_with_metrics_testdist(images, mean_metrics, far, args, test_dist, with_test_time_optimization=False, test_samples=False):
+    
+    if not test_samples:
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_dist" + str(test_dist) + "_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+    else:
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples_dist"  + str(test_dist) + "_" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+
+    # if not test_samples:
+    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+    # else:
+    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+
+    os.makedirs(result_dir, exist_ok=True)
+    for n, (rgb, depth, gt_rgb) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
+            images["depths"].permute(0, 2, 3, 1).cpu().numpy(), images["target_rgbs"].permute(0, 2, 3, 1).cpu().numpy())):
+
+        # write rgb
+        # cv2.imwrite(os.path.join(result_dir, str(n) + "_rgb" + ".jpg"), cv2.cvtColor(to8b(rgb), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(result_dir, str(n) + "_rgb" + ".png"), cv2.cvtColor(to8b(rgb), cv2.COLOR_RGB2BGR))
+
+        cv2.imwrite(os.path.join(result_dir, str(n) + "_gt" + ".png"), cv2.cvtColor(to8b(gt_rgb), cv2.COLOR_RGB2BGR))
+
+        # write depth
+        cv2.imwrite(os.path.join(result_dir, str(n) + "_d" + ".png"), to16b(depth))
+
+    with open(os.path.join(result_dir, 'metrics.txt'), 'w') as f:
+        mean_metrics.print(f)
+    mean_metrics.print()
 
 def create_nerf(args):
     """Instantiate NeRF's MLP model.
@@ -729,8 +758,9 @@ def config_parser():
                         help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
 
     ## blender flags
-    parser.add_argument("--white_bkgd", action='store_true', 
-                        help='set to render synthetic data on a white bkgd (always use for dvoxels)')
+    # parser.add_argument("--white_bkgd", action='store_true', 
+    #                     help='set to render synthetic data on a white bkgd (always use for dvoxels)')
+    parser.add_argument('--white_bkgd', default= False, type=bool)
     parser.add_argument("--half_res", action='store_true', 
                         help='load blender synthetic data at 400x400 instead of 800x800')
 
@@ -783,6 +813,9 @@ def config_parser():
 
     parser.add_argument("--coarse_weight", type=float, default=1.0, 
                         help='zero tol to revert to piecewise constant assumption') 
+
+    parser.add_argument('--test_dist', default= 1.0, type=float)
+
     ##################
 
     return parser
@@ -807,11 +840,18 @@ def train():
             exit()
         tmp_task = args.task
         tmp_data_dir = args.data_dir
+        tmp_scene_id = args.scene_id
+        tmp_dataset = args.dataset
+        tmp_test_dist = args.test_dist
         tmp_ckpt_dir = args.ckpt_dir
         tmp_set_near_plane = args.set_near_plane
-        tmp_mode = args.mode
-        tmp_N_samples = args.N_samples
-        tmp_N_importance = args.N_importance
+
+        tmp_white_bkgd = args.white_bkgd
+        # tmp_white_bkgd = False
+
+        # tmp_mode = args.mode
+        # tmp_N_samples = args.N_samples
+        # tmp_N_importance = args.N_importance
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
@@ -822,11 +862,15 @@ def train():
         args.task = tmp_task
         args.data_dir = tmp_data_dir
         args.ckpt_dir = tmp_ckpt_dir
-        args.mode = tmp_mode
+        # args.mode = tmp_mode
         args.train_jsonfile = 'transforms_train.json'
         args.set_near_plane = tmp_set_near_plane
-        args.N_samples = tmp_N_samples
-        args.N_importance = tmp_N_importan
+        # args.N_samples = tmp_N_samples
+        # args.N_importance = tmp_N_importance
+        args.dataset = tmp_dataset
+        args.test_dist = tmp_test_dist
+        args.scene_id = tmp_scene_id
+        args.white_bkgd = tmp_white_bkgd 
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
     args.n_gpus = torch.cuda.device_count()
@@ -877,6 +921,37 @@ def train():
             images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
         else:
             images = images[...,:3]
+
+    elif args.dataset == "blender2":
+        images, poses, render_poses, hwf, i_split = load_scene_blender2(scene_data_dir, half_res=args.half_res)
+        print('Loaded blender2', images.shape, render_poses.shape, hwf, scene_data_dir)
+        i_train, i_val, i_test = i_split
+
+        # near = 2.
+        near = args.set_near_plane
+        print("Set near plane to: " + str(near))
+        far = 6.
+
+        if args.white_bkgd:
+            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+        else:
+            images = images[...,:3]  
+
+
+    elif args.dataset == "blender_fixeddist":
+        images, poses, render_poses, hwf, i_split = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=args.test_dist)
+
+        print('Loaded blender fixed dist', images.shape, hwf, scene_data_dir)
+        i_train, i_val, i_test = i_split
+
+        near = args.set_near_plane
+        print("Set near plane to: " + str(near))
+        far = 6.
+
+        if args.white_bkgd:
+            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+        else:
+            images = images[...,:3] 
 
     elif args.dataset == 'LINEMOD':
         images, poses, render_poses, hwf, K, i_split, near, far = load_LINEMOD_data(scene_data_dir, args.half_res, args.testskip)
@@ -1176,7 +1251,11 @@ def train():
         mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=False)
 
-        write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
+        if args.dataset == "blender_fixeddist":
+            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, args.test_dist, with_test_time_optimization=False)
+
+        else:
+            write_images_with_metrics(images_test, mean_metrics_test, far, args,  with_test_time_optimization=False)
 
 
 if __name__=='__main__':

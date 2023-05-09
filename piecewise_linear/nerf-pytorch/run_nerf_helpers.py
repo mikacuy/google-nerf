@@ -192,6 +192,42 @@ def ndc_rays(H, W, focal, near, rays_o, rays_d):
     
     return rays_o, rays_d
 
+def compute_space_carving_loss_corrected(pred_depth, target_hypothesis, is_joint=False, mask=None, norm_p=2, threshold=0.0):
+    n_rays, n_points = pred_depth.shape
+    num_hypothesis = target_hypothesis.shape[0]
+
+    if target_hypothesis.shape[-1] == 1:
+        ### In the case where there is no caching of quantiles
+        target_hypothesis_repeated = target_hypothesis.repeat(1, 1, n_points)
+    else:
+        ### Each quantile here already picked a hypothesis
+        target_hypothesis_repeated = target_hypothesis
+
+    ## L2 distance
+    # distances = torch.sqrt((pred_depth - target_hypothesis_repeated)**2)
+    distances = torch.norm(pred_depth.unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=norm_p, dim=-1)
+
+    if mask is not None:
+        mask = mask.unsqueeze(0).repeat(distances.shape[0],1).unsqueeze(-1)
+        distances = distances * mask
+
+    if threshold > 0:
+        distances = torch.where(distances < threshold, torch.tensor([0.0]).to(distances.device), distances)
+
+    if is_joint:
+        ### Take the mean for all points on all rays, hypothesis is chosen per image
+        quantile_mean = torch.mean(distances, axis=1) ## mean for each quantile, averaged across all rays
+        samples_min = torch.min(quantile_mean, axis=0)[0]
+        loss =  torch.mean(samples_min, axis=-1)
+
+
+    else:
+        ### Each ray selects a hypothesis
+        best_hyp = torch.min(distances, dim=0)[0]   ## for each sample pick a hypothesis
+        ray_mean = torch.mean(best_hyp, dim=-1) ## average across samples
+        loss = torch.mean(ray_mean)  
+
+    return loss
 
 # Hierarchical sampling (section 5.2)
 def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
@@ -238,6 +274,59 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
 
     return samples
+
+def sample_pdf_return_u(bins, weights, N_samples, det=False, pytest=False, load_u=None):
+    # Get pdf
+    weights = weights + 1e-5 # prevent nans
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    if load_u is None:
+        # Take uniform samples
+        if det:
+            u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+            u = u.expand(list(cdf.shape[:-1]) + [N_samples])
+        else:
+            u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=bins.device)
+
+        # Pytest, overwrite u with numpy's fixed random numbers
+        if pytest:
+            np.random.seed(0)
+            new_shape = list(cdf.shape[:-1]) + [N_samples]
+            if det:
+                u = np.linspace(0., 1., N_samples)
+                u = np.broadcast_to(u, new_shape)
+            else:
+                u = np.random.rand(*new_shape)
+            u = torch.Tensor(u)
+
+    ## Otherwise, take the saved u
+    else:
+        u = load_u
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[...,1]-cdf_g[...,0])
+    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    t = (u-cdf_g[...,0])/denom
+    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    return samples, u
 
 
 def pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=1e-3):
@@ -359,6 +448,134 @@ def sample_pdf_reformulation(bins, weights, tau, T, near, far, N_samples, det=Fa
 
 
     return samples, T_below, tau_below, bin_below
+
+
+def sample_pdf_reformulation_return_u(bins, weights, tau, T, near, far, N_samples, det=False, pytest=False, load_u=None, quad_solution_v2=True, zero_threshold = 1e-4, epsilon_=1e-3):
+    
+
+    bins = torch.cat([near, bins, far], -1)   
+    pdf = weights # make into a probability distribution
+
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    ### Overwrite to always have a cdf to end in 1.0 --> I checked and it doesn't always integrate to 1..., make tau at far plane larger?
+    cdf[:,-1] = 1.0
+
+    if load_u is None:
+        # Take uniform samples
+        if det:
+            u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+            u = u.expand(list(cdf.shape[:-1]) + [N_samples])
+        else:
+            u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=bins.device)
+
+        # Pytest, overwrite u with numpy's fixed random numbers
+        if pytest:
+            np.random.seed(0)
+            new_shape = list(cdf.shape[:-1]) + [N_samples]
+            if det:
+                u = np.linspace(0., 1., N_samples)
+                u = np.broadcast_to(u, new_shape)
+            else:
+                u = np.random.rand(*new_shape)
+            u = torch.Tensor(u)
+    else:
+        u = load_u
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    ### Get tau diffs, this is to split the case between constant (left and right bin are equal), increasing and decreasing
+    tau_diff = tau[...,1:] - tau[...,:-1]
+    matched_shape_tau = [inds_g.shape[0], inds_g.shape[1], tau_diff.shape[-1]]
+    tau_diff_g = torch.gather(tau_diff.unsqueeze(1).expand(matched_shape_tau), 2, below.unsqueeze(-1)).squeeze()
+
+    s_left = bins_g[...,0]
+    s_right = bins_g[...,1]
+    T_left = T_g[...,0]
+    tau_left = tau_g[...,0]
+    tau_right = tau_g[...,1]
+
+    # zero_threshold = 1e-4
+
+    dummy = torch.ones(s_left.shape, device=s_left.device)*-1.0
+
+    ### Constant interval, take the left bin
+    samples1 = torch.where(torch.logical_and(tau_diff_g < zero_threshold, tau_diff_g > -zero_threshold), s_left, dummy)
+
+    ### Increasing
+    samples2 = torch.where(tau_diff_g >= zero_threshold, pw_linear_sample_increasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples1)
+
+    ### Decreasing
+    samples3 = torch.where(tau_diff_g <= -zero_threshold, pw_linear_sample_decreasing_v2(s_left, s_right, T_left, tau_left, tau_right, u, epsilon=epsilon_), samples2)
+
+    ## Check for nan --> need to figure out why
+    samples = torch.where(torch.isnan(samples3), s_left, samples3)
+
+    tau_g = torch.gather(tau.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    T_g = torch.gather(T.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    T_below = T_g[...,0]
+    tau_below = tau_g[...,0]
+    bin_below = bins_g[...,0]
+    ###################################
+
+
+    return samples, T_below, tau_below, bin_below, u
+
+
+class Scale_Gradient_PDF(torch.autograd.Function):
+
+    # Note that both forward and backward are @staticmethods
+    @staticmethod
+    # bias is an optional argument
+    def forward(ctx, samples, T_below, tau_below, bin_below, samples_raw):
+        ctx.save_for_backward(samples, T_below, tau_below, bin_below, samples_raw)
+
+        return samples
+
+    # This function has only a single output, so it gets only one gradient
+    @staticmethod
+    def backward(ctx, grad_samples):
+        # This is a pattern that is very convenient - at the top of backward
+        # unpack saved_tensors and initialize all gradients w.r.t. inputs to
+        # None. Thanks to the fact that additional trailing Nones are
+        # ignored, the return statement is simple even when the function has
+        # optional inputs.
+        samples, T_below, tau_below, bin_below, samples_raw = ctx.saved_tensors
+        grad_T_below = grad_tau_below = grad_bin_below = grad_samples_raw = None
+
+
+        #### To evaluate tau(s) --> from samples_raw (make sure to use no_grad here) transform (currently: ReLU)
+        tau_samples = samples_raw[...,3]
+        tau_samples = F.relu(tau_samples)
+
+        f_s = T_below*tau_samples*torch.exp(-0.5*(tau_samples+tau_below)*(samples-bin_below))
+
+        grad_scale = 1./torch.max(f_s, torch.ones_like(f_s, device=f_s.device)*1e-3) ### prevent nan     
+
+        scaled_grad_samples = grad_scale * grad_samples
+
+        ### use negative
+        # scaled_grad_samples = -grad_scale * grad_samples
+
+        return scaled_grad_samples, grad_T_below, grad_tau_below, grad_bin_below, grad_samples_raw
+
+
 
 
 #### Utils for eval #####

@@ -30,6 +30,7 @@ from load_blender import load_blender_data
 from load_LINEMOD import load_LINEMOD_data
 
 from natsort import natsorted 
+from argparse import Namespace
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -821,7 +822,7 @@ def train():
         args.train_jsonfile = 'transforms_train.json'
         args.set_near_plane = tmp_set_near_plane
         args.N_samples = tmp_N_samples
-        args.N_importance = tmp_N_importan
+        args.N_importance = tmp_N_importance
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
     args.n_gpus = torch.cuda.device_count()
@@ -1106,7 +1107,7 @@ def train():
                 imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
 
 
-            if i%args.i_testset==0 and i > 0:
+            if (i%args.i_testset==0 and i > 0) or i==2000 or i==4000 or i==6000 or i==8000:
                 testsavedir = os.path.join(args.ckpt_dir, args.expname, 'testset_{:06d}'.format(i))
                 os.makedirs(testsavedir, exist_ok=True)
                 print('test poses shape', poses[i_test].shape)

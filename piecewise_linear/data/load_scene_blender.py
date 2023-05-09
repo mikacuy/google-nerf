@@ -55,8 +55,14 @@ def read_files(rgb_file, downsample_scale=None):
 
     return img
 
+# def load_ground_truth_depth(depth_file, depth_scaling_factor, near, far):
+#     gt_depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED).astype(np.float64)[...,0]
+#     gt_depth = (gt_depth / depth_scaling_factor).astype(np.float32)
+
+#     return gt_depth
+
 def load_ground_truth_depth(depth_file, depth_scaling_factor, near, far):
-    gt_depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED).astype(np.float64)[...,0]
+    gt_depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED).astype(np.float64)
     gt_depth = (gt_depth / depth_scaling_factor).astype(np.float32)
 
     return gt_depth
@@ -680,10 +686,13 @@ def load_scene_blender2_depth(basedir, train_json = "transforms_train.json", hal
                     max_depth = frame["max_depth"]
                     depth_scaling_factor = (255. / max_depth)
 
-                    if "chair" in basedir:
-                        depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path']+"0000.png"), depth_scaling_factor, near, far)
-                    else:
-                        depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path']+"0001.png"), depth_scaling_factor, near, far)
+                    # if "chair" in basedir:
+                    #     depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path']+"0000.png"), depth_scaling_factor, near, far)
+                    # else:
+                    #     depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path']+"0001.png"), depth_scaling_factor, near, far)
+
+                    depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'][:-1]+".png"), depth_scaling_factor, near, far)
+
 
                     if depth.ndim == 2:
                         depth = np.expand_dims(depth, -1)

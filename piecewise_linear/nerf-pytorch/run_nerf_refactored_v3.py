@@ -29,6 +29,7 @@ from load_blender import load_blender_data
 from load_LINEMOD import load_LINEMOD_data
 
 from natsort import natsorted 
+from argparse import Namespace
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
@@ -156,14 +157,18 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
         focal = focal/render_factor
 
     rgbs = []
+    rgb0s = []
     disps = []
 
     t = time.time()
     for i, c2w in enumerate(tqdm(render_poses)):
         print(i, time.time() - t)
         t = time.time()
-        rgb, disp, acc, _ = render(H, W, K, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
+        rgb, disp, acc, ret_dict = render(H, W, K, chunk=chunk, c2w=c2w[:3,:4], **render_kwargs)
+        rgb0 = ret_dict["rgb0"]
+
         rgbs.append(rgb.cpu().numpy())
+        rgb0s.append(rgb0.cpu().numpy())
         disps.append(disp.cpu().numpy())
         if i==0:
             print(rgb.shape, disp.shape)
@@ -179,8 +184,13 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
             filename = os.path.join(savedir, '{:03d}.png'.format(i))
             imageio.imwrite(filename, rgb8)
 
+            rgb08 = to8b(rgb0s[-1])
+            filename = os.path.join(savedir, '{:03d}_coarse.png'.format(i))
+            imageio.imwrite(filename, rgb08)
+
 
     rgbs = np.stack(rgbs, 0)
+    rgb0s = np.stack(rgb0s, 0)
     disps = np.stack(disps, 0)
 
     return rgbs, disps
@@ -666,7 +676,7 @@ def config_parser():
                         help='batch size (number of random rays per gradient step)')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
-    parser.add_argument("--coarse_lrate", type=float, default=1e-4, 
+    parser.add_argument("--coarse_lrate", type=float, default=5e-4, 
                         help='learning rate')    
     parser.add_argument("--lrate_decay", type=int, default=250, 
                         help='exponential learning rate decay (in 1000 steps)')
@@ -808,7 +818,7 @@ def train():
         args.train_jsonfile = 'transforms_train.json'
         args.set_near_plane = tmp_set_near_plane
         args.N_samples = tmp_N_samples
-        args.N_importance = tmp_N_importan
+        args.N_importance = tmp_N_importance
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
     args.n_gpus = torch.cuda.device_count()

@@ -60,7 +60,7 @@ class MeanTracker(object):
 ######
 
 def visualize(config):
-    data = get_dataloader(config.dataset_name, config.base_dir, split="test", factor=config.factor, shuffle=False)
+    data = get_dataloader(config.dataset_name, config.base_dir, split="test", factor=config.factor, shuffle=False, mode="test_time")
     # data = get_dataloader(config.dataset_name, config.base_dir, split="render", factor=config.factor, shuffle=False)
 
     model = MipNeRF(
