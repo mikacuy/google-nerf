@@ -455,7 +455,7 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
             elif s == "val":
                 skip = 1
             elif s =="test":
-                skip = 4
+                skip = 20
             elif "video" in s:
                 skip = 1
             

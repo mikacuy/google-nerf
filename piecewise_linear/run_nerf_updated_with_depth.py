@@ -1801,7 +1801,7 @@ def config_parser():
     # logging/saving options
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric logging')
-    parser.add_argument("--i_img",     type=int, default=20000,
+    parser.add_argument("--i_img",     type=int, default=600000,
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
@@ -2032,11 +2032,11 @@ def run_nerf():
         points_3D = rays_o + rays_d * far # [H, W, 3]
         max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
         min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)
-    args.bb_center = (max_xyz + min_xyz) / 2.
+    # args.bb_center = (max_xyz + min_xyz) / 2.
     # args.bb_scale = 2. / (max_xyz - min_xyz).max()
 
     ### Make scale 1.
-    # args.bb_center = 0.0
+    args.bb_center = 0.0
     args.bb_scale = 1.0
     # print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
 

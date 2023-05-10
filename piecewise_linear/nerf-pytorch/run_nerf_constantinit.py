@@ -782,13 +782,13 @@ def config_parser():
 
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=200000, 
+    parser.add_argument("--i_img",     type=int, default=600000, 
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=50000, 
+    parser.add_argument("--i_weights", type=int, default=100000, 
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--i_testset", type=int, default=200000, 
+    parser.add_argument("--i_testset", type=int, default=500000, 
                         help='frequency of testset saving')
-    parser.add_argument("--i_video",   type=int, default=200000, 
+    parser.add_argument("--i_video",   type=int, default=500000, 
                         help='frequency of render_poses video saving')
 
     ### For PWL ###
@@ -815,6 +815,11 @@ def config_parser():
                         help='zero tol to revert to piecewise constant assumption') 
 
     parser.add_argument('--test_dist', default= 1.0, type=float)
+
+    parser.add_argument("--eval_scene_id", type=str, default="chair_rgba_fixdist_nv100_dist0.25-1.0-4_depth_sfn",
+                        help='scene identifier for eval')
+    parser.add_argument("--eval_data_dir", type=str, default="../nerf_synthetic/fixed_dist_new-rgba/",
+                        help='directory containing the scenes for eval')
 
     ##################
 
@@ -1189,23 +1194,23 @@ def train():
                 }, path)
                 print('Saved checkpoints at', path)
 
-            if i%args.i_video==0 and i > 0:
-                # Turn on testing mode
-                with torch.no_grad():
-                    rgbs, disps = render_path(render_poses, hwf, K, args.chunk, render_kwargs_test)
-                print('Done, saving', rgbs.shape, disps.shape)
-                moviebase = os.path.join(args.ckpt_dir, args.expname, '{}_spiral_{:06d}_'.format(args.expname, i))
-                imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
-                imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
+            # if i%args.i_video==0 and i > 0:
+            #     # Turn on testing mode
+            #     with torch.no_grad():
+            #         rgbs, disps = render_path(render_poses, hwf, K, args.chunk, render_kwargs_test)
+            #     print('Done, saving', rgbs.shape, disps.shape)
+            #     moviebase = os.path.join(args.ckpt_dir, args.expname, '{}_spiral_{:06d}_'.format(args.expname, i))
+            #     imageio.mimwrite(moviebase + 'rgb.mp4', to8b(rgbs), fps=30, quality=8)
+            #     imageio.mimwrite(moviebase + 'disp.mp4', to8b(disps / np.max(disps)), fps=30, quality=8)
 
 
-            if i%args.i_testset==0 and i > 0:
-                testsavedir = os.path.join(args.ckpt_dir, args.expname, 'testset_{:06d}'.format(i))
-                os.makedirs(testsavedir, exist_ok=True)
-                print('test poses shape', poses[i_test].shape)
-                with torch.no_grad():
-                    render_path(torch.Tensor(poses[i_test]).to(device), hwf, K, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
-                print('Saved test set')
+            # if i%args.i_testset==0 and i > 0:
+            #     testsavedir = os.path.join(args.ckpt_dir, args.expname, 'testset_{:06d}'.format(i))
+            #     os.makedirs(testsavedir, exist_ok=True)
+            #     print('test poses shape', poses[i_test].shape)
+            #     with torch.no_grad():
+            #         render_path(torch.Tensor(poses[i_test]).to(device), hwf, K, args.chunk, render_kwargs_test, gt_imgs=images[i_test], savedir=testsavedir)
+            #     print('Saved test set')
 
         
             if i%args.i_print==0:
@@ -1235,6 +1240,59 @@ def train():
             render_kwargs_test, with_test_time_optimization=False)
 
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
+
+
+        ###### Eval fixed dist ######
+        all_test_dist = [0.25, 0.5, 0.75, 1.0]
+        near_planes = [1e-4, 0.5, 0.5, 0.5]
+
+        for i in range(len(all_test_dist)):
+            test_dist = all_test_dist[i]
+            curr_near = near_planes[i]
+            print("Eval " + str(test_dist))
+
+            bds_dict = {
+                'near' : curr_near,
+                'far' : far,
+            }
+            render_kwargs_test.update(bds_dict)
+
+            ### After training, eval with fixed dist data
+            torch.cuda.empty_cache()
+            scene_data_dir = os.path.join(args.eval_data_dir, args.eval_scene_id)
+
+            images, poses, render_poses, hwf, i_split = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=test_dist)
+
+            if args.white_bkgd:
+                images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+            else:
+                images = images[...,:3]
+
+
+            print('Loaded blender fixed dist', images.shape, hwf, scene_data_dir)
+            i_train, i_val, i_test = i_split
+
+            # Cast intrinsics to right types
+            H, W, focal = hwf
+            H, W = int(H), int(W)
+            hwf = [H, W, focal]
+
+            K = np.array([
+                [focal, 0, 0.5*W],
+                [0, focal, 0.5*H],
+                [0, 0, 1]
+            ])
+
+            with_test_time_optimization = False
+
+            images = torch.Tensor(images[i_test]).to(device)
+            poses = torch.Tensor(poses[i_test]).to(device)
+            i_test = i_test - i_test[0]
+
+            mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
+            render_kwargs_test, with_test_time_optimization=False)
+            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)
+
 
     elif args.task == "test":
 
