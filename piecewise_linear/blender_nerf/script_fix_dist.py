@@ -15,12 +15,12 @@ parser.add_argument('far', type=float, help='Distance ratio (far)')
 parser.add_argument('n_smp', type=int, default=5, help='Number of different distance samples')
 parser.add_argument('--seed', type=int, default=None, help='RAndom seed.')
 parser.add_argument('--test_only', action="store_true", help='RAndom seed.')
+parser.add_argument('--render_depth', action="store_true", help='Whether we render depth')
+parser.add_argument('--render_sfn', action="store_true", help='Whether we render depth')
 sep_idx = sys.argv.index("--")
 args = parser.parse_args(sys.argv[(sep_idx+1):])
 if args.seed is not None:
     np.random.seed(args.seed)
-
-
 
 DEBUG = False
 
@@ -31,6 +31,10 @@ R_FAR = args.far
 
 RESULTS_PATH = 'nerf_dataset/%s_fixdist_nv%d_dist%s-%s-%s' \
             % (args.name, VIEWS, R_NEAR, R_FAR, args.n_smp)
+if args.render_depth:
+    RESULTS_PATH += "_depth"
+if args.render_sfn:
+    RESULTS_PATH += "_sfn"
 os.makedirs(RESULTS_PATH, exist_ok=True)
 if args.test_only:
     split_to_nviews = {
@@ -50,7 +54,8 @@ if not os.path.exists(fp):
 #     os.makedirs(os.path.join(RESULTS_PATH, "dist_%s" % r),
 #                 exist_ok=True)
 
-DEPTH_SCALE = 1.4
+MAX_DEPTH = 8.
+DEPTH_SCALE =  1. / MAX_DEPTH
 COLOR_DEPTH = 8
 FORMAT = 'PNG'
 UPPER_VIEWS = True
@@ -88,12 +93,13 @@ if not DEBUG:
       # Remap as other types can not represent the full range of depth.
       map = tree.nodes.new(type="CompositorNodeMapValue")
       # Size is chosen kind of arbitrarily, try out until you're satisfied with resulting depth map.
-      map.offset = [-0.7]
+      map.offset = [0.]
       map.size = [DEPTH_SCALE]
       map.use_min = True
       map.min = [0]
+      map.use_max = True
+      map.max = [255]
       links.new(render_layers.outputs['Depth'], map.inputs[0])
-
       links.new(map.outputs[0], depth_file_output.inputs[0])
 
     normal_file_output = tree.nodes.new(type="CompositorNodeOutputFile")
@@ -168,19 +174,36 @@ for split, nviews in split_to_nviews.items():
             b_empty.rotation_euler = rot
             scene.render.filepath = fp + "/" + rfpath
 
-            # depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
-            # normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
+            depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
+            normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
 
-            if DEBUG:
-                break
-            else:
-                bpy.ops.render.render(write_still=True)  # render still
+            if args.render_depth:
+                depth_file_output.file_slots[0].path = RESULTS_PATH + "/" + rfpath + "_depth_"
+            if args.render_sfn:
+                normal_file_output.file_slots[0].path = RESULTS_PATH + "/" + rfpath + "_normal_"
+
+            bpy.ops.render.render(write_still=True)  # render still
             frame_data = {
                 'full_file_path': scene.render.filepath,
                 'file_path': rfpath,
                 'transform_matrix': listify_matrix(cam.matrix_world),
                 'dist_ratio': smp_r
             }
+            if args.render_depth:
+                frame_data.update({
+                    "full_depth_file_path": bpy.path.abspath(
+                        depth_file_output.file_slots[0].path),
+                    "depth_file_path": rfpath + "_depth_",
+                    "depth_scale": DEPTH_SCALE,
+                    "max_depth": MAX_DEPTH
+                })
+
+            if args.render_sfn:
+                frame_data.update({
+                    'full_normal_file_path': bpy.path.abspath(
+                        normal_file_output.file_slots[0].path),
+                    "normal_file_path": rfpath + "_normal_"
+                })
             out_data[smp_r]['frames'].append(frame_data)
 
 

@@ -1,6 +1,7 @@
 # A simple script that uses blender to render views of a single object by rotation the camera around it.
 # Also produces depth map at the same time.
 
+from math import radians
 import argparse, sys, os
 import json
 import numpy as np
@@ -12,6 +13,8 @@ parser.add_argument('name', type=str, help='Name')
 parser.add_argument('views', type=int, help='Number of views')
 parser.add_argument('near', type=float, help='Distance ratio (near)')
 parser.add_argument('far', type=float, help='Distance ratio (far)')
+parser.add_argument('--render_depth', action="store_true", help='Whether we render depth')
+parser.add_argument('--render_sfn', action="store_true", help='Whether we render depth')
 
 args = parser.parse_args(sys.argv[(sep_idx+1):])
 
@@ -30,12 +33,17 @@ DISTANCE_RATIO_NEAR = args.near
 DISTANCE_RATIO_FAR = args.far
 RESULTS_PATH = 'nerf_dataset/%s_randdist_nv%d_dist%s-%s' \
             % (args.name, args.views, DISTANCE_RATIO_NEAR, DISTANCE_RATIO_FAR)
-DEPTH_SCALE = 1.4
+if args.render_depth:
+    RESULTS_PATH += "_depth"
+if args.render_sfn:
+    RESULTS_PATH += "_sfn"
+
+MAX_DEPTH = 8.
+DEPTH_SCALE =  1. / MAX_DEPTH
 COLOR_DEPTH = 8
 FORMAT = 'PNG'
 RANDOM_VIEWS = True
 UPPER_VIEWS = True
-
 
 fp = bpy.path.abspath(f"//{RESULTS_PATH}")
 
@@ -52,14 +60,13 @@ if not os.path.exists(fp):
 # Render Optimizations
 bpy.context.scene.render.use_persistent_data = True
 
-
 # Set up rendering of depth map.
 bpy.context.scene.use_nodes = True
 tree = bpy.context.scene.node_tree
 links = tree.links
 
 # Add passes for additionally dumping albedo and normals.
-#bpy.context.scene.view_layers["RenderLayer"].use_pass_normal = True
+# bpy.context.scene.view_layers["RenderLayer"].use_pass_normal = True
 bpy.context.scene.render.image_settings.file_format = str(FORMAT)
 bpy.context.scene.render.image_settings.color_depth = str(COLOR_DEPTH)
 
@@ -75,12 +82,14 @@ if not DEBUG:
       # Remap as other types can not represent the full range of depth.
       map = tree.nodes.new(type="CompositorNodeMapValue")
       # Size is chosen kind of arbitrarily, try out until you're satisfied with resulting depth map.
-      map.offset = [-0.7]
+      # map.offset = [-0.7]
+      map.offset = [0.]
       map.size = [DEPTH_SCALE]
       map.use_min = True
       map.min = [0]
+      map.use_max = True
+      map.max = [255]
       links.new(render_layers.outputs['Depth'], map.inputs[0])
-
       links.new(map.outputs[0], depth_file_output.inputs[0])
 
     normal_file_output = tree.nodes.new(type="CompositorNodeOutputFile")
@@ -114,14 +123,11 @@ scene.render.resolution_y = RESOLUTION
 scene.render.resolution_percentage = 100
 scene.render.image_settings.file_format = 'PNG'  # set output format to .png
 
-from math import radians
 
 rotation_mode = 'XYZ'
 
-if not DEBUG:
-    for output_node in [depth_file_output, normal_file_output]:
-        output_node.base_path = ''
-
+for output_node in [depth_file_output, normal_file_output]:
+    output_node.base_path = ''
 
 # for i in range(0, VIEWS):
 for split, views in VIEWS.items():
@@ -155,24 +161,45 @@ for split, views in VIEWS.items():
             rfpath =  '{}/r_{}_{0:03d}'.format(split, i, int(i * stepsize))
         scene.render.filepath = fp + "/" + rfpath
 
-        # depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
-        # normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
-
-        if DEBUG:
-            break
-        else:
-            bpy.ops.render.render(write_still=True)  # render still
+        if args.render_depth:
+            # depth_file_output.file_slots[0].path = scene.render.filepath + "_depth_"
+            depth_file_output.file_slots[0].path = RESULTS_PATH + "/" + rfpath + "_depth_"
+            # depth_file_output.file_slots.path = RESULTS_PATH + "/" + rfpath + "_depth_"
+            # depth_file_output.file_slots[0].path = RESULTS_PATH + "/" + rfpath + "_depth.png"
+            # depth_file_output.file_slots[0].use_node_format = False
+        if args.render_sfn:
+            # normal_file_output.file_slots[0].path = scene.render.filepath + "_normal_"
+            normal_file_output.file_slots[0].path = RESULTS_PATH + "/" + rfpath + "_normal_"
+            # normal_file_output.file_slots.path = RESULTS_PATH + "/" + rfpath + "_normal_"
+            # normal_file_output.file_slots[0].path = RESULTS_PATH + "/" + rfpath + "_normal.png"
+            # normal_file_output.file_slots[0].use_node_format = False
+        bpy.ops.render.render(write_still=True)  # render still
         frame_data = {
             'full_file_path': scene.render.filepath,
             'file_path': rfpath,
             'rotation': radians(stepsize),
             'transform_matrix': listify_matrix(cam.matrix_world)
         }
+        if args.render_depth:
+            frame_data.update({
+                "full_depth_file_path": bpy.path.abspath(
+                    depth_file_output.file_slots[0].path),
+                "depth_file_path": rfpath + "_depth_",
+                "depth_scale": DEPTH_SCALE,
+                "max_depth": MAX_DEPTH
+            })
+
+        if args.render_sfn:
+            frame_data.update({
+                'full_normal_file_path': bpy.path.abspath(
+                    normal_file_output.file_slots[0].path),
+                "normal_file_path": rfpath + "_normal_"
+            })
         out_data['frames'].append(frame_data)
 
         if RANDOM_VIEWS:
             if UPPER_VIEWS:
-                rot = np.random.uniform(0, 1, size=3) * (1,0,2*np.pi)
+                rot = np.random.uniform(0, 1, size=3) * (1, 0, 2 * np.pi)
                 rot[0] = np.abs(np.arccos(1 - 2 * rot[0]) - np.pi/2)
                 b_empty.rotation_euler = rot
             else:
@@ -183,4 +210,3 @@ for split, views in VIEWS.items():
     if not DEBUG:
         with open(fp + '/' + '{}_transforms.json'.format(split), 'w') as out_file:
             json.dump(out_data, out_file, indent=4)
-
