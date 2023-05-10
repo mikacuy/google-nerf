@@ -435,7 +435,15 @@ def resample_along_rays_piecewise_linear(origins, directions, radii, t_vals, wei
             z_vals = 0.5 * (t_vals[...,:-1] + t_vals[...,1:])
             new_t_vals, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, t_vals.shape[-1], det= (not randomized), pytest=False)
             new_t_vals = torch.clamp(new_t_vals, near, far)
-            z_vals, _ = torch.sort(new_t_vals, -1)
+            new_t_vals, _ = torch.sort(new_t_vals, -1)
+
+            # print("In resample_along_rays_piecewise_linear")
+            # print(z_vals)
+
+            # dists = z_vals[...,1:] - z_vals[...,:-1]
+            # print(dists)
+            # print((dists>=0).all())
+            # print()
 
             # new_t_vals = sorted_piecewise_constant_pdf(
             #     t_vals,
@@ -554,6 +562,25 @@ def volumetric_rendering_piecewise_linear(rgb, density, t_vals, dirs, white_bkgd
     T = torch.cumprod(torch.cat([torch.ones((expr.shape[0], 1), device=density.device), expr], -1), -1)
     alpha = (1 - expr)
     weights = alpha * T[:, :-1]
+
+    # print()
+    # print("z_vals")
+    # print(z_vals)
+    # print("dists")
+    # print((dists>=0).all())
+    # print(dists)
+    # print("tau")
+    # print(torch.isnan(tau).any())
+    # print("expr")
+    # print(torch.isnan(expr).any())
+    # print(expr)
+    # print("alpha")
+    # print(torch.isnan(alpha).any())    
+    # print("T")
+    # print(torch.isnan(T).any())
+    # print(T)
+    # print("weights")
+    # print(torch.isnan(weights).any())
 
     # print(weights.shape)
     # print(tau.shape)

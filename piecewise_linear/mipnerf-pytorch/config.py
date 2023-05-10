@@ -8,6 +8,9 @@ def get_config():
 
     # basic hyperparams to specify where to load/save data from/to
     config.add_argument("--log_dir", type=str, default="log")
+    config.add_argument("--expname", type=str, default="chair", 
+                        help='specify the experiment"')
+
     config.add_argument("--dataset_name", type=str, default="blender")
     config.add_argument("--scene", type=str, default="lego")
     # model hyperparams
@@ -65,7 +68,8 @@ def get_config():
 
     config.add_argument("--data_dir", type=str, default="../nerf_llff_data/",
                     help='directory containing the scenes')
-    config.add_argument("--correct_hier", action="store_true")
+    # config.add_argument("--correct_hier", action="store_true")
+    config.add_argument('--correct_hier', default= True, type=bool)
 
     config = config.parse_args()
 

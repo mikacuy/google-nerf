@@ -27,7 +27,7 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender2
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender2, load_scene_blender_fixed_dist_new
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -419,6 +419,37 @@ def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_op
     with open(os.path.join(result_dir, 'metrics.txt'), 'w') as f:
         mean_metrics.print(f)
     mean_metrics.print()
+
+
+def write_images_with_metrics_testdist(images, mean_metrics, far, args, test_dist, with_test_time_optimization=False, test_samples=False):
+    
+    if not test_samples:
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_dist" + str(test_dist) + "_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+    else:
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples_dist"  + str(test_dist) + "_" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+
+    # if not test_samples:
+    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+    # else:
+    #     result_dir = os.path.join(args.ckpt_dir, args.expname, "train_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+
+    os.makedirs(result_dir, exist_ok=True)
+    for n, (rgb, depth, gt_rgb) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
+            images["depths"].permute(0, 2, 3, 1).cpu().numpy(), images["target_rgbs"].permute(0, 2, 3, 1).cpu().numpy())):
+
+        # write rgb
+        # cv2.imwrite(os.path.join(result_dir, str(n) + "_rgb" + ".jpg"), cv2.cvtColor(to8b(rgb), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(result_dir, str(n) + "_rgb" + ".png"), cv2.cvtColor(to8b(rgb), cv2.COLOR_RGB2BGR))
+
+        cv2.imwrite(os.path.join(result_dir, str(n) + "_gt" + ".png"), cv2.cvtColor(to8b(gt_rgb), cv2.COLOR_RGB2BGR))
+
+        # write depth
+        cv2.imwrite(os.path.join(result_dir, str(n) + "_d" + ".png"), to16b(depth))
+
+    with open(os.path.join(result_dir, 'metrics.txt'), 'w') as f:
+        mean_metrics.print(f)
+    mean_metrics.print()
+
 
 def load_checkpoint(args):
     path = os.path.join(args.ckpt_dir, args.expname)
@@ -903,7 +934,7 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
 
     if N_importance > 0:
 
@@ -1268,6 +1299,38 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         global_step += 1
 
+    #############################################################
+    ### Attempt to combine the the eval script here after training
+    #############################################################
+    all_test_dist = [0.25, 0.5, 0.75, 1.0]
+
+    for test_dist in all_test_dist:
+        print("Eval " + str(test_dist))
+        ### After training, eval with fixed dist data
+        torch.cuda.empty_cache()
+        scene_data_dir = os.path.join(args.eval_data_dir, args.eval_scene_id)
+        images, _, _, poses, H, W, intrinsics, _, _, i_split, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=test_dist)
+        i_train, i_val, i_test, i_video = i_split
+
+
+        if args.white_bkgd:
+            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+        else:
+            images = images[...,:3]  
+
+        with_test_time_optimization = False
+
+        images = torch.Tensor(images[i_test]).to(device)
+        poses = torch.Tensor(poses[i_test]).to(device)
+        intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
+        i_test = i_test - i_test[0]
+
+        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, intrinsics, lpips_alex, args, \
+            render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
+        write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)
+    #####################
+
+
 def config_parser():
     parser = configargparse.ArgumentParser()
     parser.add_argument('task', type=str, help='one out of: "train", "test", "test_with_opt", "video"')
@@ -1351,6 +1414,12 @@ def config_parser():
     parser.add_argument("--data_dir", type=str, default="",
                         help='directory containing the scenes')
 
+    parser.add_argument("--eval_scene_id", type=str, default="chair_rgba_fixdist_nv100_dist0.25-1.0-4_depth_sfn",
+                        help='scene identifier for eval')
+    parser.add_argument("--eval_data_dir", type=str, default="../nerf_synthetic/fixed_dist_new-rgba/",
+                        help='directory containing the scenes for eval')
+
+
     ### Train json file --> experimenting making views sparser
     parser.add_argument("--train_jsonfile", type=str, default='transforms_train.json',
                         help='json file containing training images')
@@ -1373,7 +1442,7 @@ def config_parser():
 
     parser.add_argument("--mode", type=str, default="constant", 
                         help='rendering opacity aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
-    parser.add_argument("--color_mode", type=str, default="left", 
+    parser.add_argument("--color_mode", type=str, default="midpoint", 
                         help='rendering color aggregation mode -- whether to use left bin or midpoint."')
 
     parser.add_argument('--quad_solution_v2', default= True, type=bool)
@@ -1441,8 +1510,9 @@ def run_nerf():
         tmp_ckpt_dir = args.ckpt_dir
         tmp_set_near_plane = args.set_near_plane
         tmp_mode = args.mode
-        tmp_N_samples = args.N_samples
-        tmp_N_importance = args.N_importance
+
+        tmp_eval_scene_id = args.eval_scene_id
+        tmp_eval_data_dir = args.eval_data_dir
 
         # load nerf parameters from training
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
@@ -1456,8 +1526,9 @@ def run_nerf():
         args.mode = tmp_mode
         args.train_jsonfile = 'transforms_train.json'
         args.set_near_plane = tmp_set_near_plane
-        args.N_samples = tmp_N_samples
-        args.N_importance = tmp_N_importance
+
+        args.eval_scene_id = tmp_eval_scene_id
+        args.eval_data_dir = tmp_eval_data_dir
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
 
@@ -1550,7 +1621,7 @@ def run_nerf():
         param.requires_grad = False
 
     # render test set and compute statistics
-    if "test" in args.task: 
+    if "test" == args.task: 
         with_test_time_optimization = False
         if args.task == "test_opt":
             with_test_time_optimization = True
@@ -1568,6 +1639,50 @@ def run_nerf():
             write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization, test_samples=True)
         else:
             write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
+
+    elif "test_fixed_dist" == args.task: 
+        all_test_dist = [0.25, 0.5, 0.75, 1.0]
+        near_planes = [1e-4, 0.5, 0.5, 0.5]
+
+        for i in range(len(all_test_dist)):
+            test_dist = all_test_dist[i]
+            curr_near = near_planes[i]
+            print("Eval " + str(test_dist))
+
+            scene_sample_params = {
+                'precomputed_z_samples' : precomputed_z_samples,
+                'near' : curr_near,
+                'far' : far,
+            }
+            
+            # create nerf model for testing
+            _, render_kwargs_test, _, nerf_grad_vars, _ = create_nerf(args, scene_sample_params)
+            for param in nerf_grad_vars:
+                param.requires_grad = False
+
+            ### After training, eval with fixed dist data
+            torch.cuda.empty_cache()
+            scene_data_dir = os.path.join(args.eval_data_dir, args.eval_scene_id)
+            images, _, _, poses, H, W, intrinsics, _, _, i_split, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=test_dist)
+            i_train, i_val, i_test, i_video = i_split
+
+            if args.white_bkgd:
+                images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+            else:
+                images = images[...,:3]  
+
+            with_test_time_optimization = False
+
+            images = torch.Tensor(images[i_test]).to(device)
+            poses = torch.Tensor(poses[i_test]).to(device)
+            intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
+            i_test = i_test - i_test[0]
+
+            mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, intrinsics, lpips_alex, args, \
+                render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
+            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)
+
+
     elif args.task == "video":
         vposes = torch.Tensor(poses[i_video]).to(device)
         vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
