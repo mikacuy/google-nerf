@@ -15,6 +15,8 @@ parser = argparse.ArgumentParser(description='NeRF data post processing.')
 parser.add_argument('img_dir', type=str, help='Image directory')
 parser.add_argument('--out_dir', type=str,
                     default=None, help='Image directory')
+parser.add_argument('--keep_alpha_channel', action="store_true",
+                    default=None, help='Whether we keep the alpha channel.')
 args = parser.parse_args()
 
 
@@ -49,17 +51,29 @@ if out_folder is None:
 # "../data/nerf_synthetic_multicam2/lego_0.5_1.25_rgb/"
 
 
+
 flst = list(os.listdir(folder))
 # for f in os.listdir(folder):
 for f in tqdm(flst):
     if not f.endswith(".png"): continue
-    fname = osp.join(folder, f)
-
-    img = read_files(fname)
-    if img.shape[-1] > 3:
-        img[..., :3] *= img[..., 3:]
-    img = img[..., :3]
-    img_out = cv2.cvtColor(to8b(img), cv2.COLOR_RGB2BGR)
-    out_fname = osp.join(out_folder, f)
-    status = cv2.imwrite(out_fname, img_out)
-    print(out_fname, status)
+    if "_normal_" in f:
+        continue
+    elif "_depth_" in f:
+        fname = osp.join(folder, f)
+        img = cv2.imread(fname, cv2.IMREAD_UNCHANGED)
+        if img.shape[-1] > 3:
+            img = img[..., 0]  # all three channels should be the same
+        f_no_postfix = f[:-len("_0000.png")] + ".png"
+        out_fname = osp.join(folder, f_no_postfix)
+        status = cv2.imwrite(out_fname, img)
+        print(out_fname, status, img.shape)
+    elif not args.keep_alpha_channel:
+        fname = osp.join(folder, f)
+        img = read_files(fname)
+        if img.shape[-1] > 3:
+            img[..., :3] *= img[..., 3:]
+        img = img[..., :3]
+        img_out = cv2.cvtColor(to8b(img), cv2.COLOR_RGB2BGR)
+        out_fname = osp.join(out_folder, f)
+        status = cv2.imwrite(out_fname, img_out)
+        print(out_fname, status)

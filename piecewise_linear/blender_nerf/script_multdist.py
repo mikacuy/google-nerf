@@ -43,7 +43,7 @@ if args.train_only:
     }
 else:
     split_to_nviews = {
-        "train": args.views * 2,
+        "train": args.views,
         "test": args.views,
         "val": args.views
     }
