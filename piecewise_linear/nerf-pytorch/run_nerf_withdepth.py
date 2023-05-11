@@ -825,7 +825,7 @@ def config_parser():
     parser.add_argument('--set_near_plane', default= 0.5, type=float)
     parser.add_argument('--farcolorfix', default= False, type=bool)
 
-    parser.add_argument("--constant_init",   type=int, default=1000, 
+    parser.add_argument("--constant_init",   type=int, default=2000, 
                         help='number of iterations to use constant aggregation')    
 
     parser.add_argument("--coarse_weight", type=float, default=1.0, 
@@ -1146,9 +1146,12 @@ def train():
 
         images = torch.Tensor(images[i_test]).to(device)
         poses = torch.Tensor(poses[i_test]).to(device)
+        depths = torch.Tensor(depths[i_test]).to(device)
+        valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
+
         i_test = i_test - i_test[0]  
 
-        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
+        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=False)
 
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
@@ -1157,9 +1160,11 @@ def train():
 
         images = torch.Tensor(images[i_test]).to(device)
         poses = torch.Tensor(poses[i_test]).to(device)
+        depths = torch.Tensor(depths[i_test]).to(device)
+        valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
         i_test = i_test - i_test[0]            
 
-        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
+        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=False)
 
         if args.dataset == "blender_fixeddist":

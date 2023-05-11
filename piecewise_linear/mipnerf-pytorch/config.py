@@ -69,7 +69,7 @@ def get_config():
     config.add_argument("--data_dir", type=str, default="../nerf_llff_data/",
                     help='directory containing the scenes')
     # config.add_argument("--correct_hier", action="store_true")
-    config.add_argument('--correct_hier', default= True, type=bool)
+    config.add_argument('--correct_hier', default= False, type=bool)
 
     config = config.parse_args()
 

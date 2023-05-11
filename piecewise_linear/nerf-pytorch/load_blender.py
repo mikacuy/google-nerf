@@ -162,7 +162,7 @@ def load_scene_blender_fixed_dist_new(basedir, half_res=True, train_dist=1.0, te
             elif s == "val":
                 skip = 1
             elif s =="test":
-                skip = 20
+                skip = 4
             elif "video" in s:
                 skip = 1
             
