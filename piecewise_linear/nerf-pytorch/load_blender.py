@@ -236,7 +236,7 @@ def load_scene_blender2(basedir, train_json = "transforms_train.json", half_res=
             if s=='train':
                 skip = 1
             elif s =="test":
-                skip = 8
+                skip = 2
             elif "video" in s:
                 skip = 1
             

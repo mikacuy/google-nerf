@@ -51,13 +51,36 @@ def run_network(inputs, viewdirs, fn, embed_fn, embeddirs_fn, netchunk=1024*64):
     """Prepares inputs and applies network 'fn'.
     """
     inputs_flat = torch.reshape(inputs, [-1, inputs.shape[-1]])
-    embedded = embed_fn(inputs_flat)
+    # embedded = embed_fn(inputs_flat)
 
+    # if viewdirs is not None:
+    #     input_dirs = viewdirs[:,None].expand(inputs.shape)
+    #     input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
+    #     embedded_dirs = embeddirs_fn(input_dirs_flat)
+    #     embedded = torch.cat([embedded, embedded_dirs], -1)
+
+    # print(embedded.shape)
+    # print(inputs_flat.shape)
+
+    # if viewdirs is not None:
+    #     input_dirs = viewdirs[:,None].expand(inputs.shape)
+    #     input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
+    #     embedded_dirs = embeddirs_fn(input_dirs_flat)
+    #     embedded = torch.cat([embedded, embedded_dirs], -1)
+    #     print(embedded_dirs.shape)
+
+    # before = embedded
+    # print()        
+    # print(embedded.shape)
+    # print(embedded.dtype)
+
+    embedded = torch.zeros([inputs_flat.shape[0], 90], dtype=torch.float32)
+    embedded[:,:63] = embed_fn(inputs_flat)
     if viewdirs is not None:
         input_dirs = viewdirs[:,None].expand(inputs.shape)
         input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
         embedded_dirs = embeddirs_fn(input_dirs_flat)
-        embedded = torch.cat([embedded, embedded_dirs], -1)
+        embedded[:,63:] = embedded_dirs
 
     outputs_flat = batchify(fn, netchunk)(embedded)
     outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
@@ -264,12 +287,12 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     all_mean_metrics.add({**mean_metrics.as_dict(), **mean_depth_metrics.as_dict()})
     return all_mean_metrics, res
 
-def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False):
+def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False, num_split=0):
     
     if not test_samples:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(num_split) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     else:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples"+ str(num_split) + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
 
     os.makedirs(result_dir, exist_ok=True)
     for n, (rgb, depth, gt_rgb) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
@@ -1144,34 +1167,82 @@ def train():
             global_step += 1
 
 
-        images = torch.Tensor(images[i_test]).to(device)
-        poses = torch.Tensor(poses[i_test]).to(device)
-        depths = torch.Tensor(depths[i_test]).to(device)
-        valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
+        # images = torch.Tensor(images[i_test]).to(device)
+        # poses = torch.Tensor(poses[i_test]).to(device)
+        # depths = torch.Tensor(depths[i_test]).to(device)
+        # valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
 
-        i_test = i_test - i_test[0]  
+        # i_test = i_test - i_test[0]  
 
-        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, \
-            render_kwargs_test, with_test_time_optimization=False)
+        # mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, \
+        #     render_kwargs_test, with_test_time_optimization=False)
 
-        write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
+        # write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
+
+        torch.cuda.empty_cache()
+        num_splits = 4
+
+        for j in range(num_splits):
+
+            num_samples = len(i_test)//num_splits
+
+            start_idx = int(j* num_samples)
+            end_idx = start_idx + num_samples
+
+            curr_images = torch.Tensor(images[i_test[start_idx:end_idx]]).to(device)
+            curr_depths = torch.Tensor(depths[i_test[start_idx:end_idx]]).to(device)
+            curr_valid_depths = torch.Tensor(valid_depths[i_test[start_idx:end_idx]]).bool().to(device)
+            curr_poses = torch.Tensor(poses[i_test[start_idx:end_idx]]).to(device)
+
+            curr_i_test = i_test[start_idx:end_idx] - i_test[start_idx]
+
+
+            mean_metrics_test, images_test = render_images_with_metrics(None, curr_i_test, curr_images, curr_depths, curr_valid_depths, curr_poses, H, W, K, lpips_alex, args, \
+                render_kwargs_test, with_test_time_optimization=False)
+
+            write_images_with_metrics(images_test, mean_metrics_test, far, args,  with_test_time_optimization=False, num_split=j)
+
 
     elif args.task == "test":
 
-        images = torch.Tensor(images[i_test]).to(device)
-        poses = torch.Tensor(poses[i_test]).to(device)
-        depths = torch.Tensor(depths[i_test]).to(device)
-        valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
-        i_test = i_test - i_test[0]            
+        num_splits = 4
 
-        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, \
-            render_kwargs_test, with_test_time_optimization=False)
+        for j in range(num_splits):
 
-        if args.dataset == "blender_fixeddist":
-            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, args.test_dist, with_test_time_optimization=False)
+            num_samples = len(i_test)//num_splits
 
-        else:
-            write_images_with_metrics(images_test, mean_metrics_test, far, args,  with_test_time_optimization=False)
+            start_idx = int(j* num_samples)
+            end_idx = start_idx + num_samples
+
+
+            curr_images = torch.Tensor(images[i_test[start_idx:end_idx]]).to(device)
+            curr_depths = torch.Tensor(depths[i_test[start_idx:end_idx]]).to(device)
+            curr_valid_depths = torch.Tensor(valid_depths[i_test[start_idx:end_idx]]).bool().to(device)
+            curr_poses = torch.Tensor(poses[i_test[start_idx:end_idx]]).to(device)
+
+            curr_i_test = i_test[start_idx:end_idx] - i_test[start_idx]
+
+
+            mean_metrics_test, images_test = render_images_with_metrics(None, curr_i_test, curr_images, curr_depths, curr_valid_depths, curr_poses, H, W, K, lpips_alex, args, \
+                render_kwargs_test, with_test_time_optimization=False)
+
+            write_images_with_metrics(images_test, mean_metrics_test, far, args,  with_test_time_optimization=False, num_split=j)
+
+
+        # images = torch.Tensor(images[i_test]).to(device)
+        # poses = torch.Tensor(poses[i_test]).to(device)
+        # depths = torch.Tensor(depths[i_test]).to(device)
+        # valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
+        # i_test = i_test - i_test[0]            
+
+        # mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, \
+        #     render_kwargs_test, with_test_time_optimization=False)
+
+        # if args.dataset == "blender_fixeddist":
+        #     write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, args.test_dist, with_test_time_optimization=False)
+
+        # else:
+        #     write_images_with_metrics(images_test, mean_metrics_test, far, args,  with_test_time_optimization=False)
 
 
 if __name__=='__main__':

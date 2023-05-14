@@ -278,7 +278,25 @@ class Embedder:
         self.out_dim = out_dim
         
     def embed(self, inputs):
-        return torch.cat([fn(inputs).to(inputs.device) for fn in self.embed_fns], -1)
+
+        # print(inputs.shape)
+        # print("In embedder.")
+        # for fn in self.embed_fns:
+        #     print(fn(inputs).shape)
+        # print("after for loop:")
+        # print(torch.cat([fn(inputs).to(inputs.device) for fn in self.embed_fns], -1).shape)
+        # before = torch.cat([fn(inputs).to(inputs.device) for fn in self.embed_fns], -1)
+
+        # print("removing torch cat")
+        embedded = torch.zeros([inputs.shape[0], 3*len(self.embed_fns)], dtype=torch.float32).to(inputs.device)
+        # print(embedded.shape)
+
+        for i in range(len(self.embed_fns)):
+            embedded[:, i*3:i*3+3] = self.embed_fns[i](inputs)
+        # print(embedded == before)
+        
+        # return torch.cat([fn(inputs).to(inputs.device) for fn in self.embed_fns], -1)
+        return embedded
 
 def get_embedder(multires, i=0):
     if i == -1:

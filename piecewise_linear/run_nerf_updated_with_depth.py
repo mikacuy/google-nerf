@@ -32,8 +32,8 @@ from data import create_random_subsets, load_scene, convert_depth_completion_sca
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
-import imageio
-from natsort import natsorted 
+# import imageio
+# from natsort import natsorted 
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -55,13 +55,31 @@ def run_network(inputs, viewdirs, embedded_cam, fn, embed_fn, embeddirs_fn, bb_c
     inputs_flat = torch.reshape(inputs, [-1, inputs.shape[-1]])
     inputs_flat = (inputs_flat - bb_center) * bb_scale ### --> does this make sense for inward facing cameras?
 
-    embedded = embed_fn(inputs_flat) # samples * rays, multires * 2 * 3 + 3
+    # embedded = embed_fn(inputs_flat) # samples * rays, multires * 2 * 3 + 3
 
+    embedded = torch.zeros([inputs_flat.shape[0], 60], dtype=torch.float32)
+    embedded[:,:57] = embed_fn(inputs_flat)
     if viewdirs is not None:
         input_dirs = viewdirs[:,None].expand(inputs.shape)
         input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
         embedded_dirs = embeddirs_fn(input_dirs_flat)
-        embedded = torch.cat([embedded, embedded_dirs, embedded_cam.unsqueeze(0).expand(embedded_dirs.shape[0], embedded_cam.shape[0])], -1)
+        embedded[:,57:] = embedded_dirs
+
+    # print(embedded.shape)
+    # print(inputs_flat.shape)
+
+    # if viewdirs is not None:
+    #     input_dirs = viewdirs[:,None].expand(inputs.shape)
+    #     input_dirs_flat = torch.reshape(input_dirs, [-1, input_dirs.shape[-1]])
+    #     embedded_dirs = embeddirs_fn(input_dirs_flat)
+    #     embedded = torch.cat([embedded, embedded_dirs, embedded_cam.unsqueeze(0).expand(embedded_dirs.shape[0], embedded_cam.shape[0])], -1)
+    #     print(embedded_dirs.shape)
+    #     print(embedded_cam.unsqueeze(0).expand(embedded_dirs.shape[0], embedded_cam.shape[0]).shape)
+
+    # print()        
+    # print(embedded.shape)
+    # print(embedded.dtype)
+    # exit()
 
     outputs_flat = batchify(fn, netchunk)(embedded)
     outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
@@ -472,12 +490,12 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     all_mean_metrics.add({**mean_metrics.as_dict(), **mean_depth_metrics.as_dict()})
     return all_mean_metrics, res
 
-def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False):
+def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False, num_split=0):
     
     if not test_samples:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(num_split) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     else:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples"+ str(num_split) + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
 
     os.makedirs(result_dir, exist_ok=True)
     for n, (rgb, depth, gt_rgb) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
@@ -1715,17 +1733,43 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                     torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
 
         # test at the last iteration
+        # if (i + 1) == N_iters:
+            # torch.cuda.empty_cache()
+            # images = torch.Tensor(test_images).to(device)
+            # depths = torch.Tensor(test_depths).to(device)
+            # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
+            # poses = torch.Tensor(test_poses).to(device)
+            # intrinsics = torch.Tensor(test_intrinsics).to(device)
+            # mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
+            #     poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
+            # write_images_with_metrics(images_test, mean_metrics_test, far, args)
+            # tb.flush()
+
         if (i + 1) == N_iters:
             torch.cuda.empty_cache()
-            images = torch.Tensor(test_images).to(device)
-            depths = torch.Tensor(test_depths).to(device)
-            valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
-            poses = torch.Tensor(test_poses).to(device)
-            intrinsics = torch.Tensor(test_intrinsics).to(device)
-            mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-            write_images_with_metrics(images_test, mean_metrics_test, far, args)
-            tb.flush()
+
+            num_splits = 4
+
+            for j in range(num_splits):
+
+                num_samples = len(i_test)//num_splits
+
+                start_idx = int(j* num_samples)
+                end_idx = start_idx + num_samples
+
+                curr_images = torch.Tensor(test_images[i_test[start_idx:end_idx]]).to(device)
+                curr_depths = torch.Tensor(test_depths[i_test[start_idx:end_idx]]).to(device)
+                curr_valid_depths = torch.Tensor(test_valid_depths[i_test[start_idx:end_idx]]).bool().to(device)
+                curr_poses = torch.Tensor(test_poses[i_test[start_idx:end_idx]]).to(device)
+                curr_intrinsics = torch.Tensor(test_intrinsics[i_test[start_idx:end_idx]]).to(device)
+
+                curr_i_test = i_test[start_idx:end_idx] - i_test[start_idx]
+
+                mean_metrics_test, images_test = render_images_with_metrics(None, curr_i_test, curr_images, curr_depths, curr_valid_depths, curr_poses, H, W, curr_intrinsics, lpips_alex, args, \
+                    render_kwargs_test, with_test_time_optimization=False)
+
+                write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False, num_split=j)
+                tb.flush()
 
         global_step += 1
 
@@ -2069,26 +2113,45 @@ def run_nerf():
 
     # render test set and compute statistics
     if "test" in args.task: 
-        with_test_time_optimization = False
-        if args.task == "test_opt":
-            with_test_time_optimization = True
-        images = torch.Tensor(images[i_test]).to(device)
-        if gt_depths is None:
-            depths = torch.Tensor(depths[i_test]).to(device)
-            valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
-        else:
-            depths = torch.Tensor(gt_depths[i_test]).to(device)
-            valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
-        poses = torch.Tensor(poses[i_test]).to(device)
-        intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
-        i_test = i_test - i_test[0]
-        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
-            render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
 
-        if "samples" in args.task:
-            write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization, test_samples=True)
-        else:
-            write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
+        num_splits = 4
+
+        for j in range(num_splits):
+
+            num_samples = len(i_test)//num_splits
+            print(len(i_test))
+            print(num_samples)
+
+            start_idx = int(j* num_samples)
+            end_idx = start_idx + num_samples
+
+            print(start_idx)
+            print(end_idx)
+
+            with_test_time_optimization = False
+            if args.task == "test_opt":
+                with_test_time_optimization = True
+            curr_images = torch.Tensor(images[i_test[start_idx:end_idx]]).to(device)
+            if gt_depths is None:
+                curr_depths = torch.Tensor(depths[i_test[start_idx:end_idx]]).to(device)
+                curr_valid_depths = torch.Tensor(valid_depths[i_test[start_idx:end_idx]]).bool().to(device)
+            else:
+                curr_depths = torch.Tensor(gt_depths[i_test[start_idx:end_idx]]).to(device)
+                curr_valid_depths = torch.Tensor(gt_valid_depths[i_test[start_idx:end_idx]]).bool().to(device)
+            curr_poses = torch.Tensor(poses[i_test[start_idx:end_idx]]).to(device)
+            curr_intrinsics = torch.Tensor(intrinsics[i_test[start_idx:end_idx]]).to(device)
+
+            curr_i_test = i_test[start_idx:end_idx] - i_test[start_idx]
+
+            mean_metrics_test, images_test = render_images_with_metrics(None, curr_i_test, curr_images, curr_depths, curr_valid_depths, curr_poses, H, W, curr_intrinsics, lpips_alex, args, \
+                render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
+
+            if "samples" in args.task:
+                write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization, test_samples=True, num_split=j)
+            else:
+                write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization, num_split=j)
+
+
     elif args.task == "video":
         vposes = torch.Tensor(poses[i_video]).to(device)
         vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)

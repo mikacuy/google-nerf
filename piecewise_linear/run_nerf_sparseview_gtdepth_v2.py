@@ -1,6 +1,6 @@
 '''
-March 24, 2023
-Sparse View with constant color by taking the midpoint
+May 13 -- updating and cleaning up script
+Sparse view nerf with space carving using GT depth
 '''
 import os
 import shutil
@@ -626,6 +626,7 @@ def create_nerf(args, scene_render_params):
         'use_viewdirs' : args.use_viewdirs,
         'raw_noise_std' : args.raw_noise_std,
         'white_bkgd' : args.white_bkgd,
+        'color_mode': args.color_mode,
         'mode' : args.mode
     }
     render_kwargs_train.update(scene_render_params)
@@ -778,7 +779,7 @@ def raw2depth(raw, z_vals, near, far, rays_d, mode):
     std = (((z_vals - depth.unsqueeze(-1)).pow(2) * weights).sum(-1)).sqrt()
     return depth, std
 
-def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=False, white_bkgd=False):
+def raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std=0, pytest=False, white_bkgd=False):
     """Transforms model's predictions to semantically meaningful values.
     Args:
         raw: [num_rays, num_samples along ray, 4]. Prediction from model.
@@ -805,23 +806,15 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=Fa
     if mode == "linear":
         weights, tau, T = compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise, return_tau=True)
 
-        if DEBUG:
-            print("===============")
-            print("In raw2outputs:")
-            print("Does nan/inf exist in weights")
-            print(torch.isnan(weights).any())
-            print(torch.isinf(weights).any())
-            print("Does nan exist in per point rgb")
-            print(torch.isnan(rgb).any())        
-    
-        rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
-        rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
+        if color_mode == "midpoint":
 
-        rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
+            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb, rgb[: ,-1, :].unsqueeze(1)], 1)
+            rgb_mid = .5 * (rgb_concat[:, 1:, :] + rgb_concat[:, :-1, :])
+            rgb_map = torch.sum(weights[...,None] * rgb_mid, -2)  # [N_rays, 3]
 
-        if DEBUG:
-            print("Does nan exist in per point rgb_map")
-            print(torch.isnan(rgb_map).any())
+        elif color_mode == "left":
+            rgb_concat = torch.cat([rgb[: ,0, :].unsqueeze(1), rgb], 1)
+            rgb_map = torch.sum(weights[...,None] * rgb_concat, -2)
 
         ### Piecewise linear means take the midpoint
         z_vals = torch.cat([near, z_vals, far], -1)
@@ -829,6 +822,7 @@ def raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std=0, pytest=Fa
 
         depth_map = torch.sum(weights * z_vals_mid, -1)
 
+        
     elif mode == "constant":
         weights = compute_weights(raw, z_vals, rays_d, noise)
         
@@ -909,6 +903,7 @@ def render_rays(ray_batch,
                 network_query_fn,
                 N_samples,
                 mode,
+                color_mode,
                 precomputed_z_samples=None,
                 embedded_cam=None,
                 retraw=False,
@@ -1009,7 +1004,7 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+    rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
 
     if N_importance == 0:
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
@@ -1042,6 +1037,8 @@ def render_rays(ray_batch,
 
         # z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
+        ### Hierarchical Sampling --> Fine NeRF
+        
         if mode == "linear":
             z_samples, T_below, tau_below, bin_below = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2)
         elif mode == "constant":
@@ -1067,7 +1064,7 @@ def render_rays(ray_batch,
             print("Does nan exist in forward")
             print(torch.isnan(raw).any())
 
-        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
+        rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd)
         
         if DEBUG:
             print("Does nan/inf exist after converting to rgb outputs")
@@ -1142,7 +1139,7 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
         batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     return batch_rays, target_s, target_d, target_vd, img_i
 
-def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args, space_carving_idx=None, cached_u=None):
+def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args, space_carving_idx=None, cached_u=None, gt_valid_depths=None):
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W), indexing='ij'), -1)  # (H, W, 2)
     # img_i = np.random.choice(i_train)
     
@@ -1180,21 +1177,23 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
     else:
         curr_cached_u = None
 
-    if args.mask_corners:
-        ### Initialize a masked image
-        space_carving_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
+    # if args.mask_corners:
+    #     ### Initialize a masked image
+    #     space_carving_mask = torch.ones((target.shape[0], target.shape[1]), dtype=torch.float, device=images.device)
 
-        ### Mask out the corners
-        num_pix_to_mask = 20
-        space_carving_mask[:num_pix_to_mask, :num_pix_to_mask] = 0
-        space_carving_mask[:num_pix_to_mask, -num_pix_to_mask:] = 0
-        space_carving_mask[-num_pix_to_mask:, :num_pix_to_mask] = 0
-        space_carving_mask[-num_pix_to_mask:, -num_pix_to_mask:] = 0
+    #     ### Mask out the corners
+    #     num_pix_to_mask = 20
+    #     space_carving_mask[:num_pix_to_mask, :num_pix_to_mask] = 0
+    #     space_carving_mask[:num_pix_to_mask, -num_pix_to_mask:] = 0
+    #     space_carving_mask[-num_pix_to_mask:, :num_pix_to_mask] = 0
+    #     space_carving_mask[-num_pix_to_mask:, -num_pix_to_mask:] = 0
 
-        space_carving_mask = space_carving_mask[select_coords[:, 0], select_coords[:, 1]]
-    else:
-        space_carving_mask = None
+    #     space_carving_mask = space_carving_mask[select_coords[:, 0], select_coords[:, 1]]
+    # else:
+    #     space_carving_mask = None
 
+    space_carving_mask = gt_valid_depths[img_i].squeeze()
+    space_carving_mask = space_carving_mask[select_coords[:, 0], select_coords[:, 1]]
 
     if args.depth_loss_weight > 0.:
         depth_range = precompute_depth_sampling(target_d)
@@ -1348,7 +1347,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         gt_valid_depths_train = torch.Tensor(gt_valid_depths[i_train]).bool().to(device) # only used to evaluate error of completed depth
         depths, valid_depths = complete_and_check_depth(images, depths, valid_depths, i_train, gt_depths_train, gt_valid_depths_train, \
             scene_sample_params, args)
-        del gt_depths_train, gt_valid_depths_train
+        # del gt_depths_train, gt_valid_depths_train
+
+    #### Use GT depth for space carving --> overriding all_depth_hypothesis ###
+    gt_depths_train = gt_depths_train.unsqueeze(1)
+    gt_valid_depths_train = gt_valid_depths_train.unsqueeze(1)
 
     ##### Initialize depth scale and shift
     DEPTH_SCALES = torch.autograd.Variable(torch.ones((images.shape[0], 1), dtype=torch.float, device=images.device)*args.scale_init, requires_grad=True)
@@ -1505,7 +1508,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                     target = images[img_idx]
                     pose = poses[img_idx, :3,:4]
                     intrinsic = intrinsics[img_idx, :]
-                    prior_depth_hypothesis = all_depth_hypothesis[img_idx]
+                    prior_depth_hypothesis = gt_depths_train[img_idx]
 
                     ### Rescale with current scale shift values
                     curr_scale = DEPTH_SCALES[img_idx]
@@ -1539,7 +1542,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         ## Scale and shift
         batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
-            intrinsics, all_depth_hypothesis, args, SPACE_CARVING_INDICES, CACHED_U)
+            intrinsics, gt_depths_train, args, SPACE_CARVING_INDICES, CACHED_U, gt_valid_depths_train)
 
         target_h = target_h*curr_scale + curr_shift        
 
@@ -1552,8 +1555,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         ## Feed cached quantiles into the renderer
         render_kwargs_train["cached_u"] = curr_cached_u
 
-        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint,\
-        quad_solution_v2=args.quad_solution_v2, scale_sample_gradient = args.scale_sample_gradient, **render_kwargs_train)
+        rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint, \
+            quad_solution_v2=args.quad_solution_v2, scale_sample_gradient = args.scale_sample_gradient, **render_kwargs_train)
 
         # compute loss and optimize
         optimizer.zero_grad()
@@ -1792,6 +1795,8 @@ def config_parser():
 
     parser.add_argument("--mode", type=str, default="constant", 
                         help='rendering aggregation mode -- whether to use piecewise constant (vanilla) or piecewise linear (reformulation)."')
+    parser.add_argument("--color_mode", type=str, default="midpoint", 
+                        help='rendering color aggregation mode -- whether to use left bin or midpoint."')
 
     ##################
     ### For SCADE ###
@@ -1928,16 +1933,18 @@ def run_nerf():
     i_train, i_val, i_test, i_video = i_split
 
     # Compute boundaries of 3D space
-    max_xyz = torch.full((3,), -1e6, device=device)
-    min_xyz = torch.full((3,), 1e6, device=device)
-    for idx_train in i_train:
-        rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics[idx_train]).to(device), torch.Tensor(poses[idx_train]).to(device)) # (H, W, 3), (H, W, 3)
-        points_3D = rays_o + rays_d * far # [H, W, 3]
-        max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
-        min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)
-    args.bb_center = (max_xyz + min_xyz) / 2.
-    args.bb_scale = 2. / (max_xyz - min_xyz).max()
-    print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
+    # max_xyz = torch.full((3,), -1e6, device=device)
+    # min_xyz = torch.full((3,), 1e6, device=device)
+    # for idx_train in i_train:
+    #     rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics[idx_train]).to(device), torch.Tensor(poses[idx_train]).to(device)) # (H, W, 3), (H, W, 3)
+    #     points_3D = rays_o + rays_d * far # [H, W, 3]
+    #     max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
+    #     min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)
+    # args.bb_center = (max_xyz + min_xyz) / 2.
+    # args.bb_scale = 2. / (max_xyz - min_xyz).max()
+    args.bb_center = 0.0
+    args.bb_scale = 1.0
+    # print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
 
     # Precompute scene sampling parameters
     if args.depth_loss_weight > 0.:

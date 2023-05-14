@@ -1221,57 +1221,58 @@ def train():
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
 
 
-        ###### Eval fixed dist ######
-        all_test_dist = [0.25, 0.5, 0.75, 1.0]
-        near_planes = [1e-4, 0.5, 0.5, 0.5]
+        if not args.dataset == "llff":
+            ###### Eval fixed dist ######
+            all_test_dist = [0.25, 0.5, 0.75, 1.0]
+            near_planes = [1e-4, 0.5, 0.5, 0.5]
 
-        for i in range(len(all_test_dist)):
-            test_dist = all_test_dist[i]
-            curr_near = near_planes[i]
-            print("Eval " + str(test_dist))
+            for i in range(len(all_test_dist)):
+                test_dist = all_test_dist[i]
+                curr_near = near_planes[i]
+                print("Eval " + str(test_dist))
 
-            bds_dict = {
-                'near' : curr_near,
-                'far' : far,
-            }
-            render_kwargs_test.update(bds_dict)
+                bds_dict = {
+                    'near' : curr_near,
+                    'far' : far,
+                }
+                render_kwargs_test.update(bds_dict)
 
-            ### After training, eval with fixed dist data
-            torch.cuda.empty_cache()
-            scene_data_dir = os.path.join(args.eval_data_dir, args.eval_scene_id)
+                ### After training, eval with fixed dist data
+                torch.cuda.empty_cache()
+                scene_data_dir = os.path.join(args.eval_data_dir, args.eval_scene_id)
 
-            images, poses, render_poses, hwf, i_split = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=test_dist)
+                images, poses, render_poses, hwf, i_split = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=test_dist)
 
-            if args.white_bkgd:
-                images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
-            else:
-                images = images[...,:3]
-
-
-            print('Loaded blender fixed dist', images.shape, hwf, scene_data_dir)
-            i_train, i_val, i_test = i_split
+                if args.white_bkgd:
+                    images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+                else:
+                    images = images[...,:3]
 
 
-            # Cast intrinsics to right types
-            H, W, focal = hwf
-            H, W = int(H), int(W)
-            hwf = [H, W, focal]
+                print('Loaded blender fixed dist', images.shape, hwf, scene_data_dir)
+                i_train, i_val, i_test = i_split
 
-            K = np.array([
-                [focal, 0, 0.5*W],
-                [0, focal, 0.5*H],
-                [0, 0, 1]
-            ])
 
-            with_test_time_optimization = False
+                # Cast intrinsics to right types
+                H, W, focal = hwf
+                H, W = int(H), int(W)
+                hwf = [H, W, focal]
 
-            images = torch.Tensor(images[i_test]).to(device)
-            poses = torch.Tensor(poses[i_test]).to(device)
-            i_test = i_test - i_test[0]
+                K = np.array([
+                    [focal, 0, 0.5*W],
+                    [0, focal, 0.5*H],
+                    [0, 0, 1]
+                ])
 
-            mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
-            render_kwargs_test, with_test_time_optimization=False)
-            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)
+                with_test_time_optimization = False
+
+                images = torch.Tensor(images[i_test]).to(device)
+                poses = torch.Tensor(poses[i_test]).to(device)
+                i_test = i_test - i_test[0]
+
+                mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
+                render_kwargs_test, with_test_time_optimization=False)
+                write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)
 
     elif args.task == "test":
 

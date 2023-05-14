@@ -1859,7 +1859,7 @@ def config_parser():
     ##################
 
     parser.add_argument('--scale_sample_gradient', default= False, type=bool)
-    parser.add_argument('--quad_solution_v2', default= False, type=bool)
+    parser.add_argument('--quad_solution_v2', default= True, type=bool)
 
 
     return parser
