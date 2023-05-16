@@ -7,3 +7,9 @@
 *.dae
 data/*
 logs/*
+runs/*
+logs_dtu
+logs_dtu_constant
+logs_dtu_scene_id21
+logs_dtu2_scene_id21
+logs_dtu_scene_id21_num_train40

@@ -11,6 +11,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 from tqdm import tqdm, trange
 
 from torch.utils.tensorboard import SummaryWriter
@@ -25,6 +26,7 @@ import shutil
 from run_nerf_helpers import *
 
 from load_llff import load_llff_data
+from load_dtu import load_dtu, load_dtu2
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, load_scene_blender_fixed_dist_new, load_scene_blender2
 from load_LINEMOD import load_LINEMOD_data
@@ -37,6 +39,29 @@ np.random.seed(0)
 torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 DEBUG = False
+
+def build_json_for_dtu(splits, intrinsics, poses, near, far):
+    out_dict = {}
+    out_dict = {"near": near,
+                "far": far}
+    i_train, i_test = splits
+    train_dicts = []
+    test_dicts = []
+    for i in i_train:
+        train_dict = {}
+        train_dict["extrinsic"] = poses[i].tolist()
+        train_dict["intrinsic"] = intrinsics[i].tolist()
+        train_dict["pose_id"] = int(i) 
+        train_dicts.append(train_dict)
+    for i in i_test:
+        test_dict = {}
+        test_dict["extrinsic"] = poses[i].tolist()
+        test_dict["intrinsic"] = intrinsics[i].tolist()
+        test_dict["pose_id"] = int(i) 
+        test_dicts.append(test_dict)
+    out_dict["train_frames"] = train_dicts
+    out_dict["test_frames"] = test_dicts
+    return out_dict
 
 
 def batchify(fn, chunk):
@@ -240,6 +265,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 mean_depth_metrics.add(depth_metrics)
             
             # compute color metrics
+            target = torch.tensor(target).to(rgb.device)
             img_loss = img2mse(rgb, target)
             psnr = mse2psnr(img_loss)
             print("PSNR: {}".format(psnr))
@@ -758,9 +784,9 @@ def config_parser():
                         help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
 
     ## blender flags
-    # parser.add_argument("--white_bkgd", action='store_true', 
-    #                     help='set to render synthetic data on a white bkgd (always use for dvoxels)')
-    parser.add_argument('--white_bkgd', default= False, type=bool)
+    parser.add_argument("--white_bkgd", action='store_true', 
+                        help='set to render synthetic data on a white bkgd (always use for dvoxels)')
+    # parser.add_argument('--white_bkgd', default= False, type=bool)
     parser.add_argument("--half_res", action='store_true', 
                         help='load blender synthetic data at 400x400 instead of 800x800')
 
@@ -820,6 +846,14 @@ def config_parser():
                         help='scene identifier for eval')
     parser.add_argument("--eval_data_dir", type=str, default="../nerf_synthetic/fixed_dist_new-rgba/",
                         help='directory containing the scenes for eval')
+    
+    ### DTU flags 
+    parser.add_argument("--dtu_scene_id", type=int, default=21, 
+                        help='scan id for DTU dataset to render')
+    parser.add_argument("--num_train", type=int, default=40, 
+                        help='number of training views to use (1 - 49)')
+    parser.add_argument("--dtu_split", type=str, default=None, 
+                        help='number of training views to use (1 - 49)')
 
     ##################
 
@@ -830,7 +864,8 @@ def train():
 
     parser = config_parser()
     args = parser.parse_args()
-
+    print(args.white_bkgd)
+    
     if args.task == "train":
         if args.expname is None:
             args.expname = "{}_{}".format(datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S'), args.scene_id)
@@ -974,7 +1009,51 @@ def train():
             images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
         else:
             images = images[...,:3]
-
+    elif args.dataset == 'DTU':
+        
+        # use the existing split
+        if args.dtu_split is not None:
+            with open(args.dtu_split, 'r') as ff:
+                train_split = json.load(ff)
+        else:
+            train_split = None
+        images, Ks, poses, render_poses, hwf, i_split, near, far, splits = load_dtu(args.data_dir, args.dtu_scene_id, num_train=args.num_train, half_res=args.half_res, train_split=train_split)
+        K = Ks[0]
+        print(f'Loaded DTU, images shape: {images.shape}, hwf: {hwf}, K: {K}')
+        print(f'[CHECK HERE] near: {near}, far: {far}.')
+        i_train, i_test = i_split
+        i_val = i_test
+        save_json = build_json_for_dtu(splits, Ks, poses, near, far)
+        save_split_file = os.path.join(args.ckpt_dir, args.expname, 'split.json')
+        with open(save_split_file, 'w') as f:
+            json.dump(save_json, f, indent=4)
+        
+        if args.white_bkgd:
+            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+        else:
+            images = images[...,:3]
+    elif args.dataset == 'DTU2':
+        
+        # use the existing split
+        if args.dtu_split is not None:
+            with open(args.dtu_split, 'r') as ff:
+                train_split = json.load(ff)
+        else:
+            train_split = None
+        images, K, poses, render_poses, hwf, i_split, near, far, splits = load_dtu2(args.data_dir, args.dtu_scene_id, num_train=args.num_train, half_res=args.half_res, train_split=train_split)
+        print(f'Loaded DTU, images shape: {images.shape}, hwf: {hwf}, K: {K}')
+        print(f'[CHECK HERE] near: {near}, far: {far}.')
+        i_train, i_test = i_split
+        i_val = i_test
+        save_json = build_json_for_dtu(splits, [K]*poses.shape[0], poses, near, far)
+        save_split_file = os.path.join(args.ckpt_dir, args.expname, 'split.json')
+        with open(save_split_file, 'w') as f:
+            json.dump(save_json, f, indent=4)
+        
+        if args.white_bkgd:
+            images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+        else:
+            images = images[...,:3]
     elif args.dataset == 'deepvoxels':
 
         images, poses, render_poses, hwf, i_split = load_dv_data(scene=args.shape,
@@ -1199,6 +1278,43 @@ def train():
                     'optimizer_state_dict': optimizer.state_dict(),
                 }, path)
                 print('Saved checkpoints at', path)
+
+            
+            if i%args.i_img==0:
+                # visualize 2 train images
+                _, images_train = render_images_with_metrics(2, i_train, images, None, None, \
+                    poses, H, W, K, lpips_alex, args, render_kwargs_test, embedcam_fn=None)
+                tb.add_image('train_image',  torch.cat((
+                    torchvision.utils.make_grid(images_train["rgbs"], nrow=1), \
+                    torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
+                    torchvision.utils.make_grid(images_train["depths"], nrow=1), \
+                    torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
+                # compute validation metrics and visualize 8 validation images
+                mean_metrics_val, images_val = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, render_kwargs_test, with_test_time_optimization=False)
+                tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
+                tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
+                tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
+                tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
+                if mean_metrics_val.has("depth_rmse"):
+                    tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
+                if 'rgbs0' in images_val:
+                    tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
+                    tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
+                if 'rgbs0' in images_val:
+                    tb.add_image('val_image',  torch.cat((
+                        torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+                else:
+                    tb.add_image('val_image',  torch.cat((
+                        torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+                        torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+
 
             # if i%args.i_video==0 and i > 0:
             #     # Turn on testing mode
