@@ -455,7 +455,7 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
             elif s == "val":
                 skip = 1
             elif s =="test":
-                skip = 20
+                skip = 4
             elif "video" in s:
                 skip = 1
             
@@ -648,6 +648,9 @@ def load_scene_blender2_depth(basedir, train_json = "transforms_train.json", hal
     counts = [0]
     filenames = []
     for s in splits:
+
+        # print(basedir)
+        # print(os.path.join(basedir, '{}_transforms.json'.format(s)))
         if os.path.exists(os.path.join(basedir, '{}_transforms.json'.format(s))):
 
             json_fname =  os.path.join(basedir, '{}_transforms.json'.format(s))

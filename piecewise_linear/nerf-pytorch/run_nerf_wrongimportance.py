@@ -1,3 +1,7 @@
+'''
+Use a different learning rate for the coarse network
+Use constant aggregation for the first few iterations
+'''
 import os, sys
 import numpy as np
 import imageio
@@ -290,7 +294,6 @@ def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_op
         mean_metrics.print(f)
     mean_metrics.print()
 
-
 def write_images_with_metrics_testdist(images, mean_metrics, far, args, test_dist, with_test_time_optimization=False, test_samples=False):
     
     if not test_samples:
@@ -334,14 +337,14 @@ def create_nerf(args):
     model = NeRF(D=args.netdepth, W=args.netwidth,
                  input_ch=input_ch, output_ch=output_ch, skips=skips,
                  input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-    grad_vars = list(model.parameters())
+    coarse_grad_vars = list(model.parameters())
 
     model_fine = None
     if args.N_importance > 0:
         model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
                           input_ch_views=input_ch_views, use_viewdirs=args.use_viewdirs).to(device)
-        grad_vars += list(model_fine.parameters())
+        grad_vars = list(model_fine.parameters())
 
     network_query_fn = lambda inputs, viewdirs, network_fn : run_network(inputs, viewdirs, network_fn,
                                                                 embed_fn=embed_fn,
@@ -350,6 +353,7 @@ def create_nerf(args):
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+    optimizer_coarse = torch.optim.Adam(params=coarse_grad_vars, lr=args.coarse_lrate, betas=(0.9, 0.999))
 
     start = 0
 
@@ -406,7 +410,7 @@ def create_nerf(args):
 
     render_kwargs_test['raw_noise_std'] = 0.
 
-    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer
+    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse
 
 def compute_weights(raw, z_vals, rays_d, noise=0.):
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
@@ -549,7 +553,8 @@ def render_rays(ray_batch,
                 quad_solution_v2=False,
                 zero_tol = 1e-4,
                 epsilon = 1e-3,
-                farcolorfix = False):
+                farcolorfix = False,
+                constant_init = False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -612,6 +617,14 @@ def render_rays(ray_batch,
 
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
+    ### If constant init then overwrite mode for coarse model to constant first
+    if constant_init:
+        # coarse_mode = "constant"
+        mode = "constant"
+    # else:
+    #     coarse_mode = mode
+
+    # print(mode)
 
 #     raw = run_network(pts)
     raw = network_query_fn(pts, viewdirs, network_fn)
@@ -623,8 +636,13 @@ def render_rays(ray_batch,
 
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
 
+        # print(z_vals_mid.shape)
+        # print(weights.shape)
+        # print(weights.shape)
+        # exit()
+
         if mode == "linear":
-            z_samples, _, _, _ = sample_pdf_reformulation(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, quad_solution_v2=quad_solution_v2, zero_threshold = zero_tol, epsilon_=epsilon)
+            z_samples = sample_pdf(z_vals_mid, weights[...,2:-1], N_importance, det=(perturb==0.), pytest=pytest) ## remove the first bin which is the near plane to the first sample
         elif mode == "constant":
             z_samples = sample_pdf(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest)
 
@@ -695,6 +713,8 @@ def config_parser():
                         help='batch size (number of random rays per gradient step)')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
+    parser.add_argument("--coarse_lrate", type=float, default=1e-4, 
+                        help='learning rate')    
     parser.add_argument("--lrate_decay", type=int, default=250, 
                         help='exponential learning rate decay (in 1000 steps)')
     parser.add_argument("--chunk", type=int, default=1024*32, 
@@ -772,9 +792,9 @@ def config_parser():
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000, 
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--i_testset", type=int, default=600000, 
+    parser.add_argument("--i_testset", type=int, default=500000, 
                         help='frequency of testset saving')
-    parser.add_argument("--i_video",   type=int, default=600000, 
+    parser.add_argument("--i_video",   type=int, default=500000, 
                         help='frequency of render_poses video saving')
 
     ### For PWL ###
@@ -794,8 +814,11 @@ def config_parser():
     parser.add_argument('--set_near_plane', default= 2., type=float)
     parser.add_argument('--farcolorfix', default= False, type=bool)
 
+    parser.add_argument("--constant_init",   type=int, default=1000, 
+                        help='number of iterations to use constant aggregation')    
+
     parser.add_argument("--coarse_weight", type=float, default=1.0, 
-                        help='zero tol to revert to piecewise constant assumption')    
+                        help='zero tol to revert to piecewise constant assumption') 
 
     parser.add_argument('--test_dist', default= 1.0, type=float)
 
@@ -803,6 +826,7 @@ def config_parser():
                         help='scene identifier for eval')
     parser.add_argument("--eval_data_dir", type=str, default="../nerf_synthetic/fixed_dist_new-rgba/",
                         help='directory containing the scenes for eval')
+
     ##################
 
     return parser
@@ -821,12 +845,6 @@ def train():
         with open(args_file, 'w') as af:
             json.dump(vars(args), af, indent=4)
 
-        # Create log dir and copy the config file
-        if args.config is not None:
-            f = os.path.join(args.ckpt_dir, args.expname, 'config.txt')
-            with open(f, 'w') as file:
-                file.write(open(args.config, 'r').read())
-
     else:
         if args.expname is None:
             print("Error: Specify experiment name for test or video")
@@ -840,9 +858,9 @@ def train():
         tmp_set_near_plane = args.set_near_plane
 
         tmp_white_bkgd = args.white_bkgd
-        # tmp_white_bkgd = False
         tmp_eval_scene_id = args.eval_scene_id
         tmp_eval_data_dir = args.eval_data_dir
+        # tmp_white_bkgd = False
         tmp_test_skip = args.testskip
 
         # tmp_mode = args.mode
@@ -870,7 +888,6 @@ def train():
         args.eval_scene_id = tmp_eval_scene_id 
         args.eval_data_dir = tmp_eval_data_dir
         args.testskip = tmp_test_skip
-
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
     args.n_gpus = torch.cuda.device_count()
@@ -937,6 +954,7 @@ def train():
         else:
             images = images[...,:3]  
 
+
     elif args.dataset == "blender_fixeddist":
         images, poses, render_poses, hwf, i_split = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=args.test_dist)
 
@@ -995,9 +1013,14 @@ def train():
     if args.render_test:
         render_poses = np.array(poses[i_test])
 
+    # Create log dir and copy the config file
+    if args.config is not None:
+        f = os.path.join(args.ckpt_dir, args.expname, 'config.txt')
+        with open(f, 'w') as file:
+            file.write(open(args.config, 'r').read())
 
     # Create nerf model
-    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer = create_nerf(args)
+    render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse = create_nerf(args)
     global_step = start
 
     bds_dict = {
@@ -1035,8 +1058,10 @@ def train():
             return
 
     if args.task == "train":
-
         print("Begin training.")
+        np.random.seed(0)
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
 
         tb = SummaryWriter(log_dir=os.path.join("runs", args.ckpt_dir, args.expname))
 
@@ -1127,10 +1152,12 @@ def train():
 
             #####  Core optimization loop  #####
             rgb, disp, acc, extras = render(H, W, K, chunk=args.chunk, rays=batch_rays,
-                                                    verbose=i < 10, retraw=True,
+                                                    verbose=i < 10, retraw=True, constant_init = i < args.constant_init,
                                                     **render_kwargs_train)
 
             optimizer.zero_grad()
+            optimizer_coarse.zero_grad()
+
             img_loss = img2mse(rgb, target_s)
             trans = extras['raw'][...,-1]
             loss = img_loss
@@ -1138,16 +1165,17 @@ def train():
 
             if 'rgb0' in extras:
                 img_loss0 = img2mse(extras['rgb0'], target_s)
-
-
-                if global_step < args.precrop_iters + 500:
-                    loss = loss + args.coarse_weight * img_loss0
-                else:
-                    loss = loss + img_loss0
+                # if global_step < args.constant_init + 500:
+                #     loss = loss + args.coarse_weight * img_loss0
+                # else:
+                #     loss = loss + img_loss0
+                loss = loss + img_loss0
                 psnr0 = mse2psnr(img_loss0)
 
             loss.backward()
+
             optimizer.step()
+            optimizer_coarse.step()
 
             # NOTE: IMPORTANT!
             ###   update learning rate   ###
@@ -1156,7 +1184,12 @@ def train():
             new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
             for param_group in optimizer.param_groups:
                 param_group['lr'] = new_lrate
-            ################################
+
+            new_lrate_coarse = args.coarse_lrate * (decay_rate ** (global_step / decay_steps))
+            for param_group in optimizer_coarse.param_groups:
+                param_group['lr'] = new_lrate
+            ################################                
+
 
             dt = time.time()-time0
             # print(f"Step: {global_step}, Loss: {loss}, Time: {dt}")
@@ -1215,65 +1248,63 @@ def train():
             poses = torch.Tensor(poses[i_test]).to(device)
             i_test = i_test - i_test[0]  
 
-
         mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=False)
 
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
 
 
-        if not args.dataset == "llff":
-            ###### Eval fixed dist ######
-            all_test_dist = [0.25, 0.5, 0.75, 1.0]
-            near_planes = [1e-4, 0.5, 0.5, 0.5]
+        ###### Eval fixed dist ######
+        all_test_dist = [0.25, 0.5, 0.75, 1.0]
+        near_planes = [1e-4, 0.5, 0.5, 0.5]
 
-            for i in range(len(all_test_dist)):
-                test_dist = all_test_dist[i]
-                curr_near = near_planes[i]
-                print("Eval " + str(test_dist))
+        for i in range(len(all_test_dist)):
+            test_dist = all_test_dist[i]
+            curr_near = near_planes[i]
+            print("Eval " + str(test_dist))
 
-                bds_dict = {
-                    'near' : curr_near,
-                    'far' : far,
-                }
-                render_kwargs_test.update(bds_dict)
+            bds_dict = {
+                'near' : curr_near,
+                'far' : far,
+            }
+            render_kwargs_test.update(bds_dict)
 
-                ### After training, eval with fixed dist data
-                torch.cuda.empty_cache()
-                scene_data_dir = os.path.join(args.eval_data_dir, args.eval_scene_id)
+            ### After training, eval with fixed dist data
+            torch.cuda.empty_cache()
+            scene_data_dir = os.path.join(args.eval_data_dir, args.eval_scene_id)
 
-                images, poses, render_poses, hwf, i_split = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=test_dist)
+            images, poses, render_poses, hwf, i_split = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=test_dist)
 
-                if args.white_bkgd:
-                    images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
-                else:
-                    images = images[...,:3]
-
-
-                print('Loaded blender fixed dist', images.shape, hwf, scene_data_dir)
-                i_train, i_val, i_test = i_split
+            if args.white_bkgd:
+                images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
+            else:
+                images = images[...,:3]
 
 
-                # Cast intrinsics to right types
-                H, W, focal = hwf
-                H, W = int(H), int(W)
-                hwf = [H, W, focal]
+            print('Loaded blender fixed dist', images.shape, hwf, scene_data_dir)
+            i_train, i_val, i_test = i_split
 
-                K = np.array([
-                    [focal, 0, 0.5*W],
-                    [0, focal, 0.5*H],
-                    [0, 0, 1]
-                ])
+            # Cast intrinsics to right types
+            H, W, focal = hwf
+            H, W = int(H), int(W)
+            hwf = [H, W, focal]
 
-                with_test_time_optimization = False
+            K = np.array([
+                [focal, 0, 0.5*W],
+                [0, focal, 0.5*H],
+                [0, 0, 1]
+            ])
 
-                images = torch.Tensor(images[i_test]).to(device)
-                poses = torch.Tensor(poses[i_test]).to(device)
-                i_test = i_test - i_test[0]
+            with_test_time_optimization = False
 
-                mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
-                render_kwargs_test, with_test_time_optimization=False)
-                write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)
+            images = torch.Tensor(images[i_test]).to(device)
+            poses = torch.Tensor(poses[i_test]).to(device)
+            i_test = i_test - i_test[0]
+
+            mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
+            render_kwargs_test, with_test_time_optimization=False)
+            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)
+
 
     elif args.task == "test":
 
@@ -1294,9 +1325,10 @@ def train():
             write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, args.test_dist, with_test_time_optimization=False)
 
         else:
-            write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)
+            write_images_with_metrics(images_test, mean_metrics_test, far, args,  with_test_time_optimization=False)
 
     elif args.task == "test_fixed_dist":
+
         # ### Also eval the full test set
         # images = torch.Tensor(images[i_test]).to(device)
         # poses = torch.Tensor(poses[i_test]).to(device)
@@ -1305,9 +1337,7 @@ def train():
         # mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
         #     render_kwargs_test, with_test_time_optimization=False)
 
-        # write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)        
-
-
+        # write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=False)   
 
         ###### Eval fixed dist ######
         all_test_dist = [0.25, 0.5, 0.75, 1.0]
@@ -1360,7 +1390,7 @@ def train():
 
             mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=False)
-            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)      
+            write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)        
 
 
 if __name__=='__main__':

@@ -454,10 +454,10 @@ def render_pmf(count, indices, images, poses, H, W, intrinsics, lpips_alex, args
     target_rgbs_res = torch.empty(count, 3, H, W)
 
 
-    # ### Selected mic image
-    # n, img_idx = 0, 14
-    # ### Selected pixel index
-    # selected_coor = np.array([205, 205])
+    ### Selected mic image
+    n, img_idx = 0, 14
+    ### Selected pixel index
+    selected_coor = np.array([205, 205])
     
     # ### Selected chair image
     # n, img_idx = 0, 5
@@ -465,11 +465,11 @@ def render_pmf(count, indices, images, poses, H, W, intrinsics, lpips_alex, args
     # selected_coor = np.array([196, 196])
     # selected_xlim = np.array([2.8, 2.9])
 
-    ### Selected chair image
-    n, img_idx = 0, 7
-    ### Selected pixel index
-    selected_coor = np.array([265, 480]) ### when selecting with preview, flip it (x,y is reverse)
-    selected_xlim = np.array([3.25, 3.4])
+    # ### Selected chair image
+    # n, img_idx = 0, 7
+    # ### Selected pixel index
+    # selected_coor = np.array([265, 480]) ### when selecting with preview, flip it (x,y is reverse)
+    # selected_xlim = np.array([3.25, 3.4])
 
     print("Render image {}/{}".format(n, count))
     target = images[img_idx]

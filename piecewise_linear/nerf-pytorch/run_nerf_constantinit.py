@@ -273,7 +273,8 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
 def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False, test_samples=False):
     
     if not test_samples:
-        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        # result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+        result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_multidist" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     else:
         result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_samples" + str(args.mode)+ "_" + str(args.N_samples) + "_" + str(args.N_importance) + ("with_optimization_" if with_test_time_optimization else "") + str(args.N_samples) + "_" + str(args.N_importance) + args.scene_id)
 
