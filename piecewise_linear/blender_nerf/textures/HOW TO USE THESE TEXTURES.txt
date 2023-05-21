@@ -1,0 +1,8 @@
+It's simple really - have a folder anywhere you like, called anything you like, with the Ship_04.blend file in it.
+In that folder, create a folder called "textures" and put all the images in there.
+
+So for example, the folders should look something like this:
+C:\Blends\suzannes_revenge\Ship_04.blend
+C:\Blends\suzannes_revenge\textures\rope_col.png
+
+The textures will be read properly and thus everything will render just great. If you have any trouble, please comment on the blendswap page where you got the blend file and I'll try help you out.

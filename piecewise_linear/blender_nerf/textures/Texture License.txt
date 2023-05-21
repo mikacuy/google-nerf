@@ -1,0 +1,11 @@
+openfootagenethdr_ocean_pisa_small.hdr.hdr - From openfootage.net, licensed under a Creative Commons Attribution 2.0 Austria License (http://creativecommons.org/licenses/by/2.0/at/)
+
+hull_AO.png; dirtmap_RGB.png; rope_bump.png; rope_col.png - Created by Greg Zaal, licensed under Creative Commons Attribution 3.0 License (http://creativecommons.org/licenses/by/3.0/)
+
+Good Textures_005843.jpg; Good Textures_005296.jpg - From goodtextures.com
+
+church_wood.png; gss-paintstrokes_var.png; tile-metal-rotten-col.png; wood-saturated-oak-texture_seamless.jpg; wood-texture.jpg - From the Mango Open Movie Project, by the Blender Foundation, licensed under Creative Commons Attribution 3.0 License (http://creativecommons.org/licenses/by/3.0/)
+
+The remaining textures - From cgtextures.com, "One or more textures on this 3D model have been created with images from CGTextures.com. These images may not be redistributed by default, please visit www.cgtextures.com for more information."
+
+These textures were not included in the Blend download as the Blend file is licensed under Creative Commons, which does not comply with many of the texture licenses. Hence the textures are downloaded separately and have different licenses, but can be considered a part of the "Suzanne's Revenge" Blend File available on blendswap.com created by Greg Zaal and Chris Kuhn.
