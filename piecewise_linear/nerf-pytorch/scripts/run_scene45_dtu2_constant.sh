@@ -9,8 +9,8 @@
 
 # only use the following on partition with GPUs
 #SBATCH --gres=gpu:a5000:1
-#SBATCH --job-name=const_45
-#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-const_45-%j.out
+#SBATCH --job-name=c_45
+#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-c_45-%j.out
 
 # only use the following if yo####SBATCH --mail-user=youremailaddress
 ####SBATCH --mail-type=ALLu want email notification
@@ -30,11 +30,7 @@ echo NPROCS=$NPROCS
 # can try the following to list out which GPU you have access to
 #srun /usr/local/cuda/samples/1_Utilities/deviceQuery/deviceQuery
 source ~/.bashrc
-export PATH=/usr/local/cuda-11.3/bin${PATH:+:${PATH}}$
-export LD_LIBRARY_PATH=/usr/local/cuda-11.3/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
-export CUDA_HOME=/usr/local/cuda-11.3
 cd /orion/u/w4756677/nerf/google-nerf/piecewise_linear/nerf-pytorch
-source /orion/u/w4756677/miniconda3/bin/activate
 conda activate nerf
-python run_nerf_constantinit.py --task train --config configs/dtu2_constant.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 45 --expname scan45_constant --i_img 10000
+python run_nerf_constantinit.py --task train --config configs/dtu2_constant.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 45 --expname repick_scan45_constant --i_img 10000
 echo "Done"

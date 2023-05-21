@@ -2,15 +2,15 @@
 #SBATCH --partition=orion --qos=normal
 # #SBATCH --time=96:00:00  --> this is a comment, you can choose to not specify a nodelist, it will randomly assign to a GPU
 #SBATCH --nodes=1
-#SBATCH --nodelist=oriong7
+#SBATCH --nodelist=oriong11
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=12G
 #SBATCH --account=orion
 
 # only use the following on partition with GPUs
-#SBATCH --gres=gpu:titanxp:1
-#SBATCH --job-name=const_34
-#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-const_34-%j.out
+#SBATCH --gres=gpu:a5000:1
+#SBATCH --job-name=c_34
+#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-c_34-%j.out
 
 # only use the following if yo####SBATCH --mail-user=youremailaddress
 ####SBATCH --mail-type=ALLu want email notification
@@ -30,11 +30,7 @@ echo NPROCS=$NPROCS
 # can try the following to list out which GPU you have access to
 #srun /usr/local/cuda/samples/1_Utilities/deviceQuery/deviceQuery
 source ~/.bashrc
-export PATH=/usr/local/cuda-11.3/bin${PATH:+:${PATH}}$
-export LD_LIBRARY_PATH=/usr/local/cuda-11.3/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
-export CUDA_HOME=/usr/local/cuda-11.3
 cd /orion/u/w4756677/nerf/google-nerf/piecewise_linear/nerf-pytorch
-source /orion/u/w4756677/miniconda3/bin/activate
 conda activate nerf
-python run_nerf_constantinit.py --task train --config configs/dtu2_constant.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 34 --expname scan34_constant --i_img 10000
+python run_nerf_constantinit.py --task train --config configs/dtu2_constant.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 34 --expname repick_scan34_constant --i_img 10000
 echo "Done"

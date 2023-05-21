@@ -70,8 +70,10 @@ def read_poses(root_dir, vid, scale_factor=1./200., downSample=1.0):
 
 def load_dtu(root_dir, scene_id, num_train=42, scale_factor = 1. / 200., half_res=True, train_split = None):
     if train_split is None:
-        i_perm = np.random.RandomState(seed=0).permutation(N_VIEWS) # fix a seed so that we get that same split every time 
-        i_train, i_test = i_perm[:num_train], i_perm[num_train:]
+        # i_perm = np.random.RandomState(seed=0).permutation(N_VIEWS) # fix a seed so that we get that same split every time 
+        # i_train, i_test = i_perm[:num_train], i_perm[num_train:]
+        i_test = list(range(N_VIEWS))[::8]
+        i_train = [i for i in range(N_VIEWS) if i not in i_test]
     else:
         assert len(train_split) == num_train 
         i_train = train_split
@@ -189,8 +191,11 @@ def load_dtu2(root_dir, scene_id, num_train=42, half_res=True, train_split = Non
     all_poses = torch.stack(all_poses)
     
     if train_split is None:
-        i_perm = np.random.RandomState(seed=0).permutation(N_VIEWS) # fix a seed so that we get that same split every time 
-        i_train, i_test = i_perm[:num_train], i_perm[num_train:]
+        # i_perm = np.random.RandomState(seed=0).permutation(N_VIEWS) # fix a seed so that we get that same split every time 
+        # i_train, i_test = i_perm[:num_train], i_perm[num_train:]
+        i_test = list(range(N_VIEWS))[::8]
+        i_train = [i for i in range(N_VIEWS) if i not in i_test]
+        num_train = len(i_train)
     else:
         assert len(train_split) == num_train 
         i_train = train_split

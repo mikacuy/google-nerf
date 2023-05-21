@@ -2,15 +2,15 @@
 #SBATCH --partition=orion --qos=normal
 # #SBATCH --time=96:00:00  --> this is a comment, you can choose to not specify a nodelist, it will randomly assign to a GPU
 #SBATCH --nodes=1
-#SBATCH --nodelist=oriong3
+#SBATCH --nodelist=oriong7
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=12G
 #SBATCH --account=orion
 
 # only use the following on partition with GPUs
 #SBATCH --gres=gpu:titanxp:1
-#SBATCH --job-name=linear_8
-#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-linear_8-%j.out
+#SBATCH --job-name=l_8
+#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-l_8-%j.out
 
 # only use the following if yo####SBATCH --mail-user=youremailaddress
 ####SBATCH --mail-type=ALLu want email notification
@@ -32,5 +32,5 @@ echo NPROCS=$NPROCS
 source ~/.bashrc
 cd /orion/u/w4756677/nerf/google-nerf/piecewise_linear/nerf-pytorch
 conda activate nerf
-python run_nerf_constantinit.py --task train --config configs/dtu2_linear_improved.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 8 --expname scan8_linear --i_img 10000
+python run_nerf_constantinit.py --task train --config configs/dtu2_linear_improved.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 8 --expname repick_scan8_linear --i_img 10000
 echo "Done"
