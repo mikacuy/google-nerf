@@ -9,8 +9,8 @@
 
 # only use the following on partition with GPUs
 #SBATCH --gres=gpu:a5000:1
-#SBATCH --job-name=l_41
-#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-l_41-%j.out
+#SBATCH --job-name=l_110_init
+#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-l_110_init-%j.out
 
 # only use the following if yo####SBATCH --mail-user=youremailaddress
 ####SBATCH --mail-type=ALLu want email notification
@@ -36,5 +36,5 @@ export CUDA_HOME=/usr/local/cuda-11.3
 cd /orion/u/w4756677/nerf/google-nerf/piecewise_linear/nerf-pytorch
 source /orion/u/w4756677/miniconda3/bin/activate
 conda activate nerf
-python run_nerf_constantinit.py --task train --config configs/dtu2_linear_improved.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 41 --expname repick_scan41_linear_farcolorfix --i_img 10000 --farcolorfix
+python run_nerf_refactored.py --task train --config configs/dtu2_linear_improved.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 110 --expname repick_scan110_linear_wo_constinit --i_img 10000
 echo "Done"

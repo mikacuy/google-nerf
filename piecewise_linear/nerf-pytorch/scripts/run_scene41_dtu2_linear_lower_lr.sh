@@ -2,15 +2,15 @@
 #SBATCH --partition=orion --qos=normal
 # #SBATCH --time=96:00:00  --> this is a comment, you can choose to not specify a nodelist, it will randomly assign to a GPU
 #SBATCH --nodes=1
-#SBATCH --nodelist=oriong12
+#SBATCH --nodelist=oriong11
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=12G
 #SBATCH --account=orion
 
 # only use the following on partition with GPUs
 #SBATCH --gres=gpu:a5000:1
-#SBATCH --job-name=l_41
-#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-l_41-%j.out
+#SBATCH --job-name=l_41_lr
+#SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-l_41_lr-%j.out
 
 # only use the following if yo####SBATCH --mail-user=youremailaddress
 ####SBATCH --mail-type=ALLu want email notification
@@ -36,5 +36,5 @@ export CUDA_HOME=/usr/local/cuda-11.3
 cd /orion/u/w4756677/nerf/google-nerf/piecewise_linear/nerf-pytorch
 source /orion/u/w4756677/miniconda3/bin/activate
 conda activate nerf
-python run_nerf_constantinit.py --task train --config configs/dtu2_linear_improved.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 41 --expname repick_scan41_linear_farcolorfix --i_img 10000 --farcolorfix
+python run_nerf_constantinit.py --task train --config configs/dtu2_linear_improved_lower_lr.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 41 --expname repick_scan41_linear_lower_lr --i_img 10000
 echo "Done"

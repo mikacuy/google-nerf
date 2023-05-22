@@ -2,13 +2,13 @@
 #SBATCH --partition=orion --qos=normal
 # #SBATCH --time=96:00:00  --> this is a comment, you can choose to not specify a nodelist, it will randomly assign to a GPU
 #SBATCH --nodes=1
-#SBATCH --nodelist=oriong7
+#SBATCH --nodelist=oriong12
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=12G
 #SBATCH --account=orion
 
 # only use the following on partition with GPUs
-#SBATCH --gres=gpu:titanxp:1
+#SBATCH --gres=gpu:a5000:1
 #SBATCH --job-name=l_8
 #SBATCH --output=/orion/u/w4756677/slurm_dump/slurm-l_8-%j.out
 

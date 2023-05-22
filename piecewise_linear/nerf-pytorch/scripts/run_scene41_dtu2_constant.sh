@@ -36,5 +36,5 @@ export CUDA_HOME=/usr/local/cuda-11.3
 cd /orion/u/w4756677/nerf/google-nerf/piecewise_linear/nerf-pytorch
 source /orion/u/w4756677/miniconda3/bin/activate
 conda activate nerf
-python run_nerf_constantinit.py --task train --config configs/dtu2_constant.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 41 --expname repick_scan41_constant --i_img 10000
+python run_nerf_constantinit.py --task train --config configs/dtu2_constant.txt --num_train 40  --data_dir /orion/group/rs_dtu_4/DTU  --dtu_scene_id 41 --expname repick_scan41_constant_farcolorfix --i_img 10000 --farcolorfix
 echo "Done"
