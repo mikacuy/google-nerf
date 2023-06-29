@@ -1038,254 +1038,656 @@ def run_nerf():
     args.n_gpus = torch.cuda.device_count()
     print(f"Using {args.n_gpus} GPU(s).")
 
-    # Load data
     scene_data_dir = os.path.join(args.data_dir, args.scene_id)
 
-    # images, _, _, poses1, H, W, intrinsics1, near, far, i_split1, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.5)
-    # print("Loaded 1.5")
-    # images, _, _, poses2, H, W, intrinsics2, near, far, i_split2, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.25)
-    # print("Loaded 1.25")
-    # images, _, _, poses3, H, W, intrinsics3, near, far, i_split3, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0)
-    # print("Loaded 1.0")
-    # images, _, _, poses4, H, W, intrinsics4, near, far, i_split4, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.75)
-    # print("Loaded 0.75")
-    # images, _, _, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.5)
-    # print("Loaded 0.5")
-    # images, _, _, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.25)
-    # print("Loaded 0.25")
+    ####### Load poses from blender file #######
+    json_fname =  os.path.join("video_demo_poses", "transforms_chair.json")
 
-    # images, _, _, poses1, H, W, intrinsics1, near, far, i_split1, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.5)
-    # print("Loaded 1.5")
-    # images, _, _, poses2, H, W, intrinsics2, near, far, i_split2, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.25)
-    # print("Loaded 1.25")
-    images, _, _, poses3, H, W, intrinsics3, near, far, i_split3, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0)
-    print("Loaded 1.0")
-    images, _, _, poses4, H, W, intrinsics4, near, far, i_split4, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.75)
-    print("Loaded 0.75")
-    images, _, _, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.5)
-    print("Loaded 0.5")
-    images, _, _, poses6, H, W, intrinsics6, near, far, i_split6, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.25)
-    print("Loaded 0.25")
+    with open(json_fname, 'r') as fp:
+        meta = json.load(fp)
 
+    poses = []
 
-    # i_train, i_val, i_test1, i_video = i_split1
-    # i_train, i_val, i_test2, i_video = i_split2
-    i_train, i_val, i_test3, i_video = i_split3
-    i_train, i_val, i_test4, i_video = i_split4
-    i_train, i_val, i_test5, i_video = i_split5
-    i_train, i_val, i_test6, i_video = i_split6
+    camera_angle_x = float(meta['camera_angle_x'])
+    H, W = 800, 800
 
-    # print(len(i_test1))
-    # print(len(i_test2))
-    print(len(i_test3))
-    print(len(i_test4))
-    print(len(i_test5))
+    focal = .5 * W / np.tan(.5 * camera_angle_x)                            
 
-    # # Compute boundaries of 3D space
-    # max_xyz = torch.full((3,), -1e6)
-    # min_xyz = torch.full((3,), 1e6)
-    # for idx_train in i_train:
-    #     rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics1[idx_train]), torch.Tensor(poses1[idx_train])) # (H, W, 3), (H, W, 3)
-    #     points_3D = rays_o + rays_d * far # [H, W, 3]
-    #     max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
-    #     min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)
-    # args.bb_center = (max_xyz + min_xyz) / 2.
-    # args.bb_scale = 2. / (max_xyz - min_xyz).max()
-    # print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
+    fx, fy, cx, cy = focal, focal, W/2.0, H/2.0
+    intrinsic_video = np.array((fx, fy, cx, cy))
 
-    args.bb_center = 0.0
-    args.bb_scale = 1.0
+    K_video = np.array([
+        [intrinsic_video[0], 0, intrinsic_video[2]],
+        [0, intrinsic_video[1], intrinsic_video[3]],
+        [0, 0, 1]
+    ])
+    
+    for frame in meta['frames']:
+        poses.append(np.array(frame['transform_matrix']))
 
-    # # Precompute scene sampling parameters
-    # if args.depth_loss_weight > 0.:
-    #     precomputed_z_samples = precompute_quadratic_samples(near, far, args.N_samples // 2)
+    poses = np.array(poses).astype(np.float32)
 
-    #     if precomputed_z_samples.shape[0] % 2 == 1:
-    #         precomputed_z_samples = precomputed_z_samples[:-1]
-
-    #     print("Computed {} samples between {} and {}".format(precomputed_z_samples.shape[0], precomputed_z_samples[0], precomputed_z_samples[-1]))
-    # else:
-    #     precomputed_z_samples = None
-
-    precomputed_z_samples = None
-    scene_sample_params = {
-        'precomputed_z_samples' : precomputed_z_samples,
-        'near' : near,
-        'far' : far,
-    }
-
-    lpips_alex = LPIPS()
+    # print(poses)
+    print(poses.shape)
+    # exit()
+    ###########################################
 
 
-    ### Get the poses from the test images
-    # test_poses1 = poses1[i_test1]
-    # test_intrinsics1 = intrinsics1[i_test1]
+    ####### Load poses from blender file #######
+    json_fname =  os.path.join("video_demo_poses", "transforms_chair2.json")
 
-    # test_poses2 = poses2[i_test2]
-    # test_intrinsics2 = intrinsics2[i_test2]
+    with open(json_fname, 'r') as fp:
+        meta = json.load(fp)
 
-    test_poses3 = poses3[i_test3]
-    test_intrinsics3 = intrinsics3[i_test3]
+    poses2 = []
 
-    test_poses4 = poses4[i_test4]
-    test_intrinsics4 = intrinsics4[i_test4]        
+    camera_angle_x = float(meta['camera_angle_x'])
+    H, W = 800, 800
 
-    test_poses5 = poses5[i_test5]
-    test_intrinsics5 = intrinsics5[i_test5]
+    focal = .5 * W / np.tan(.5 * camera_angle_x)                            
 
-    test_poses6 = poses6[i_test5]
-    test_intrinsics6 = intrinsics6[i_test5]
+    fx, fy, cx, cy = focal, focal, W/2.0, H/2.0
+    # intrinsic_video = np.array((fx, fy, cx, cy))
 
-    ## Lego
-    # idx_to_take = [29, 36, 41, 96, 0]
+    # K_video = np.array([
+    #     [intrinsic_video[0], 0, intrinsic_video[2]],
+    #     [0, intrinsic_video[1], intrinsic_video[3]],
+    #     [0, 0, 1]
+    # ])
+    
+    for frame in meta['frames']:
+        poses2.append(np.array(frame['transform_matrix']))
 
-    # ## Mic
-    # idx_to_take = [11, 59]
+    poses2 = np.array(poses2).astype(np.float32)
 
-    #### 0520
-    ## Chair
-    # idx_to_take = [0, 26, 5, 74, 81, 83, 97, 60]
-    idx_to_take = [97]
+    # print(poses)
+    print(poses2.shape)
+    # exit()
+    ###########################################
 
-    #### 0520
-    # ## Mic
-    # idx_to_take = [16, 34, 51, 58, 68, 6, 44, 66]
-
-    # ## Lego
-    # idx_to_take = [0, 11, 24, 36, 37, 45, 47, 49]
 
     #### Manual video making ###
-    num_samples_zoom = 2
+    num_samples_more = 20
+    num_samples_less = 10
 
-    for i in idx_to_take:
 
-        ## For the video sequence
-        video_poses = []
-        video_intrinsics = []
-        frames = []
+    ## For the video sequence
+    video_poses = []
+    video_intrinsics = []
+    video_bboxes = []
+    frames = []
 
-        # p1 = test_poses1[i]
-        # p2 = test_poses2[i]
-        p3 = test_poses3[i]
-        p4 = test_poses4[i]
-        p5 = test_poses5[i]
-        p6 = test_poses6[i]
 
-        # t1 = p1[:3,-1]
-        # t2 = p2[:3,-1]
-        # t3 = p3[:3,-1]
-        # t4 = p4[:3,-1]
-        # t5 = p5[:3,-1]
-        # t6 = p6[:3,-1]
+    middle_far = poses[0]
+    middle_middle = poses[1]
+    middle_near = poses[2]
 
-        # manual_translation = np.array([0.0, -0.75, 0.0])
-        # manual_translation = np.array([0.75, 0.0, 0.0])
-        manual_translation = np.array([0.0, 0.0, 0.3])
+    left_far = poses[3]
+    left_middle = poses[4]
+    left_near = poses[5]
 
-        # manual_rotation = R.from_euler('z', 15, degrees=True)
-        # manual_rotation = R.from_euler('y', 15, degrees=True)
-        manual_rotation = R.from_euler('x', 5, degrees=True)
+    right_far = poses[6]
+    right_middle = poses[7]
+    right_near = poses[8]
 
-        ### Translate upwards --> trial for chair
-        t3 = p3[:3,-1] + manual_translation
-        t4 = p4[:3,-1] + manual_translation
-        t5 = p5[:3,-1] + manual_translation
-        t6 = p6[:3,-1] + manual_translation     
 
-        # r1 = R.from_matrix(p1[:3, :3])        
-        # r2 = R.from_matrix(p2[:3, :3])        
-        # r3 = R.from_matrix(p3[:3, :3])        
-        # r4 = R.from_matrix(p4[:3, :3])        
-        # r5 = R.from_matrix(p5[:3, :3])        
-        # r6 = R.from_matrix(p6[:3, :3])        
+    left_nearer = poses2[6]
+    right_nearer = poses2[10]
 
-        ### Rotate upwards --> trial for chair
-        r3 = manual_rotation * R.from_matrix(p3[:3, :3])        
-        r4 = manual_rotation * R.from_matrix(p4[:3, :3])        
-        r5 = manual_rotation * R.from_matrix(p5[:3, :3])        
-        r6 = manual_rotation * R.from_matrix(p6[:3, :3])         
 
-        intrinsic = intrinsics3[0]
+    ############
+    curr_num_samples = num_samples_less
+    start_pose = middle_far
+    end_pose = middle_middle
 
-        times_zoom = np.linspace(0.0, 1.0, num=num_samples_zoom)    
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
 
-        # ### 1 to 2
-        # f = interpolate.interp1d([0,1], np.vstack([t1, t2]), axis=0)
-        # interp_trans = f(times_zoom)
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
 
-        # for j in range(num_samples_zoom):
-        #     c2w = np.hstack((r1.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-        #     c2w = np.vstack((c2w, np.array([0,0,0,1])))
-        #     # print(c2w)
-        #     video_poses.append(c2w.astype(float))
-        #     video_intrinsics.append(intrinsic.astype(float))  
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
 
-        # ### 2 to 3
-        # f = interpolate.interp1d([0,1], np.vstack([t2, t3]), axis=0)
-        # interp_trans = f(times_zoom)
 
-        # for j in range(num_samples_zoom):
-        #     c2w = np.hstack((r2.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-        #     c2w = np.vstack((c2w, np.array([0,0,0,1])))
-        #     # print(c2w)
-        #     video_poses.append(c2w.astype(float))
-        #     video_intrinsics.append(intrinsic.astype(float))  
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
 
-        ### 3 to 4
-        f = interpolate.interp1d([0,1], np.vstack([t3, t4]), axis=0)
-        interp_trans = f(times_zoom)
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
 
-        for j in range(num_samples_zoom):
-            c2w = np.hstack((r3.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-            c2w = np.vstack((c2w, np.array([0,0,0,1])))
-            # print(c2w)
-            video_poses.append(c2w.astype(float))
-            video_intrinsics.append(intrinsic.astype(float))  
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
 
-        ### 4 to 5
-        f = interpolate.interp1d([0,1], np.vstack([t4, t5]), axis=0)
-        interp_trans = f(times_zoom)
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
 
-        for j in range(num_samples_zoom):
-            c2w = np.hstack((r4.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-            c2w = np.vstack((c2w, np.array([0,0,0,1])))
-            # print(c2w)
-            video_poses.append(c2w.astype(float))
-            video_intrinsics.append(intrinsic.astype(float))  
 
-        ### 5 to 6
-        f = interpolate.interp1d([0,1], np.vstack([t5, t6]), axis=0)
-        interp_trans = f(times_zoom)
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = middle_middle
+    end_pose = middle_near
 
-        for j in range(num_samples_zoom):
-            c2w = np.hstack((r5.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-            c2w = np.vstack((c2w, np.array([0,0,0,1])))
-            # print(c2w)
-            video_poses.append(c2w.astype(float))
-            video_intrinsics.append(intrinsic.astype(float))  
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
 
-        
-        ### Output to json
-        for j in range(len(video_poses)):
-            vpose = video_poses[j]
-            curr_intrinsic = video_intrinsics[j]
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
 
-            curr_frame = {"file_path": "", "depth_file_path":"", \
-                        "fx":  curr_intrinsic[0], "fy": curr_intrinsic[1], "cx": curr_intrinsic[2], "cy": curr_intrinsic[3],\
-                        "transform_matrix": vpose.tolist()}
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
 
-            frames.append(curr_frame)
 
-        data = {"near": near, "far": far, "depth_scaling_factor": 1000., "frames": frames}
-        # print(json.dumps(data, indent=4))
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
 
-        with open(os.path.join(scene_data_dir, "transforms_video2" + str(i) +".json"), "w") as outfile:
-            json.dump(data, outfile)
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
 
-        print()
-        print("Num frames: ")
-        print(len(frames))
-        print("Done with "+str(i)+".")
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    # ############
+    # curr_num_samples = num_samples_less
+    # start_pose = middle_near
+    # end_pose = middle_far
+
+    # t_start = start_pose[:3,-1]
+    # t_end = end_pose[:3,-1]
+    # r_start = start_pose[:3, :3]
+    # r_end = end_pose[:3, :3]
+
+    # times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    # ### 3 to 6
+    # f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    # interp_trans = f(times_zoom)
+
+
+    # key_rots = R.from_matrix([r_start, r_end])
+    # key_times = [0, 1]
+    # slerp = Slerp(key_times, key_rots)
+
+    # times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    # interp_rots = slerp(times)
+    # interp_rots = interp_rots.as_matrix()   
+
+    # for j in range(curr_num_samples):
+    #     c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+    #     c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+    #     # print(c2w)
+    #     video_poses.append(c2w.astype(float))
+    #     # video_intrinsics.append(intrinsic.astype(float))  
+    #     video_intrinsics.append(intrinsic_video.astype(float))  
+    # ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = middle_near
+    end_pose = left_far
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))   
+    ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = left_far
+    end_pose = left_near
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))   
+    ###########
+
+
+    ############
+    curr_num_samples = num_samples_less
+    start_pose = left_near
+    end_pose = left_nearer
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = left_nearer
+    end_pose = middle_far
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    ############
+    curr_num_samples = num_samples_less
+    start_pose = middle_far
+    end_pose = right_far
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))   
+    ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = right_far
+    end_pose = right_near
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+
+    ############
+    curr_num_samples = num_samples_less
+    start_pose = right_near
+    end_pose = right_nearer
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = right_nearer
+    end_pose = right_middle
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = right_middle
+    end_pose = right_nearer
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = right_nearer
+    end_pose = left_nearer
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = left_nearer
+    end_pose = left_middle
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    ############
+    curr_num_samples = num_samples_more
+    start_pose = left_middle
+    end_pose = right_middle
+
+    t_start = start_pose[:3,-1]
+    t_end = end_pose[:3,-1]
+    r_start = start_pose[:3, :3]
+    r_end = end_pose[:3, :3]
+
+    times_zoom = np.linspace(0.0, 1.0, num=curr_num_samples)    
+
+    ### 3 to 6
+    f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
+    interp_trans = f(times_zoom)
+
+
+    key_rots = R.from_matrix([r_start, r_end])
+    key_times = [0, 1]
+    slerp = Slerp(key_times, key_rots)
+
+    times = np.linspace(0.0, 1.0, num=curr_num_samples)
+    interp_rots = slerp(times)
+    interp_rots = interp_rots.as_matrix()   
+
+    for j in range(curr_num_samples):
+        c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
+        c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+        # print(c2w)
+        video_poses.append(c2w.astype(float))
+        # video_intrinsics.append(intrinsic.astype(float))  
+        video_intrinsics.append(intrinsic_video.astype(float))  
+    ###########
+
+    
+    ### Output to json
+    i = 0
+    for j in range(len(video_poses)):
+        vpose = video_poses[j]
+        curr_intrinsic = video_intrinsics[j]
+
+        curr_frame = {"file_path": "", "depth_file_path":"", \
+                    "fx":  curr_intrinsic[0], "fy": curr_intrinsic[1], "cx": curr_intrinsic[2], "cy": curr_intrinsic[3],\
+                    "transform_matrix": vpose.tolist()}
+
+        frames.append(curr_frame)
+
+    data = {"near": 0.5, "far": 6.0, "depth_scaling_factor": 1000., "frames": frames}
+    # print(json.dumps(data, indent=4))
+
+    with open(os.path.join(scene_data_dir, "transforms_video_demo4" + str(i) +".json"), "w") as outfile:
+        json.dump(data, outfile)
+
+    print(os.path.join(scene_data_dir, "transforms_video_demo4" + str(i) +".json"))
+    print()
+    print("Num frames: ")
+    print(len(frames))
+    print("Done with "+str(i)+".")
 
 
 

@@ -1,7 +1,6 @@
 '''
 Mikaela Uy
-1021    : Quantatively evaluate scannet scenes to pick the best prior model
-        : Also find the scale/shift init for the nerf training 
+mikacuy@stanford.edu
 '''
 import math
 import os, sys

@@ -1058,13 +1058,13 @@ def run_nerf():
     # print("Loaded 1.5")
     # images, _, _, poses2, H, W, intrinsics2, near, far, i_split2, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.25)
     # print("Loaded 1.25")
-    images, _, _, poses3, H, W, intrinsics3, near, far, i_split3, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0)
+    images, depths3, valid_depths, poses3, H, W, intrinsics3, near, far, i_split3, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0)
     print("Loaded 1.0")
-    images, _, _, poses4, H, W, intrinsics4, near, far, i_split4, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.75)
+    images, depths4, valid_depths, poses4, H, W, intrinsics4, near, far, i_split4, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.75)
     print("Loaded 0.75")
-    images, _, _, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.5)
+    images, depths5, valid_depths, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.5)
     print("Loaded 0.5")
-    images, _, _, poses6, H, W, intrinsics6, near, far, i_split6, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.25)
+    images, depths6, valid_depths, poses6, H, W, intrinsics6, near, far, i_split6, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.25)
     print("Loaded 0.25")
 
 
@@ -1126,15 +1126,19 @@ def run_nerf():
 
     test_poses3 = poses3[i_test3]
     test_intrinsics3 = intrinsics3[i_test3]
+    test_depths3 = depths3[i_test3]
 
     test_poses4 = poses4[i_test4]
     test_intrinsics4 = intrinsics4[i_test4]        
+    test_depths4 = depths4[i_test4]
 
     test_poses5 = poses5[i_test5]
     test_intrinsics5 = intrinsics5[i_test5]
+    test_depths5 = depths5[i_test5]
 
     test_poses6 = poses6[i_test5]
     test_intrinsics6 = intrinsics6[i_test5]
+    test_depths6 = depths6[i_test6]
 
     ## Lego
     # idx_to_take = [29, 36, 41, 96, 0]
@@ -1188,9 +1192,9 @@ def run_nerf():
 
         ### Translate upwards --> trial for chair
         t3 = p3[:3,-1] + manual_translation
-        t4 = p4[:3,-1] + manual_translation
-        t5 = p5[:3,-1] + manual_translation
-        t6 = p6[:3,-1] + manual_translation     
+        t4 = manual_rotation.apply(p4[:3,-1]) + manual_translation
+        t5 = manual_rotation.apply(p5[:3,-1]) + manual_translation
+        t6 = manual_rotation.apply(p6[:3,-1]) + manual_translation     
 
         # r1 = R.from_matrix(p1[:3, :3])        
         # r2 = R.from_matrix(p2[:3, :3])        

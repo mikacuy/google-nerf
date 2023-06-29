@@ -22,8 +22,8 @@ import sys
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR, "../"))
 
-from lib.test_utils import refine_focal, refine_shift
-from lib.spvcnn_classsification import SPVCNN_CLASSIFICATION
+# from lib.test_utils import refine_focal, refine_shift
+# from lib.spvcnn_classsification import SPVCNN_CLASSIFICATION
 
 from scipy.interpolate import griddata
 
@@ -42,7 +42,7 @@ parser.add_argument("--ckpt", default="epoch56_step0.pth", help="checkpoint", ty
 # parser.add_argument('--dump_dir', default= "dump_1027_visutaskonomy_metric/", type=str)
 # parser.add_argument('--dump_dir', default= "dump_1027_visutaskonomy_withrecons_backproject2/", type=str)
 
-parser.add_argument('--dump_dir', default= "dump_1029_backproject_debug/", type=str)
+parser.add_argument('--dump_dir', default= "dump_0621_taskonomy_test/", type=str)
 
 ### For the dataset
 parser.add_argument('--phase', type=str, default='test', help='Training flag')
@@ -53,13 +53,13 @@ parser.add_argument('--dataroot', default='/orion/downloads/coordinate_mvs/', he
 
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
-parser.add_argument('--num_samples', default= 5, type=int)
+parser.add_argument('--num_samples', default= 15, type=int)
 parser.add_argument('--rescaled', default=True, type=bool)
 
 parser.add_argument('--ada_version', default= "v2", type=str)
 parser.add_argument('--cimle_version', default= "enc", type=str)
 parser.add_argument('--import_from_logdir', default=False, type=bool)
-parser.add_argument('--visu_all', default=False, type=bool)
+parser.add_argument('--visu_all', default=True, type=bool)
 parser.add_argument('--seed_num', default= 0, type=int)
 
 ### Pretrained LeReS model --> get focal and shift models
@@ -221,16 +221,16 @@ LERES_CKPT_FILE = FLAGS.leres_pretrained
 print("Loading pretrained LeReS model " + LERES_CKPT_FILE)
 checkpoint = torch.load(LERES_CKPT_FILE)
 
-shift_model, focal_model = make_shift_focallength_models()
-shift_model.load_state_dict(strip_prefix_if_present(checkpoint['shift_model'], 'module.'),
-                                    strict=True)
-focal_model.load_state_dict(strip_prefix_if_present(checkpoint['focal_model'], 'module.'),
-                                    strict=True)
+# shift_model, focal_model = make_shift_focallength_models()
+# shift_model.load_state_dict(strip_prefix_if_present(checkpoint['shift_model'], 'module.'),
+#                                     strict=True)
+# focal_model.load_state_dict(strip_prefix_if_present(checkpoint['focal_model'], 'module.'),
+#                                     strict=True)
 
-shift_model.cuda()
-focal_model.cuda()
-print("Shift and Focal model loaded.")
-######################################################
+# shift_model.cuda()
+# focal_model.cuda()
+# print("Shift and Focal model loaded.")
+# ######################################################
 
 
 ### Quantitative Metrics ####
@@ -429,6 +429,7 @@ with torch.no_grad():
         ## Get original image size
         curr_imgh_path = data['A_paths'][0]
         img = cv2.imread(curr_imgh_path)
+        rgb_c = img.copy()
         img = cv2.resize(img, (448, 448))
 
         ### Repeat for the number of samples
@@ -453,10 +454,8 @@ with torch.no_grad():
 
         if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:      
             img_name = "image" + str(i)
-            cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb)
+            cv2.imwrite(os.path.join(temp_fol, img_name+"-raw.png"), rgb_c)
             image_fname.append(os.path.join(temp_fol, img_name+"-raw.png"))
-            img_name = "image" + str(i) + "_gt"
-            reconstruct_depth(curr_gt, rgb, gt_fol, img_name, f)
 
         all_err_absRel = np.zeros((batch_size, mini_batch_size))
         all_err_squaRel = np.zeros((batch_size, mini_batch_size))
@@ -483,156 +482,184 @@ with torch.no_grad():
                 # pred_depth_ori = cv2.resize(curr_pred_depth, (H, W))
 
                 img_name = "image" + str(i) + "_" + str(k) + "_" + str(s)
-                
+
                 if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:
-
-                    # save depth
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow') 
+                    curr_pred_depth_raw = cv2.resize(curr_pred_depth, (rgb_c.shape[1], rgb_c.shape[0])) 
+                    plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), curr_pred_depth_raw, cmap='rainbow') 
                     image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
+                
+                # if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:
 
-                    ### Output point cloud
-                    reconstruct_depth(np.copy(curr_pred_depth), rgb, pc_fol, img_name, f)
+                    # # save depth
+                    # plt.imsave(os.path.join(temp_fol, img_name+'-depth.png'), pred_depth_ori, cmap='rainbow') 
+                    # image_fname.append(os.path.join(temp_fol, img_name+'-depth.png'))
 
-                    reconstruct_depth(np.copy(curr_pred_depth_metric), rgb, pc_fol, img_name+"_metric", f)
+                    # ### Output point cloud
+                    # reconstruct_depth(np.copy(curr_pred_depth), rgb, pc_fol, img_name, f)
 
-
-                    shift, focal_length, depth_scaleinv = reconstruct3D_from_depth(img, pred_depth_ori,
-                                                                           shift_model, focal_model)
-                    print(focal_length)
-                    curr_pred_depth_metric_corrected = recover_metric_depth(depth_scaleinv, curr_gt)
-
-                    reconstruct_depth(depth_scaleinv, rgb, pc_fol, img_name+'-pcd-shiftfocal', focal=focal_length)
+                    # reconstruct_depth(np.copy(curr_pred_depth_metric), rgb, pc_fol, img_name+"_metric", f)
 
 
-                    ### Project into ground truth camera
-                    pointcloud = reconstruct_3D(depth_scaleinv, f=focal_length)
+                    # shift, focal_length, depth_scaleinv = reconstruct3D_from_depth(img, pred_depth_ori,
+                    #                                                        shift_model, focal_model)
+                    # print(focal_length)
+                    # curr_pred_depth_metric_corrected = recover_metric_depth(depth_scaleinv, curr_gt)
 
-                    ### Project to camera given a focal length
-                    # print(pointcloud.shape)
-                    # print(rgb.shape)
-                    pointcloud_visible = get_nonoccluded_points(pointcloud, f, rgb)
-                    # print(pointcloud_visible.shape)
-                    pointcloud_2d = project_2d(pointcloud_visible, f, rgb)
+                    # reconstruct_depth(depth_scaleinv, rgb, pc_fol, img_name+'-pcd-shiftfocal', focal=focal_length)
+
+
+                    # ### Project into ground truth camera
+                    # pointcloud = reconstruct_3D(depth_scaleinv, f=focal_length)
+
+                    # ### Project to camera given a focal length
+                    # # print(pointcloud.shape)
+                    # # print(rgb.shape)
+                    # pointcloud_visible = get_nonoccluded_points(pointcloud, f, rgb)
+                    # # print(pointcloud_visible.shape)
+                    # pointcloud_2d = project_2d(pointcloud_visible, f, rgb)
                     
-                    # print(pointcloud)
-                    # print()
-                    print(pointcloud_2d)
-                    print(pointcloud_2d.shape)
-                    # print(f)
-                    # print(rgb.shape)
-                    exit()
-
-                    ### Projected depth map --> with holes
-                    width = rgb.shape[0]
-                    height = rgb.shape[1]
-
-                    projected_depth = np.zeros((height,width))
-
-                    pointcloud_2d = pointcloud_2d.astype(int)
-                    projected_depth[pointcloud_2d[1], pointcloud_2d[0]] = pointcloud_visible[:,2]
-                    
-                    # print(projected_depth)
-                    # print(projected_depth.shape)
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected.png'), projected_depth*1000., cmap='rainbow')
-
-                    ### Grid data interpolate
-                    grid_x, grid_y = np.mgrid[0:height, 0:width]
-                    interpolated_depth_nearest = griddata(pointcloud_2d.T, pointcloud_visible[:,2], (grid_x, grid_y), method='nearest', fill_value=0.0).T
-                    interpolated_depth_linear = griddata(pointcloud_2d.T, pointcloud_visible[:,2], (grid_x, grid_y), method='linear', fill_value=0.0).T
-                    interpolated_depth_cubic = griddata(pointcloud_2d.T, pointcloud_visible[:,2], (grid_x, grid_y), method='cubic', fill_value=0.0).T
-
-                    # print(interpolated_depth_linear)
-                    # print(interpolated_depth_cubic)
+                    # # print(pointcloud)
+                    # # print()
+                    # print(pointcloud_2d)
+                    # print(pointcloud_2d.shape)
+                    # # print(f)
+                    # # print(rgb.shape)
                     # exit()
 
-                    # print(interpolated_depth_nearest.shape)
-                    # print(interpolated_depth_linear.shape)
-                    # print(interpolated_depth_cubic.shape)
+                    # ### Projected depth map --> with holes
+                    # width = rgb.shape[0]
+                    # height = rgb.shape[1]
 
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected-interpolated-nearest.png'), interpolated_depth_nearest, cmap='rainbow')
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected-interpolated-linear.png'), interpolated_depth_linear, cmap='rainbow')
-                    plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected-interpolated-cubic.png'), interpolated_depth_cubic, cmap='rainbow')
+                    # projected_depth = np.zeros((height,width))
+
+                    # pointcloud_2d = pointcloud_2d.astype(int)
+                    # projected_depth[pointcloud_2d[1], pointcloud_2d[0]] = pointcloud_visible[:,2]
+                    
+                    # # print(projected_depth)
+                    # # print(projected_depth.shape)
+                    # plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected.png'), projected_depth*1000., cmap='rainbow')
+
+                    # ### Grid data interpolate
+                    # grid_x, grid_y = np.mgrid[0:height, 0:width]
+                    # interpolated_depth_nearest = griddata(pointcloud_2d.T, pointcloud_visible[:,2], (grid_x, grid_y), method='nearest', fill_value=0.0).T
+                    # interpolated_depth_linear = griddata(pointcloud_2d.T, pointcloud_visible[:,2], (grid_x, grid_y), method='linear', fill_value=0.0).T
+                    # interpolated_depth_cubic = griddata(pointcloud_2d.T, pointcloud_visible[:,2], (grid_x, grid_y), method='cubic', fill_value=0.0).T
+
+                    # # print(interpolated_depth_linear)
+                    # # print(interpolated_depth_cubic)
+                    # # exit()
+
+                    # # print(interpolated_depth_nearest.shape)
+                    # # print(interpolated_depth_linear.shape)
+                    # # print(interpolated_depth_cubic.shape)
+
+                    # plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected-interpolated-nearest.png'), interpolated_depth_nearest, cmap='rainbow')
+                    # plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected-interpolated-linear.png'), interpolated_depth_linear, cmap='rainbow')
+                    # plt.imsave(os.path.join(temp_fol, img_name+'-depth-projected-interpolated-cubic.png'), interpolated_depth_cubic, cmap='rainbow')
 
 
-                    ### Scale with gt depth then output as point cloud
-                    curr_interpolated_depth_metric_nearest = recover_metric_depth(interpolated_depth_nearest, curr_gt)
-                    curr_interpolated_depth_metric_linear = recover_metric_depth(interpolated_depth_linear, curr_gt)
-                    curr_interpolated_depth_metric_cubic = recover_metric_depth(interpolated_depth_cubic, curr_gt)
+                    # ### Scale with gt depth then output as point cloud
+                    # curr_interpolated_depth_metric_nearest = recover_metric_depth(interpolated_depth_nearest, curr_gt)
+                    # curr_interpolated_depth_metric_linear = recover_metric_depth(interpolated_depth_linear, curr_gt)
+                    # curr_interpolated_depth_metric_cubic = recover_metric_depth(interpolated_depth_cubic, curr_gt)
 
-                    reconstruct_depth(curr_interpolated_depth_metric_nearest, rgb, pc_fol, img_name+"_metric_nearest", f)
-                    reconstruct_depth(curr_interpolated_depth_metric_linear, rgb, pc_fol, img_name+"_metric_linear", f)
-                    reconstruct_depth(curr_interpolated_depth_metric_cubic, rgb, pc_fol, img_name+"_metric_cubic", f)
+                    # reconstruct_depth(curr_interpolated_depth_metric_nearest, rgb, pc_fol, img_name+"_metric_nearest", f)
+                    # reconstruct_depth(curr_interpolated_depth_metric_linear, rgb, pc_fol, img_name+"_metric_linear", f)
+                    # reconstruct_depth(curr_interpolated_depth_metric_cubic, rgb, pc_fol, img_name+"_metric_cubic", f)
 
-                    exit()
+                    # exit()
 
-                ### Align prediction and compute qualitative results
-                # curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, curr_gt)
-                err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_metric, curr_gt)
+                # ### Align prediction and compute qualitative results
+                # # curr_pred_depth_metric = recover_metric_depth(curr_pred_depth, curr_gt)
+                # err_absRel, err_squaRel, err_silog, err_delta1, err_whdr = evaluate_rel_err(curr_pred_depth_metric, curr_gt)
 
-                all_err_absRel[:, k*mini_batch_size + s] = err_absRel
-                all_err_squaRel[:, k*mini_batch_size + s] = err_squaRel
-                all_err_silog[:, k*mini_batch_size + s] = err_silog
-                all_err_delta1[:, k*mini_batch_size + s] = err_delta1
-                all_err_whdr[:, k*mini_batch_size + s] = err_whdr
+                # all_err_absRel[:, k*mini_batch_size + s] = err_absRel
+                # all_err_squaRel[:, k*mini_batch_size + s] = err_squaRel
+                # all_err_silog[:, k*mini_batch_size + s] = err_silog
+                # all_err_delta1[:, k*mini_batch_size + s] = err_delta1
+                # all_err_whdr[:, k*mini_batch_size + s] = err_whdr
             #######
 
         ### Quantitative Results
-        idx_to_take = np.argmin(all_err_absRel, axis=-1)[0]
+        # idx_to_take = np.argmin(all_err_absRel, axis=-1)[0]
 
-        if all_err_absRel[0][idx_to_take] > 0:
-            total_err_absRel += all_err_absRel[0][idx_to_take]
-            total_err_squaRel += all_err_squaRel[0][idx_to_take]
-            total_err_silog += all_err_silog[0][idx_to_take]
-            total_err_delta1 += all_err_delta1[0][idx_to_take]
-            total_err_whdr += all_err_whdr[0][idx_to_take]
-            num_evaluated += 1
+        # if all_err_absRel[0][idx_to_take] > 0:
+        #     total_err_absRel += all_err_absRel[0][idx_to_take]
+        #     total_err_squaRel += all_err_squaRel[0][idx_to_take]
+        #     total_err_silog += all_err_silog[0][idx_to_take]
+        #     total_err_delta1 += all_err_delta1[0][idx_to_take]
+        #     total_err_whdr += all_err_whdr[0][idx_to_take]
+        #     num_evaluated += 1
 
         #######################
 
         if i%50==0 or (i%10==0 and FLAGS.phase_anno != "train") or VISU_ALL:
-            ### Collate and output to a single image
-            height = H
-            width = W    
+            height = rgb_c.shape[0]
+            width = rgb_c.shape[1]
+
+            num_rows = NUM_SAMPLE//mini_batch_size
+            # num_rows -= 1
+
+            out_size = (mini_batch_size * width, (num_rows+2) * height)
+
+            ### For the input image
+            midpoint =  int((mini_batch_size * width)/2 - width)
+
+            ### Init new image
+            new_im = Image.new('RGBA', out_size)
+
+            ### Paste the original input image
+            input_image = Image.open(image_fname[0])
+            ### Resize to double
+            input_image = input_image.resize((rgb_c.shape[1]*2, rgb_c.shape[0]*2))
+            new_im.paste(input_image, (midpoint,0))
 
             #Output to a single image
-            new_im = Image.new('RGBA', (width*(1+NUM_SAMPLE), height))
+            height_offset = height*2
+            for k in range(num_rows):
+                curr_image_fname = []
+                for j in range(k*mini_batch_size + 1, (k+1)*mini_batch_size+1):
+                    curr_image_fname.append(image_fname[j])
 
-            images = []
-            for fname in image_fname:
-                images.append(Image.open(fname))
+                images = []
 
-            x_offset = 0
-            for im in images:
-                new_im.paste(im, (x_offset,0))
-                x_offset += width
+                for fname in curr_image_fname:
+                    images.append(Image.open(fname))
 
-            output_image_filename = os.path.join(DUMP_DIR, str(i) +'_collate.png')
+                x_offset = 0
+                for im in images:
+                    new_im.paste(im, (x_offset, height_offset))
+                    x_offset += width
+
+                height_offset += height
+
+            output_image_filename = os.path.join(DUMP_DIR, str(i) + '_all.png')
             new_im.save(output_image_filename) 
-        # print(output_image_filename)
+            print(output_image_filename)
 
         if i%100==0:
             print("Finished "+str(i)+"/"+str(len(zcache_dataloader))+".")
 
-mean_err_absRel = total_err_absRel/float(num_evaluated)
-mean_err_squaRel = total_err_squaRel/float(num_evaluated)
-mean_err_silog = total_err_silog/float(num_evaluated)
-mean_err_delta1 = total_err_delta1/float(num_evaluated)
-mean_err_whdr = total_err_whdr/float(num_evaluated)
+# mean_err_absRel = total_err_absRel/float(num_evaluated)
+# mean_err_squaRel = total_err_squaRel/float(num_evaluated)
+# mean_err_silog = total_err_silog/float(num_evaluated)
+# mean_err_delta1 = total_err_delta1/float(num_evaluated)
+# mean_err_whdr = total_err_whdr/float(num_evaluated)
 
-log_string("=" * 20)
-log_string("")
-log_string("Num evaluated= "+str(num_evaluated))
-log_string("")
-log_string("Mean Err AbsRel= "+str(mean_err_absRel))
-log_string("")             
-log_string("Mean Err SquareRel = "+str(mean_err_squaRel))
-log_string("")     
-log_string("Mean Err SiLog= "+str(mean_err_silog))
-log_string("")                
-log_string("Mean Scale Err = "+str(mean_err_delta1))
-log_string("") 
-log_string("Mean WHDR = "+str(mean_err_whdr))
-log_string("")           
+# log_string("=" * 20)
+# log_string("")
+# log_string("Num evaluated= "+str(num_evaluated))
+# log_string("")
+# log_string("Mean Err AbsRel= "+str(mean_err_absRel))
+# log_string("")             
+# log_string("Mean Err SquareRel = "+str(mean_err_squaRel))
+# log_string("")     
+# log_string("Mean Err SiLog= "+str(mean_err_silog))
+# log_string("")                
+# log_string("Mean Scale Err = "+str(mean_err_delta1))
+# log_string("") 
+# log_string("Mean WHDR = "+str(mean_err_whdr))
+# log_string("")           
 
 print("Done.")
 

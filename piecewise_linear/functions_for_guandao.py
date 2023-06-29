@@ -2,18 +2,17 @@
 ### PWL Integration
 ####################
 
-### Our reformulation to piecewise linear
+### Our Piecewise Linear Opacity Reformulation
 def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., return_tau=False):
     raw2expr = lambda raw, dists: torch.exp(-raw*dists)
 
     dists = z_vals[...,1:] - z_vals[...,:-1]
-
-    ### Original code
     dists = dists * torch.norm(rays_d[...,None,:], dim=-1)
 
-    tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise, torch.ones((raw.shape[0], 1), device=device)*1e10], -1) ### tau(near) = 0, tau(far) = very big (will hit an opaque surface)
+    ### tau(near) = 0, tau(far) = very big (will hit an opaque surface)
+    tau = torch.cat([torch.ones((raw.shape[0], 1), device=device)*1e-10, raw[...,3] + noise, torch.ones((raw.shape[0], 1), device=device)*1e10], -1) 
 
-    tau = F.relu(tau) ## Make positive from proof of DS-NeRF
+    tau = F.relu(tau) + 1e-6 ## Make positive 
 
     interval_ave_tau = 0.5 * (tau[...,1:] + tau[...,:-1])
    
@@ -27,21 +26,12 @@ def compute_weights_piecewise_linear(raw, z_vals, near, far, rays_d, noise=0., r
 
     ### Factor to multiply transmittance with
     factor = (1 - expr)
-
     weights = factor * T[:, :-1] # [N_rays, N_samples+1]
 
-    '''
-    We will need to return tau and T for backprop later
-    '''
-    ### Remember to remove the last value of T(far) is not used
-    ### tau(far) is also not used
-
-    if return_tau:
-        return weights, tau, T
     else:
         return weights    
 
-### Original piecewise constant assumption
+### Original Piecewise Constant Opacity
 def compute_weights(raw, z_vals, rays_d, noise=0.):
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
 
@@ -50,7 +40,6 @@ def compute_weights(raw, z_vals, rays_d, noise=0.):
     dists = dists * torch.norm(rays_d[...,None,:], dim=-1)
     
     alpha = raw2alpha(raw[...,3] + noise, dists)  # [N_rays, N_samples]
-    # weights = alpha * tf.math.cumprod(1.-alpha + 1e-10, -1, exclusive=True)
     weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1), device=device), 1.-alpha + 1e-10], -1), -1)[:, :-1]
     return weights
 

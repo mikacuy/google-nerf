@@ -27,7 +27,7 @@ from tqdm import tqdm, trange
 from model import NeRF, get_embedder, get_rays, precompute_quadratic_samples, sample_pdf, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, resnet18_skip, sample_pdf_reformulation
 from data import create_random_subsets, load_scene, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender_multidist
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_llff, load_scene_blender, load_scene_blender_multidist, load_scene_blender_fixed_dist_new
 from train_utils import MeanTracker, update_learning_rate
 from metric import compute_rmse
 
@@ -1460,7 +1460,8 @@ def run_nerf():
         gt_valid_depths =None
 
     elif args.dataset == "blender":
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=0)
+        # images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=0)
+        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=0)
         depths = None
         valid_depths = None
         gt_depths = None
@@ -1523,14 +1524,21 @@ def run_nerf():
     ## Lego
     # idx_to_take = [29, 36, 41, 96, 0]
 
-    ## Mic
-    idx_to_take = [11, 59]
+    # ## Mic
+    # idx_to_take = [11, 59]
+
+    ## Chair
+    idx_to_take = [0, 26]
 
     for i in idx_to_take:
         print("Processing pose idx: "+str(i))
-        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=i)
+        # images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=i)
+        images, _, _, poses, H, W, intrinsics, near, far, i_split, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0, video_idx=i)
 
         i_train, i_val, i_test, i_video = i_split
+
+        print(i_video.shape)
+        exit()
 
         vposes = torch.Tensor(poses[i_video]).to(device)
         vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)

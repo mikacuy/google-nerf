@@ -1041,71 +1041,59 @@ def run_nerf():
     # Load data
     scene_data_dir = os.path.join(args.data_dir, args.scene_id)
 
-    # images, _, _, poses1, H, W, intrinsics1, near, far, i_split1, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.5)
-    # print("Loaded 1.5")
-    # images, _, _, poses2, H, W, intrinsics2, near, far, i_split2, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.25)
-    # print("Loaded 1.25")
-    # images, _, _, poses3, H, W, intrinsics3, near, far, i_split3, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0)
-    # print("Loaded 1.0")
-    # images, _, _, poses4, H, W, intrinsics4, near, far, i_split4, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.75)
-    # print("Loaded 0.75")
-    # images, _, _, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.5)
-    # print("Loaded 0.5")
-    # images, _, _, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_multidist(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.25)
-    # print("Loaded 0.25")
 
-    # images, _, _, poses1, H, W, intrinsics1, near, far, i_split1, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.5)
-    # print("Loaded 1.5")
-    # images, _, _, poses2, H, W, intrinsics2, near, far, i_split2, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.25)
-    # print("Loaded 1.25")
-    images, _, _, poses3, H, W, intrinsics3, near, far, i_split3, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0)
+    images3, depths3, valid_depths, poses3, H, W, intrinsics3, near, far, i_split3, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=1.0)
     print("Loaded 1.0")
-    images, _, _, poses4, H, W, intrinsics4, near, far, i_split4, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.75)
+    images4, depths4, valid_depths, poses4, H, W, intrinsics4, near, far, i_split4, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.75)
     print("Loaded 0.75")
-    images, _, _, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.5)
+    images5, depths5, valid_depths, poses5, H, W, intrinsics5, near, far, i_split5, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.5)
     print("Loaded 0.5")
-    images, _, _, poses6, H, W, intrinsics6, near, far, i_split6, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.25)
+    images6, depths6, valid_depths, poses6, H, W, intrinsics6, near, far, i_split6, _, _ = load_scene_blender_fixed_dist_new(scene_data_dir, half_res=args.half_res, train_dist=1.0, test_dist=0.25)
     print("Loaded 0.25")
 
-
-    # i_train, i_val, i_test1, i_video = i_split1
-    # i_train, i_val, i_test2, i_video = i_split2
     i_train, i_val, i_test3, i_video = i_split3
+    print(len(i_test3))
+
     i_train, i_val, i_test4, i_video = i_split4
     i_train, i_val, i_test5, i_video = i_split5
     i_train, i_val, i_test6, i_video = i_split6
 
-    # print(len(i_test1))
-    # print(len(i_test2))
-    print(len(i_test3))
-    print(len(i_test4))
-    print(len(i_test5))
+    ####### Load poses from blender file #######
+    json_fname =  os.path.join("video_demo_poses", "transforms.json")
 
-    # # Compute boundaries of 3D space
-    # max_xyz = torch.full((3,), -1e6)
-    # min_xyz = torch.full((3,), 1e6)
-    # for idx_train in i_train:
-    #     rays_o, rays_d = get_rays(H, W, torch.Tensor(intrinsics1[idx_train]), torch.Tensor(poses1[idx_train])) # (H, W, 3), (H, W, 3)
-    #     points_3D = rays_o + rays_d * far # [H, W, 3]
-    #     max_xyz = torch.max(points_3D.view(-1, 3).amax(0), max_xyz)
-    #     min_xyz = torch.min(points_3D.view(-1, 3).amin(0), min_xyz)
-    # args.bb_center = (max_xyz + min_xyz) / 2.
-    # args.bb_scale = 2. / (max_xyz - min_xyz).max()
-    # print("Computed scene boundaries: min {}, max {}".format(min_xyz, max_xyz))
+    with open(json_fname, 'r') as fp:
+        meta = json.load(fp)
+
+    poses = []
+
+    camera_angle_x = float(meta['camera_angle_x'])
+    H, W = 800, 800
+
+    focal = .5 * W / np.tan(.5 * camera_angle_x)                            
+
+    fx, fy, cx, cy = focal, focal, W/2.0, H/2.0
+    intrinsic_video = np.array((fx, fy, cx, cy))
+
+    K_video = np.array([
+        [intrinsic_video[0], 0, intrinsic_video[2]],
+        [0, intrinsic_video[1], intrinsic_video[3]],
+        [0, 0, 1]
+    ])
+    
+    for frame in meta['frames']:
+        poses.append(np.array(frame['transform_matrix']))
+
+    poses = np.array(poses).astype(np.float32)
+
+    print(poses)
+    print(poses.shape)
+    # exit()
+    ###########################################
+
 
     args.bb_center = 0.0
     args.bb_scale = 1.0
 
-    # # Precompute scene sampling parameters
-    # if args.depth_loss_weight > 0.:
-    #     precomputed_z_samples = precompute_quadratic_samples(near, far, args.N_samples // 2)
-
-    #     if precomputed_z_samples.shape[0] % 2 == 1:
-    #         precomputed_z_samples = precomputed_z_samples[:-1]
-
-    #     print("Computed {} samples between {} and {}".format(precomputed_z_samples.shape[0], precomputed_z_samples[0], precomputed_z_samples[-1]))
-    # else:
-    #     precomputed_z_samples = None
 
     precomputed_z_samples = None
     scene_sample_params = {
@@ -1126,15 +1114,24 @@ def run_nerf():
 
     test_poses3 = poses3[i_test3]
     test_intrinsics3 = intrinsics3[i_test3]
+    test_depths3 = depths3[i_test3]
+    test_images3 = images3[i_test3]
 
     test_poses4 = poses4[i_test4]
     test_intrinsics4 = intrinsics4[i_test4]        
+    test_depths4 = depths4[i_test4]
+    test_images4 = images4[i_test4]
 
     test_poses5 = poses5[i_test5]
     test_intrinsics5 = intrinsics5[i_test5]
+    test_depths5 = depths5[i_test5]
+    test_images5 = images5[i_test5]
 
     test_poses6 = poses6[i_test5]
     test_intrinsics6 = intrinsics6[i_test5]
+    test_depths6 = depths6[i_test6]
+    test_images6 = images6[i_test6]
+
 
     ## Lego
     # idx_to_take = [29, 36, 41, 96, 0]
@@ -1155,124 +1152,258 @@ def run_nerf():
     # idx_to_take = [0, 11, 24, 36, 37, 45, 47, 49]
 
     #### Manual video making ###
-    num_samples_zoom = 2
+    num_samples_zoom = 4
+
+    ### For calculating bounding box to crop and render
+    # reference_box = {"id":6, "coor":np.array([[414, 498], [625, 678]])}
+    reference_box = {"id":3, "coor":np.array([[230, 434], [307, 493]])}
+    # reference_box = {"id":3, "coor":np.array([[286, 457], [373, 528]])}
 
     for i in idx_to_take:
 
         ## For the video sequence
         video_poses = []
         video_intrinsics = []
+        video_bboxes = []
         frames = []
 
-        # p1 = test_poses1[i]
-        # p2 = test_poses2[i]
+
         p3 = test_poses3[i]
+
         p4 = test_poses4[i]
         p5 = test_poses5[i]
         p6 = test_poses6[i]
 
-        # t1 = p1[:3,-1]
-        # t2 = p2[:3,-1]
-        # t3 = p3[:3,-1]
-        # t4 = p4[:3,-1]
-        # t5 = p5[:3,-1]
-        # t6 = p6[:3,-1]
+        start_pose = poses[0]
+        end_pose = poses[1]
 
-        # manual_translation = np.array([0.0, -0.75, 0.0])
-        # manual_translation = np.array([0.75, 0.0, 0.0])
-        manual_translation = np.array([0.0, 0.0, 0.3])
 
-        # manual_rotation = R.from_euler('z', 15, degrees=True)
-        # manual_rotation = R.from_euler('y', 15, degrees=True)
-        manual_rotation = R.from_euler('x', 5, degrees=True)
-
-        ### Translate upwards --> trial for chair
-        t3 = p3[:3,-1] + manual_translation
-        t4 = p4[:3,-1] + manual_translation
-        t5 = p5[:3,-1] + manual_translation
-        t6 = p6[:3,-1] + manual_translation     
-
-        # r1 = R.from_matrix(p1[:3, :3])        
-        # r2 = R.from_matrix(p2[:3, :3])        
-        # r3 = R.from_matrix(p3[:3, :3])        
-        # r4 = R.from_matrix(p4[:3, :3])        
-        # r5 = R.from_matrix(p5[:3, :3])        
-        # r6 = R.from_matrix(p6[:3, :3])        
-
-        ### Rotate upwards --> trial for chair
-        r3 = manual_rotation * R.from_matrix(p3[:3, :3])        
-        r4 = manual_rotation * R.from_matrix(p4[:3, :3])        
-        r5 = manual_rotation * R.from_matrix(p5[:3, :3])        
-        r6 = manual_rotation * R.from_matrix(p6[:3, :3])         
+        t_start = start_pose[:3,-1]
+        t_end = end_pose[:3,-1]
+        r_start = start_pose[:3, :3]
+        r_end = end_pose[:3, :3]
 
         intrinsic = intrinsics3[0]
-
         times_zoom = np.linspace(0.0, 1.0, num=num_samples_zoom)    
 
-        # ### 1 to 2
-        # f = interpolate.interp1d([0,1], np.vstack([t1, t2]), axis=0)
-        # interp_trans = f(times_zoom)
-
-        # for j in range(num_samples_zoom):
-        #     c2w = np.hstack((r1.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-        #     c2w = np.vstack((c2w, np.array([0,0,0,1])))
-        #     # print(c2w)
-        #     video_poses.append(c2w.astype(float))
-        #     video_intrinsics.append(intrinsic.astype(float))  
-
-        # ### 2 to 3
-        # f = interpolate.interp1d([0,1], np.vstack([t2, t3]), axis=0)
-        # interp_trans = f(times_zoom)
-
-        # for j in range(num_samples_zoom):
-        #     c2w = np.hstack((r2.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-        #     c2w = np.vstack((c2w, np.array([0,0,0,1])))
-        #     # print(c2w)
-        #     video_poses.append(c2w.astype(float))
-        #     video_intrinsics.append(intrinsic.astype(float))  
-
-        ### 3 to 4
-        f = interpolate.interp1d([0,1], np.vstack([t3, t4]), axis=0)
+        ### 3 to 6
+        f = interpolate.interp1d([0,1], np.vstack([t_start, t_end]), axis=0)
         interp_trans = f(times_zoom)
 
+
+        key_rots = R.from_matrix([r_start, r_end])
+        key_times = [0, 1]
+        slerp = Slerp(key_times, key_rots)
+
+        times = np.linspace(0.0, 1.0, num=num_samples_zoom)
+        interp_rots = slerp(times)
+        interp_rots = interp_rots.as_matrix()   
+
+        ### Get 3D point for the reference box
+        if reference_box["id"] == 3:
+            depth_upperleft = test_depths3[i][reference_box["coor"][0][0], reference_box["coor"][0][1], ...]
+            depth_loweright = test_depths3[i][reference_box["coor"][1][0], reference_box["coor"][1][1], ...]
+
+            print(depth_upperleft)
+            print(depth_loweright)
+
+            X_upperleft = np.vstack((np.expand_dims(reference_box["coor"][0], axis=1), np.array([1])))
+            X_loweright = np.vstack((np.expand_dims(reference_box["coor"][1], axis=1), np.array([1])))
+
+            # print(depth_upperleft)
+            # print(depth_loweright)
+            # print(np.squeeze(X_upperleft))
+            # print(np.squeeze(X_loweright))
+            # print(intrinsic)
+
+            K = np.array([
+                [intrinsic[0], 0, intrinsic[2]],
+                [0, intrinsic[1], intrinsic[3]],
+                [0, 0, 1]
+            ])
+
+            X_upperleft = depth_upperleft * np.linalg.inv(K) @ np.squeeze(X_upperleft)
+            X_loweright = depth_loweright * np.linalg.inv(K) @ np.squeeze(X_loweright)
+
+            ### Make into homogeneous coordinates
+            X_upperleft = np.vstack((np.expand_dims(X_upperleft, axis=1), np.array([1])))
+            X_loweright = np.vstack((np.expand_dims(X_loweright, axis=1), np.array([1])))            
+
+            blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+            X_upperleft = p3 @ blender2opencv @ X_upperleft
+            X_loweright = p3 @ blender2opencv @ X_loweright
+
+            print(p3)
+            # exit()
+
+
+            print(X_upperleft)
+            print(X_loweright)
+            print("=========")
+
+            # # ############ Debugging BBOX cropping and tracking ###########
+            # curr_image = test_images3[i]
+            # ### bbox image coor
+            # curr_coor_bbox_upperleft = np.linalg.inv(p3@ blender2opencv) @ X_upperleft
+            # curr_coor_bbox_upperleft = K @ (curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1])
+            # curr_coor_bbox_upperleft = curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1]
+
+            # curr_coor_bbox_loweright = np.linalg.inv(p3@ blender2opencv) @ X_loweright
+            # curr_coor_bbox_loweright = K @ (curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1])
+            # curr_coor_bbox_loweright = curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1]
+
+            # X = int(curr_coor_bbox_upperleft[0])
+            # Y = int(curr_coor_bbox_upperleft[1])
+            # H = int(curr_coor_bbox_loweright[0] - curr_coor_bbox_upperleft[0])
+            # W = int(curr_coor_bbox_loweright[1] - curr_coor_bbox_upperleft[1])
+
+            # print(curr_coor_bbox_upperleft)
+            # print(curr_coor_bbox_loweright)
+            # print(X, Y, H, W)
+            # exit()
+
+            # cropped_image = curr_image[X:X+H, Y:Y+W] 
+            # print(cropped_image.shape)
+            # cv2.imwrite(os.path.join("dump_debug_bbox", "3_crop" + ".png"), cv2.cvtColor(to8b(cropped_image), cv2.COLOR_RGB2BGR))
+            # print()
+
+            # #######
+            # curr_image = test_images4[i]
+            # ### bbox image coor
+            # curr_coor_bbox_upperleft = np.linalg.inv(p4@ blender2opencv) @ X_upperleft
+            # print(curr_coor_bbox_upperleft)
+            # curr_coor_bbox_upperleft = K @ (curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1])
+            # print(curr_coor_bbox_upperleft)
+            # curr_coor_bbox_upperleft = curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1]
+
+            # curr_coor_bbox_loweright = np.linalg.inv(p4@ blender2opencv) @ X_loweright
+            # print(curr_coor_bbox_loweright)
+            # curr_coor_bbox_loweright = K @ (curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1])
+            # print(curr_coor_bbox_loweright)
+            # curr_coor_bbox_loweright = curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1]
+
+            # X = int(curr_coor_bbox_upperleft[0])
+            # Y = int(curr_coor_bbox_upperleft[1])
+            # H = int(curr_coor_bbox_loweright[0] - curr_coor_bbox_upperleft[0])
+            # W = int(curr_coor_bbox_loweright[1] - curr_coor_bbox_upperleft[1])
+
+            # print(curr_coor_bbox_upperleft)
+            # print(curr_coor_bbox_loweright)
+            # print(X, Y, H, W)
+
+
+            # cropped_image = curr_image[X:X+H, Y:Y+W] 
+            # print(cropped_image.shape)
+            # cv2.imwrite(os.path.join("dump_debug_bbox", "4_crop" + ".png"), cv2.cvtColor(to8b(cropped_image), cv2.COLOR_RGB2BGR))
+            # print()
+
+            # #######
+            # curr_image = test_images5[i]
+            # ### bbox image coor
+            # curr_coor_bbox_upperleft = np.linalg.inv(p5@ blender2opencv) @ X_upperleft
+            # print(curr_coor_bbox_upperleft)
+            # curr_coor_bbox_upperleft = K @ (curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1])
+            # print(curr_coor_bbox_upperleft)
+            # curr_coor_bbox_upperleft = curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1]
+
+            # curr_coor_bbox_loweright = np.linalg.inv(p5@ blender2opencv) @ X_loweright
+            # print(curr_coor_bbox_loweright)
+            # curr_coor_bbox_loweright = K @ (curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1])
+            # print(curr_coor_bbox_loweright)
+            # curr_coor_bbox_loweright = curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1]
+
+            # X = int(curr_coor_bbox_upperleft[0])
+            # Y = int(curr_coor_bbox_upperleft[1])
+            # H = int(curr_coor_bbox_loweright[0] - curr_coor_bbox_upperleft[0])
+            # W = int(curr_coor_bbox_loweright[1] - curr_coor_bbox_upperleft[1])
+
+            # print(curr_coor_bbox_upperleft)
+            # print(curr_coor_bbox_loweright)
+            # print(X, Y, H, W)
+
+
+            # cropped_image = curr_image[X:X+H, Y:Y+W] 
+            # print(cropped_image.shape)
+            # cv2.imwrite(os.path.join("dump_debug_bbox", "5_crop" + ".png"), cv2.cvtColor(to8b(cropped_image), cv2.COLOR_RGB2BGR))
+
+            # #######
+            # curr_image = test_images6[i]
+            # ### bbox image coor
+            # curr_coor_bbox_upperleft = np.linalg.inv(p6@ blender2opencv) @ X_upperleft
+            # print(curr_coor_bbox_upperleft)
+            # curr_coor_bbox_upperleft = K @ (curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1])
+            # print(curr_coor_bbox_upperleft)
+            # curr_coor_bbox_upperleft = curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1]
+
+            # curr_coor_bbox_loweright = np.linalg.inv(p6@ blender2opencv) @ X_loweright
+            # print(curr_coor_bbox_loweright)
+            # curr_coor_bbox_loweright = K @ (curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1])
+            # print(curr_coor_bbox_loweright)
+            # curr_coor_bbox_loweright = curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1]
+
+            # X = int(curr_coor_bbox_upperleft[0])
+            # Y = int(curr_coor_bbox_upperleft[1])
+            # H = int(curr_coor_bbox_loweright[0] - curr_coor_bbox_upperleft[0])
+            # W = int(curr_coor_bbox_loweright[1] - curr_coor_bbox_upperleft[1])
+
+            # print(curr_coor_bbox_upperleft)
+            # print(curr_coor_bbox_loweright)
+            # print(X, Y, H, W)
+
+
+            # cropped_image = curr_image[X:X+H, Y:Y+W] 
+            # print(cropped_image.shape)
+            # cv2.imwrite(os.path.join("dump_debug_bbox", "6_crop" + ".png"), cv2.cvtColor(to8b(cropped_image), cv2.COLOR_RGB2BGR))
+
+
+            # exit()
+
+
+
         for j in range(num_samples_zoom):
-            c2w = np.hstack((r3.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
+            c2w = np.hstack((interp_rots[j], np.expand_dims(interp_trans[j], axis=1)))
             c2w = np.vstack((c2w, np.array([0,0,0,1])))
+
+            print(c2w)
+            # print(p3)
+            # exit()
+
+            blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+
+            ### Compute corresponding bbox ###
+            curr_coor_bbox_upperleft = np.linalg.inv(c2w.copy()@blender2opencv) @ X_upperleft
+            # curr_coor_bbox_upperleft = np.linalg.solve(c2w@blender2opencv, X_upperleft) 
+            curr_coor_bbox_upperleft = K_video @ (curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1])
+            curr_coor_bbox_upperleft = curr_coor_bbox_upperleft[:-1]/curr_coor_bbox_upperleft[-1]
+
+            curr_coor_bbox_loweright = np.linalg.inv(c2w.copy()@blender2opencv) @ X_loweright
+            # curr_coor_bbox_loweright = np.linalg.solve(c2w@blender2opencv, X_loweright) 
+            curr_coor_bbox_loweright = K_video @ (curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1])
+            curr_coor_bbox_loweright = curr_coor_bbox_loweright[:-1]/curr_coor_bbox_loweright[-1]
+            print(curr_coor_bbox_upperleft)
+            print(curr_coor_bbox_loweright)
+            print()
+
+            bbox = np.array([curr_coor_bbox_upperleft, curr_coor_bbox_loweright])
+
             # print(c2w)
             video_poses.append(c2w.astype(float))
-            video_intrinsics.append(intrinsic.astype(float))  
+            # video_intrinsics.append(intrinsic.astype(float))  
+            video_intrinsics.append(intrinsic_video.astype(float))  
+            video_bboxes.append(bbox.astype(float))
 
-        ### 4 to 5
-        f = interpolate.interp1d([0,1], np.vstack([t4, t5]), axis=0)
-        interp_trans = f(times_zoom)
 
-        for j in range(num_samples_zoom):
-            c2w = np.hstack((r4.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-            c2w = np.vstack((c2w, np.array([0,0,0,1])))
-            # print(c2w)
-            video_poses.append(c2w.astype(float))
-            video_intrinsics.append(intrinsic.astype(float))  
-
-        ### 5 to 6
-        f = interpolate.interp1d([0,1], np.vstack([t5, t6]), axis=0)
-        interp_trans = f(times_zoom)
-
-        for j in range(num_samples_zoom):
-            c2w = np.hstack((r5.as_matrix(), np.expand_dims(interp_trans[j], axis=1)))
-            c2w = np.vstack((c2w, np.array([0,0,0,1])))
-            # print(c2w)
-            video_poses.append(c2w.astype(float))
-            video_intrinsics.append(intrinsic.astype(float))  
 
         
         ### Output to json
         for j in range(len(video_poses)):
             vpose = video_poses[j]
             curr_intrinsic = video_intrinsics[j]
+            curr_bbox = video_bboxes[j]
 
             curr_frame = {"file_path": "", "depth_file_path":"", \
                         "fx":  curr_intrinsic[0], "fy": curr_intrinsic[1], "cx": curr_intrinsic[2], "cy": curr_intrinsic[3],\
-                        "transform_matrix": vpose.tolist()}
+                        "transform_matrix": vpose.tolist(), "bbox": curr_bbox.tolist()}
 
             frames.append(curr_frame)
 
@@ -1282,6 +1413,7 @@ def run_nerf():
         with open(os.path.join(scene_data_dir, "transforms_video2" + str(i) +".json"), "w") as outfile:
             json.dump(data, outfile)
 
+        print(os.path.join(scene_data_dir, "transforms_video2" + str(i) +".json"))
         print()
         print("Num frames: ")
         print(len(frames))

@@ -286,6 +286,7 @@ def load_scene_blender_multidist(basedir, train_json = "transforms_train.json", 
                 far = 6.
                 camera_angle_x = float(meta['camera_angle_x'])
 
+
             imgs = []
             poses = []
             intrinsics = []
@@ -409,11 +410,12 @@ def load_scene_blender_multidist(basedir, train_json = "transforms_train.json", 
     return imgs, None, None, poses, H, W, intrinsics, near, far, i_split, None, None
 
 
-def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.json", half_res=True, train_dist=1.0, test_dist=1.0, val_dist=1.0):
+def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.json", half_res=True, train_dist=1.0, test_dist=1.0, val_dist=1.0, video_idx=0):
     splits = ['train', 'val', 'test', 'video']
 
     all_imgs = []
-
+    all_depths = []
+    all_valid_depths = []
     all_poses = []
     all_intrinsics = []
     counts = [0]
@@ -430,6 +432,8 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
         elif s == "test":
             folder = 'radius_{}_{}'.format(str(test_dist), s)
             transforms_file = 'transforms_radius{}_{}.json'.format(str(test_dist), s)        
+        elif s == 'video':
+            transforms_file = 'transforms_video{}.json'.format(str(video_idx))     
         else:
             ## dummy will return not exist
             transforms_file = "blah"
@@ -438,15 +442,24 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
 
             json_fname =  os.path.join(basedir, transforms_file)
 
+            # print(json_fname)
+
             with open(json_fname, 'r') as fp:
                 meta = json.load(fp)
 
-            # if 'train' in s:
-            near = 2.
-            far = 6.
-            camera_angle_x = float(meta['camera_angle_x'])
+            # # if 'train' in s:
+            # near = 2.
+            # far = 6.
+            # camera_angle_x = float(meta['camera_angle_x'])
+
+            if 'train' in s or 'test' in s:
+                near = 2.
+                far = 6.
+                camera_angle_x = float(meta['camera_angle_x'])
 
             imgs = []
+            depths = []
+            valid_depths = []   
             poses = []
             intrinsics = []
 
@@ -455,7 +468,7 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
             elif s == "val":
                 skip = 1
             elif s =="test":
-                skip = 4
+                skip = 1
             elif "video" in s:
                 skip = 1
             
@@ -466,7 +479,25 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
                     else:
                         downsample = 1
 
+                    # print(os.path.join(basedir, frame['file_path']+".png"))
                     img = read_files(os.path.join(basedir, frame['file_path']+".png"), downsample_scale=downsample)
+
+
+                    ############
+                    max_depth = frame["max_depth"]
+                    depth_scaling_factor = (255. / max_depth)
+
+                    depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'][:-1]+".png"), depth_scaling_factor, near, far)
+
+                    if depth.ndim == 2:
+                        depth = np.expand_dims(depth, -1)
+
+                    valid_depth = np.logical_and(depth[:, :, 0] > near, depth[:, :, 0] < far) # 0 values are invalid depth
+                    depth = np.clip(depth, 0.5, far)
+                    depths.append(depth)
+                    valid_depths.append(valid_depth)
+                    ############
+
 
                     filenames.append(frame['file_path'])
                     imgs.append(img)
@@ -483,6 +514,9 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
             counts.append(counts[-1] + len(poses))
             if len(imgs) > 0:
                 all_imgs.append(np.array(imgs))
+                all_depths.append(np.array(depths))
+                all_valid_depths.append(np.array(valid_depths))
+
             all_poses.append(np.array(poses).astype(np.float32))
             all_intrinsics.append(np.array(intrinsics).astype(np.float32))
 
@@ -512,8 +546,10 @@ def load_scene_blender_fixed_dist_new(basedir, train_json = "transforms_train.js
     imgs = np.concatenate(all_imgs, 0)
     poses = np.concatenate(all_poses, 0)
     intrinsics = np.concatenate(all_intrinsics, 0)
+    depths = np.concatenate(all_depths, 0)
+    valid_depths = np.concatenate(all_valid_depths, 0)
     
-    return imgs, None, None, poses, H, W, intrinsics, near, far, i_split, None, None
+    return imgs, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, None, None
 
 
 
