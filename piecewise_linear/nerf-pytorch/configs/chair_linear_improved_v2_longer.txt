@@ -1,0 +1,18 @@
+expname = chair_linear_improved_v2
+ckpt_dir = logs_blender_hemisphere_reproduce
+scene_id = chair
+dataset = blender
+
+use_viewdirs = True
+white_bkgd = True
+lrate_decay = 500
+
+num_iterations = 500000
+i_weights = 100000
+
+N_samples = 128
+N_importance = 64
+N_rand = 1024
+
+mode = linear
+color_mode = midpoint

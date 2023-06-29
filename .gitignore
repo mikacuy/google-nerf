@@ -42,3 +42,9 @@ piecewise_linear/slurm_output*
 piecewise_linear/runs/*
 piecewise_linear/log*   
 piecewise_linear/depth_priors_network_weights/*
+piecewise_linear/nerf-pytorch/log*
+piecewise_linear/mipnerf-pytorch/log*
+dynibar/Nvidia_long/*
+dynibar/checkpoints/*
+dynibar/nvidia_checkpoints.zip
+
