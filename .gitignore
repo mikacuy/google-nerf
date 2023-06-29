@@ -44,7 +44,7 @@ piecewise_linear/log*
 piecewise_linear/depth_priors_network_weights/*
 piecewise_linear/nerf-pytorch/log*
 piecewise_linear/mipnerf-pytorch/log*
-dynibar/Nvidia_long/*
-dynibar/checkpoints/*
-dynibar/nvidia_checkpoints.zip
+dynibar_mika/Nvidia_long/*
+dynibar_mika/checkpoints/*
+dynibar_mika/nvidia_checkpoints.zip
 
