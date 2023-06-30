@@ -1,8 +1,8 @@
 expname = umbrella
 
-rootdir = /home/zhengqili/dynibar
+rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika
 
-folder_path = /home/zhengqili/nvidia_long_release
+folder_path = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia_long
 
 coarse_dir = checkpoints/coarse/umbrella
 
