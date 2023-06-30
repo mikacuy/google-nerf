@@ -20,6 +20,8 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
+to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
+to16b = lambda x : ((2**16 - 1) * np.clip(x,0,1)).astype(np.uint16)
 
 class DynamicVideoDataset(Dataset):
   """This class loads data from Nvidia benchmarks, including camera scene and image information from source views."""
@@ -274,18 +276,18 @@ if __name__ == '__main__':
   # Create ibrnet model
   model = DynibarFF(args, load_scheduler=False, load_opt=False)
   eval_dataset_name = args.eval_dataset
-  # extra_out_dir = '{}/{}'.format(eval_dataset_name, args.expname)
-  # print('saving results to {}...'.format(extra_out_dir))
-  # os.makedirs(extra_out_dir, exist_ok=True)
+  extra_out_dir = '{}/{}'.format(eval_dataset_name, args.expname)
+  print('saving results to {}...'.format(extra_out_dir))
+  os.makedirs(extra_out_dir, exist_ok=True)
 
   projector = Projector(device='cuda:0')
 
   assert len(args.eval_scenes) == 1, 'only accept single scene'
   scene_name = args.eval_scenes[0]
-  # out_scene_dir = os.path.join(extra_out_dir, 'renderings')
-  # print('saving results to {}'.format(out_scene_dir))
-  # os.makedirs(out_scene_dir, exist_ok=True)
-  exit()
+
+  out_scene_dir = os.path.join(extra_out_dir, 'renderings')
+  print('saving results to {}'.format(out_scene_dir))
+  os.makedirs(out_scene_dir, exist_ok=True)
 
   lpips_model = models.PerceptualLoss(
       model='net-lin', net='alex', use_gpu=True, version=0.1
@@ -456,6 +458,14 @@ if __name__ == '__main__':
       st_psnr_list.append(static_psnr)
       st_ssim_list.append(static_ssim)
       st_lpips_list.append(static_lpips)
+
+      #### Output to image ####
+      print(gt_img.shape)
+      print(fine_pred_rgb.shape)
+      print(static_mask.shape)
+      print(dynamic_mask.shape)
+      exit()
+      #########################
 
     print('MOVING PSNR ', np.mean(np.array(psnr_list)))
     print('MOVING SSIM ', np.mean(np.array(ssim_list)))
