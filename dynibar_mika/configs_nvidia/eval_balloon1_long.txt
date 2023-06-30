@@ -1,4 +1,4 @@
-expname = balloon1_test_mika
+expname = balloon1
 
 rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika
 
