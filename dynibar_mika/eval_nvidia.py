@@ -470,6 +470,12 @@ if __name__ == '__main__':
       print(fine_pred_rgb.shape)
       print(static_mask.shape)
       print(dynamic_mask.shape)
+
+      cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_rgb" + ".jpg"), cv2.cvtColor(to8b(fine_pred_rgb), cv2.COLOR_RGB2BGR))
+      cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_gt" + ".jpg"), cv2.cvtColor(to8b(gt_img), cv2.COLOR_RGB2BGR))
+      cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_staticmask" + ".jpg"), cv2.cvtColor(to8b(static_mask), cv2.COLOR_RGB2BGR))
+      cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_dynamicmask" + ".jpg"), cv2.cvtColor(to8b(dynamic_mask), cv2.COLOR_RGB2BGR))
+
       exit()
       #########################
 
