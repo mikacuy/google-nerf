@@ -460,6 +460,12 @@ if __name__ == '__main__':
       st_lpips_list.append(static_lpips)
 
       #### Output to image ####
+      print(gt_img)
+      print()
+      print(fine_pred_rgb)
+      print()
+      print(static_mask)
+      print()
       print(gt_img.shape)
       print(fine_pred_rgb.shape)
       print(static_mask.shape)
