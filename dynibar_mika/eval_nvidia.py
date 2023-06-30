@@ -285,6 +285,7 @@ if __name__ == '__main__':
   # out_scene_dir = os.path.join(extra_out_dir, 'renderings')
   # print('saving results to {}'.format(out_scene_dir))
   # os.makedirs(out_scene_dir, exist_ok=True)
+  exit()
 
   lpips_model = models.PerceptualLoss(
       model='net-lin', net='alex', use_gpu=True, version=0.1

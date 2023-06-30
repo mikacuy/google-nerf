@@ -251,7 +251,7 @@ class DynibarFF(object):
     num_steps = self.load_coarse_model(fpath)
 
     step = num_steps
-    print('Reloading from {}, starting at step={}'.format(fpath, step))
+    print('Reloading coarse from {}, starting at step={}'.format(fpath, step))
 
     return step
 
@@ -280,7 +280,7 @@ class DynibarFF(object):
       fpath = ckpts[-1]
       num_steps = self.load_fine_model(fpath, load_opt, load_scheduler)
       step = num_steps
-      print('Reloading from {}, starting at step={}'.format(fpath, step))
+      print('Reloading from fine {}, starting at step={}'.format(fpath, step))
     else:
       print('No ckpts found, training from scratch...')
       step = 0
