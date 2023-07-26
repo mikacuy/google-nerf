@@ -60,6 +60,13 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
   poses = poses_arr[:, :-2].reshape([-1, 3, 5]).transpose([1, 2, 0])
   bds = poses_arr[:, -2:].transpose([1, 0])
 
+  print("In load data.")
+  print(poses.shape)
+  print(bds.shape)
+  # print(bds[:,0])
+  # print(bds[:,10])
+  # exit()
+
   img0 = [
       os.path.join(basedir, 'images', f)
       for f in sorted(os.listdir(os.path.join(basedir, 'images')))
@@ -259,6 +266,10 @@ def load_llff_data(
       [poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1
   )
   poses = np.moveaxis(poses, -1, 0).astype(np.float32)
+
+  print(poses.shape)
+  # exit()
+
   if imgs is not None:
     imgs = np.moveaxis(imgs, -1, 0).astype(np.float32)
     images = imgs
@@ -267,6 +278,8 @@ def load_llff_data(
     images = None
 
   bds = np.moveaxis(bds, -1, 0).astype(np.float32)
+  print(bds.shape)
+  # exit()
 
   # Rescale if bd_factor is provided
   scale = 1.0 if bd_factor is None else 1.0 / (bds.min() * bd_factor)
@@ -276,6 +289,8 @@ def load_llff_data(
 
   if recenter:
     poses = recenter_poses(poses)
+
+  print(recenter)
 
   spiral = True
   if spiral:
@@ -300,6 +315,8 @@ def load_llff_data(
     n_views = 120
     n_rots = 2
 
+    print(c2w_path.shape)
+
     # Generate poses for spiral path
     render_poses = render_path_spiral(
         c2w_path, up, rads, focal, zdelta, zrate=0.5, rots=n_rots, N=n_views
@@ -309,11 +326,14 @@ def load_llff_data(
 
   render_poses = np.array(render_poses).astype(np.float32)
 
+  print(render_poses.shape)
+
   dists = np.sum(np.square(c2w[:3, 3] - poses[:, :3, 3]), -1)
   i_test = np.argmin(dists)
   poses = poses.astype(np.float32)
 
   print('bds ', bds.min(), bds.max())
+  # exit()
 
   return images, poses, bds, render_poses, i_test, imgfiles, scale
 

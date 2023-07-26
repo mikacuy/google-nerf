@@ -26,6 +26,7 @@ from utils import colorize
 from utils import img2mse
 from utils import img_HWC2CHW
 from utils import mse2psnr
+from utils import compute_space_carving_loss
 
 
 def worker_init_fn(worker_id):
@@ -113,11 +114,14 @@ def train(args):
   decay_rate = args.decay_rate
 
   # First bootstrap static model for better training stability 
-  for epoch in range(start_epoch, args.init_decay_epoch // 2):
+#   for epoch in range(start_epoch, args.init_decay_epoch // 2):
+  for epoch in range(start_epoch, 10):
     train_dataset.set_epoch(epoch)
     print('================ Static Boostrap ', epoch)
 
     for ii, train_data in enumerate(train_loader):
+      time0 = time.time()
+
       ref_time_embedding = train_data['ref_time'].to(device)
       anchor_time_embedding = train_data['anchor_time'].to(device)
 
@@ -195,11 +199,63 @@ def train(args):
 
       loss = static_loss
 
+      # disparity loss
+      w_disp = args.w_disp
+      pred_disp = 1.0 / torch.clamp(
+          ret['outputs_coarse_st']['depth'], min=1e-2
+      )
+
+      gt_disp = ray_batch['disp']
+      pred_mask = ret['outputs_coarse_st']['mask']
+      disp_loss = (
+          w_disp
+          * torch.sum(torch.abs(pred_disp - gt_disp) * pred_mask)
+          / (torch.sum(pred_mask) + 1e-8)
+      )
+      
+      loss += disp_loss
+
+      ### SCADE ###
+      pred_samples = ret['outputs_coarse_st']["scade_samples"]
+      gt_samples = 1.0 / torch.clamp(
+          ray_batch['disp'], min=1e-2
+      )
+
+      # [num_hypothesis, N_batch, 1]
+      gt_samples = gt_samples.unsqueeze(0)
+      gt_samples = gt_samples.unsqueeze(-1)
+
+      space_carving_loss = compute_space_carving_loss(pred_samples, gt_samples, is_joint=args.is_joint, mask=pred_mask)
+      
+      space_carving_loss = args.w_scade * space_carving_loss
+      loss += space_carving_loss
+      #############
+
       loss.backward()
       model.optimizer.step()
       global_step += 1
 
-      if global_step % args.i_img == 0:
+      scalars_to_log['loss'] = loss.item()
+      scalars_to_log['disp_loss'] = disp_loss.item()
+      scalars_to_log['space_carving_loss'] = space_carving_loss.item()
+      scalars_to_log['static_loss'] = static_loss.item()
+      dt = time.time() - time0
+    
+      if global_step % args.i_print == 0 and args.local_rank == 0:
+        print('expname ', args.expname)
+        print(
+            'disp_loss ', scalars_to_log['disp_loss'],
+            ' static_loss ', scalars_to_log['static_loss'],
+            ' space_carving_loss ', scalars_to_log['space_carving_loss']
+        )
+        print(
+            'epoch %d global_step %d' % (epoch, global_step),
+            ' dt optimization ',
+            dt,
+        )
+
+
+      if global_step % args.i_img == 0 and args.local_rank == 0:
         print('Logging current training view...')
         tmp_ray_train_sampler = RaySamplerSingleImage(train_data, device)
         H, W = tmp_ray_train_sampler.H, tmp_ray_train_sampler.W
@@ -341,6 +397,22 @@ def train(args):
           / (torch.sum(pred_mask) + 1e-8)
       )
 
+      # SCADE loss
+      ### SCADE ###
+      pred_samples = ret['outputs_coarse_ref']["scade_samples"]
+      gt_samples = 1.0 / torch.clamp(
+          ray_batch['disp'], min=1e-2
+      )
+
+      # [num_hypothesis, N_batch, 1]
+      gt_samples = gt_samples.unsqueeze(0)
+      gt_samples = gt_samples.unsqueeze(-1)
+
+      space_carving_loss = compute_space_carving_loss(pred_samples, gt_samples, is_joint=args.is_joint, mask=pred_mask)
+      
+      space_carving_loss = args.w_scade * space_carving_loss
+      #############
+
       # # flow loss
       w_flow = args.w_flow / (decay_rate**divisor)
       flow_mask = pred_mask[None, :, None] * ray_batch['masks']
@@ -453,6 +525,7 @@ def train(args):
           + entropy_loss
           + distortion_loss
           + static_loss
+          + space_carving_loss
       )
 
       scalars_to_log['loss'] = loss.item()
@@ -462,6 +535,7 @@ def train(args):
       scalars_to_log['distortion_loss'] = distortion_loss.item()
       scalars_to_log['entropy_loss'] = entropy_loss.item()
       scalars_to_log['static_loss'] = static_loss.item()
+      scalars_to_log['space_carving_loss'] = space_carving_loss.item()
 
       loss.backward()
       model.optimizer.step()
@@ -482,6 +556,7 @@ def train(args):
         print('divisor ', divisor)
         print(
             'disp_loss ', scalars_to_log['disp_loss'],
+            'space_carving_loss ', scalars_to_log['space_carving_loss'],
             ' flow_loss ', scalars_to_log['flow_loss'],
             ' rgb_loss ', scalars_to_log['rgb_loss'],
         )

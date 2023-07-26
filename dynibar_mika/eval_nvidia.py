@@ -38,6 +38,12 @@ class DynamicVideoDataset(Dataset):
     self.scene_path = os.path.join(
         self.folder_path, scene, 'dense'
     )
+
+    print("Render index")
+    print(render_idx)
+    # exit()
+
+
     _, poses, bds, _, i_test, rgb_files, _ = load_llff_data(
         self.scene_path,
         height=288,
@@ -91,6 +97,15 @@ class DynamicVideoDataset(Dataset):
         'cam%02d.jpg' % (idx + 1),
     )
 
+    print(self.render_idx)
+    print(idx)
+    print(gt_img_path)
+    print(self.train_poses.shape)
+    print("Render pose:")
+    print(render_pose)
+    print("Train pose idx")
+    print(self.train_poses[idx])
+    print()
     nearest_pose_ids = np.sort(
         [self.render_idx + offset for offset in [1, 2, 3, 0, -1, -2, -3]]
     )
@@ -101,6 +116,11 @@ class DynamicVideoDataset(Dataset):
     # Since benchamrk has fixed viewpoint in a round-robin manner
     static_pose_ids = np.array(list(range(0, train_poses.shape[0])))
     static_id_dict = collections.defaultdict(list)
+
+    # print(static_pose_ids)
+    # print(static_id_dict)
+    # exit()
+
     for static_pose_id in static_pose_ids:
       # do not include image with the same viewpoint
       if (
@@ -111,6 +131,9 @@ class DynamicVideoDataset(Dataset):
 
       static_id_dict[static_pose_id % num_imgs_per_cycle].append(static_pose_id)
 
+    # print(static_id_dict)
+    # print()
+
     static_pose_ids = []
     for key in static_id_dict:
       min_idx = np.argmin(
@@ -119,6 +142,10 @@ class DynamicVideoDataset(Dataset):
       static_pose_ids.append(static_id_dict[key][min_idx])
 
     static_pose_ids = np.sort(static_pose_ids)
+
+    # print(static_pose_ids)
+    # print(len(static_pose_ids))
+    # exit()
 
     src_rgbs = []
     src_cameras = []
@@ -305,7 +332,7 @@ if __name__ == '__main__':
   st_ssim_list = []
   st_lpips_list = []
 
-  for img_i in range(3, args.num_frames - 3): 
+  for img_i in range(10, args.num_frames - 3): 
     test_dataset = DynamicVideoDataset(img_i, args, scenes=args.eval_scenes)
     save_prefix = scene_name
     test_loader = DataLoader(
@@ -313,6 +340,9 @@ if __name__ == '__main__':
     )
     total_num = len(test_loader)
     out_frames = []
+
+    print(len(test_loader))
+    # exit()
 
     for i, data in enumerate(test_loader):
       print('img_i ', img_i, i)
@@ -323,12 +353,17 @@ if __name__ == '__main__':
       # idx = int(data['id'].item())
       start = time.time()
 
-      ref_time_embedding = data['ref_time'].cuda()
-      ref_frame_idx = int(data['id'].item())
+      ref_time_embedding = data['ref_time'].cuda() ## id/num_frames
+      ref_frame_idx = int(data['id'].item()) ## ID of the frame goes from [0, len(frames)]
       ref_time_offset = [
           int(near_idx - ref_frame_idx)
           for near_idx in data['nearest_pose_ids'].squeeze().tolist()
-      ]
+      ] ### neighbors to take -- goes from -3 to 3 now
+
+      print(ref_time_embedding)
+      print(ref_frame_idx)
+      print(ref_time_offset)
+      print()
 
       model.switch_to_eval()
       with torch.no_grad():
@@ -339,6 +374,11 @@ if __name__ == '__main__':
             ray_batch['src_rgbs'].squeeze(0).permute(0, 3, 1, 2)
         )
         ref_featmaps = cb_featmaps_1
+
+        print("Feature extractor:")
+        print(cb_featmaps_1.shape)
+        print(cb_featmaps_2.shape)
+        print()
 
         static_src_rgbs = (
             ray_batch['static_src_rgbs'].squeeze(0).permute(0, 3, 1, 2)
@@ -360,6 +400,18 @@ if __name__ == '__main__':
 
         _, static_featmaps_fine = model.feature_net_fine(static_src_rgbs_)
 
+        print("Rgb images sizes:")
+        print(ray_batch['src_rgbs'].shape)
+        print(ray_batch['static_src_rgbs'].shape)
+
+        print("Feature map sizes")
+        print(ref_featmaps.shape)
+        print(ref_featmaps_fine.shape)
+        print("=======")
+        print(static_featmaps.shape)
+        print(static_featmaps_fine.shape)
+
+
         ret = render_single_image_nvi(
             frame_idx=(ref_frame_idx, None),
             time_embedding=(ref_time_embedding, None),
@@ -379,6 +431,8 @@ if __name__ == '__main__':
             fine_featmaps=(ref_featmaps_fine, None, static_featmaps_fine),
             is_train=False,
         )
+        
+        exit()
 
       fine_pred_rgb = ret['outputs_fine_ref']['rgb'].detach().cpu().numpy()
       fine_pred_depth = ret['outputs_fine_ref']['depth'].detach().cpu().numpy()

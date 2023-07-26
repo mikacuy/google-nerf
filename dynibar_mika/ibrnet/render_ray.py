@@ -11,7 +11,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-USE_DISTANCE = False
+# USE_DISTANCE = False
+USE_DISTANCE = True
 USE_SOFTPLUS = True
 VARIANCE_CLAMP = False
 
@@ -63,6 +64,84 @@ def sample_pdf(bins, weights, N_samples, det=False):
 
   return samples
 
+def sample_pdf_joint(bins, weights, N_samples, det=False):
+    # Get pdf
+    weights = weights + 1e-5 # prevent nans
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
+    cdf = torch.cumsum(pdf, -1)
+    cdf = torch.cat([torch.zeros_like(cdf[...,:1]), cdf], -1)  # (batch, len(bins))
+
+    # Take uniform samples
+    if det:
+        u = torch.linspace(0., 1., steps=N_samples, device=bins.device)
+        u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+    else:
+        ## Joint samples
+        u = torch.rand(N_samples, device=bins.device)
+        u = u.unsqueeze(0).repeat(cdf.shape[0], 1)
+
+    # Invert CDF
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    below = torch.max(torch.zeros_like(inds-1), inds-1)
+    above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
+    inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
+    
+    # cdf_g = tf.gather(cdf, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    # bins_g = tf.gather(bins, inds_g, axis=-1, batch_dims=len(inds_g.shape)-2)
+    matched_shape = [inds_g.shape[0], inds_g.shape[1], cdf.shape[-1]]
+    cdf_g = torch.gather(cdf.unsqueeze(1).expand(matched_shape), 2, inds_g)
+    bins_g = torch.gather(bins.unsqueeze(1).expand(matched_shape), 2, inds_g)
+
+    denom = (cdf_g[...,1]-cdf_g[...,0])
+    denom = torch.where(denom<1e-5, torch.ones_like(denom), denom)
+    t = (u-cdf_g[...,0])/denom
+    samples = bins_g[...,0] + t * (bins_g[...,1]-bins_g[...,0])
+
+    return samples
+
+
+def get_scade_samples(z_vals, weights, num_samples, inv_uniform, det, is_joint=False):
+  if inv_uniform:
+    inv_z_vals = 1.0 / z_vals
+    inv_z_vals_mid = 0.5 * (
+        inv_z_vals[:, 1:] + inv_z_vals[:, :-1]
+    )  # [N_rays, N_samples-1]
+    weights = weights[:, 1:-1]  # [N_rays, N_samples-2]
+
+    if not is_joint:
+        inv_z_vals = sample_pdf(
+            bins=torch.flip(inv_z_vals_mid, dims=[1]),
+            weights=torch.flip(weights, dims=[1]),
+            N_samples=num_samples,
+            det=det,
+        )  # [N_rays, N_importance]
+    else:
+        inv_z_vals = sample_pdf_joint(
+            bins=torch.flip(inv_z_vals_mid, dims=[1]),
+            weights=torch.flip(weights, dims=[1]),
+            N_samples=num_samples,
+            det=det,
+        )  # [N_rays, N_importance]
+              
+    z_samples = 1.0 / inv_z_vals
+  else:
+    # take mid-points of depth samples
+    z_vals_mid = 0.5 * (z_vals[:, 1:] + z_vals[:, :-1])  # [N_rays, N_samples-1]
+    weights = weights[:, 1:-1]  # [N_rays, N_samples-2]
+
+    if not is_joint:
+        z_samples = sample_pdf(
+            bins=z_vals_mid, weights=weights, N_samples=num_samples, det=det
+        )  # [N_rays, N_importance]
+    else:
+        z_samples = sample_pdf_joint(
+            bins=z_vals_mid, weights=weights, N_samples=num_samples, det=det
+        )  # [N_rays, N_importance]      
+  
+  return z_samples
 
 def sample_along_camera_ray(
     ray_o, ray_d, depth_range, N_samples, inv_uniform=False, det=False
@@ -682,6 +761,12 @@ def render_rays_mv(
     )
     raw_coeff_xyz = model.motion_mlp(ref_xyzt)
     raw_coeff_xyz[:, -num_last_samples:, :] *= 0.0
+    
+    # print("In render rays:")
+    # print(pts_ref.shape)
+    # print(ref_xyzt.shape)
+    # print(raw_coeff_xyz.shape)
+    # print()
 
     num_basis = model.trajectory_basis.shape[1]
     raw_coeff_x = raw_coeff_xyz[..., 0:num_basis]
@@ -710,6 +795,13 @@ def render_rays_mv(
     pts_3d_static = pts_ref[None, ...].repeat(
         ray_batch['static_src_rgbs'].shape[1], 1, 1, 1
     )
+
+    # print(pts_3d_seq_ref.shape)
+    # print(pts_3d_static.shape)
+    # print()
+    # print(pts_ref.shape)
+    # print(ray_batch['static_src_rgbs'].shape)
+    # print()
 
     # feature query from source view with scene motions, for ref view
     rgb_feat_ref, ray_diff_ref, mask_ref = projector.compute_with_motions(
@@ -1073,6 +1165,20 @@ def render_rays_mono(
   outputs_coarse_ref_dy = raw2outputs_vanilla(
       raw_coarse_ref, z_vals, pixel_mask_ref
   )
+
+  #### For SCADE loss ####
+  static_weights = outputs_coarse_st["weights"]
+  dynamic_weights = outputs_coarse_ref_dy["weights"]
+  combined_weights = outputs_coarse_ref["weights"]
+
+  static_scade_samples = get_scade_samples(z_vals, static_weights, N_samples, inv_uniform, det)
+  dynamic_scade_samples = get_scade_samples(z_vals, dynamic_weights, N_samples, inv_uniform, det)
+  combined_scade_samples = get_scade_samples(z_vals, combined_weights, N_samples, inv_uniform, det)
+
+  outputs_coarse_ref['scade_samples'] = combined_scade_samples
+  outputs_coarse_st['scade_samples'] = static_scade_samples
+  outputs_coarse_ref_dy['scade_samples'] = dynamic_scade_samples
+  ########################
 
   render_flows = compute_optical_flow(
       outputs_coarse_ref,

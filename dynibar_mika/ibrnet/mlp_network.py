@@ -236,6 +236,9 @@ class DynibarDynamic(nn.Module):
   def forward(
       self, pts_xyz, rgb_feat, glb_ray_dir, ray_diff, time_diff, mask, time
   ):
+    
+    # print("In Dynibar forward")
+
     num_views = rgb_feat.shape[2]
     time_pe = (
         self.t_embed(time)[..., None, :].repeat(1, 1, num_views, 1).float()
@@ -243,8 +246,14 @@ class DynibarDynamic(nn.Module):
 
     direction_feat = self.ray_dir_fc(time_pe)
 
+    # print("Rgb_feat")
+    # print(rgb_feat.shape)
+
     # rgb_in = rgb_feat[..., :3]
     rgb_feat = rgb_feat + direction_feat
+
+    # print(rgb_feat.shape)
+    # print()
 
     if self.anti_alias_pooling:
       _, dot_prod = torch.split(ray_diff, [3, 1], dim=-1)
@@ -260,6 +269,11 @@ class DynibarDynamic(nn.Module):
     mean, var = fused_mean_variance(
         rgb_feat, weight
     )  # [n_rays, n_samples, 1, n_feat]
+
+    # print("Mean Var")
+    # print(mean.shape)
+    # print(var.shape)
+
     globalfeat = torch.cat(
         [mean, var], dim=-1
     )  # [n_rays, n_samples, 1, 2*n_feat]
@@ -276,11 +290,28 @@ class DynibarDynamic(nn.Module):
     vis = self.vis_fc2(x * vis) * mask
     weight = vis / (torch.sum(vis, dim=2, keepdim=True) + 1e-8)
 
+    # print(x.shape)
+    # print()
+
     mean, var = fused_mean_variance(x, weight)
+
+    # print("Mean Var")
+    # print(mean.shape)
+    # print(var.shape)
+    # print()
+
+    # print("Global Feat")
+
     globalfeat = torch.cat(
         [mean.squeeze(2), var.squeeze(2), weight.mean(dim=2)], dim=-1
     )  # [n_rays, n_samples, 32*2+1]
+
+    # print(globalfeat.shape)
+
     globalfeat = self.geometry_fc(globalfeat)  # [n_rays, n_samples, 16]
+
+    # print(globalfeat.shape)
+
     num_valid_obs = torch.sum(mask, dim=2)
 
     globalfeat = globalfeat + self.pos_encoding.to(globalfeat.device)
@@ -288,8 +319,16 @@ class DynibarDynamic(nn.Module):
         globalfeat, globalfeat, globalfeat, mask=(num_valid_obs > 1).float()
     )  # [n_rays, n_samples, 16]
 
+    # print(globalfeat.shape)
+
     pts_xyz_pe = self.pts_embed(pts_xyz)
     globalfeat = self.ref_pts_fc(torch.cat([globalfeat, pts_xyz_pe], dim=-1))
+
+    # print()
+    # print(pts_xyz.shape)
+    # print(pts_xyz_pe.shape)
+    # print(globalfeat.shape)
+    # exit()
 
     sigma = (
         self.out_geometry_fc(globalfeat) - self.shift

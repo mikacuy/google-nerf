@@ -372,4 +372,13 @@ def config_parser():
       help='Frequency of weight ckpt saving',
   )
 
+  ##### For SCADE #####
+  parser.add_argument(
+      '--w_scade', type=float, default=0.001, help='Weight for scade loss'
+  )  
+  parser.add_argument(
+      '--is_joint',
+      action='store_true',
+      help='If True, uses joint distribution across pixels in the image for the scade loss',
+  )
   return parser

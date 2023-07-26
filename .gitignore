@@ -47,4 +47,11 @@ piecewise_linear/mipnerf-pytorch/log*
 dynibar_mika/Nvidia_long/*
 dynibar_mika/checkpoints/*
 dynibar_mika/nvidia_checkpoints.zip
-
+dynibar_mika/release.zip
+dynibar_mika/release/*
+Neural-Scene-Flow-Fields_mika/nsff_scripts/model.pt
+Neural-Scene-Flow-Fields_mika/nsff_scripts/models.zip
+dynibar_mika/logs/*
+dynibar_mika/out/*
+Neural-Scene-Flow-Fields_mika/NSFF/
+dynamic-video-depth_mika/

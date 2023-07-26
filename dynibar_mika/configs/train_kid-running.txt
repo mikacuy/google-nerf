@@ -1,8 +1,8 @@
 expname = kid-running-test
 
-rootdir = /home/zhengqili/dynibar
+rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika
 
-folder_path = /home/zhengqili/release
+folder_path = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/release
 
 no_reload = False
 render_stride = 1
@@ -35,7 +35,7 @@ white_bkgd = False
 
 ### CONSOLE AND TENSORBOARD
 i_img = 5000
-i_print = 5000
+i_print = 100
 i_weights = 10000
 
 anti_alias_pooling = 0
@@ -67,3 +67,6 @@ num_source_views = 7
 
 num_vv = 3
 mask_src_view = True
+
+w_scade = 0.1
+is_joint = True

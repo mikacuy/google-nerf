@@ -162,9 +162,13 @@ class MonocularDataset(Dataset):
     disp = np.load(disp_path) / self.scale
 
     # load motion mask
+    # mask_path = os.path.join(
+    #     '/'.join(rgb_file.split('/')[:-2]), 'dynamic_masks', '%05d.png' % idx
+    # )
     mask_path = os.path.join(
-        '/'.join(rgb_file.split('/')[:-2]), 'dynamic_masks', '%05d.png' % idx
+        '/'.join(rgb_file.split('/')[:-2]), 'dynamic_masks', '%d.png' % idx
     )
+
     motion_mask = 1.0 - imageio.imread(mask_path).astype(np.float32) / 255.0
 
     static_mask_path = os.path.join(
@@ -339,11 +343,17 @@ class MonocularDataset(Dataset):
       st_mask_path = None
 
       if self.mask_src_view:
+        # st_mask_path = os.path.join(
+        #     '/'.join(rgb_file.split('/')[:-2]),
+        #     'dynamic_masks',
+        #     '%05d.png' % st_near_id,
+        # )
         st_mask_path = os.path.join(
             '/'.join(rgb_file.split('/')[:-2]),
             'dynamic_masks',
-            '%05d.png' % st_near_id,
+            '%d.png' % st_near_id,
         )
+
 
       src_rgb, src_camera = self.load_src_view(
           train_rgb_files[st_near_id],
