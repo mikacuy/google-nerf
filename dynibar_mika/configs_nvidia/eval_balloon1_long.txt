@@ -1,10 +1,11 @@
-expname = balloon1
+expname = balloon
 
 rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika
 
 folder_path = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia_long
 
-coarse_dir = checkpoints/coarse/balloon1
+coarse_dir = checkpoints/coarse
+coarse_only = True
 
 distributed = False
 
@@ -18,10 +19,10 @@ chunk_size = 8192
 N_importance = 64
 N_samples = 64
 inv_uniform = True
-anti_alias_pooling = 1
-mask_rgb = 0
+anti_alias_pooling = 0
 
 input_dir = True
 input_xyz = False
 
-mask_static = True
+# mask_static = True
+# mask_rgb = 0

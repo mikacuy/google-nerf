@@ -129,6 +129,103 @@ def _load_data(basedir, factor=None, width=None, height=None, load_imgs=True):
 
   return poses, bds, imgs, imgfiles
 
+def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True):
+  """Function for loading LLFF data."""
+  poses_arr = np.load(os.path.join(basedir, 'poses_bounds_cvd.npy'))
+  poses = poses_arr[:, :-2].reshape([-1, 3, 5])
+  bds = poses_arr[:, -2:]
+
+  print("In load data multicam.")
+  print(poses.shape)
+  print(bds.shape)
+  # print(bds[:,0])
+  # print(bds[:,10])
+  print(camera_indices)
+  print(len(camera_indices))
+  # exit()
+
+  factor = 1
+
+  imgdir = os.path.join(basedir, 'mv_images')
+  print('imgdir ', imgdir, ' factor ', factor)
+
+  if not os.path.exists(imgdir):
+    print(imgdir, 'does not exist, returning')
+    return
+  
+  imgfols = [
+      os.path.join(imgdir, f)
+      for f in sorted(os.listdir(imgdir))
+  ]
+
+  # print(imgfols)
+  print(len(imgfols))
+  # exit()
+
+  '''
+  Load for each camera
+  '''
+  all_poses = []
+  all_bounds = []
+  all_imgfiles = []
+
+  for cam_idx in camera_indices:
+    curr_imgfiles = [
+      os.path.join(imgfols[i], 'cam%02d.jpg'%cam_idx)
+      for i in range(len(imgfols))
+    ]
+    curr_poses = [
+      poses[cam_idx]
+      for _ in range(len(imgfols))
+    ]    
+    curr_bounds = [
+        bds[cam_idx]
+      for _ in range(len(imgfols))
+    ]
+
+    all_poses += curr_poses
+    all_bounds += curr_bounds
+    all_imgfiles += curr_imgfiles
+
+  all_poses = np.stack(all_poses, 0)
+  all_bounds = np.stack(all_bounds, 0)
+
+  poses = all_poses.transpose([1, 2, 0])
+  bds = all_bounds.transpose([1, 0])
+  imgfiles = all_imgfiles
+
+  print(len(imgfiles))
+  print(imgfiles[0])
+  print(poses.shape)
+  print(bds.shape)
+
+  if poses.shape[-1] != len(imgfiles):
+    print(
+        '{}: Mismatch between imgs {} and poses {} !!!!'.format(
+            basedir, len(imgfiles), poses.shape[-1]
+        )
+    )
+    raise NotImplementedError
+
+  sh = imageio.imread(imgfiles[0]).shape
+  poses[:2, 4, :] = np.array(sh[:2]).reshape([2, 1])
+  poses[2, 4, :] = poses[2, 4, :]  # * 1. / factor
+
+  def imread(f):
+    if f.endswith('png'):
+      return imageio.imread(f, ignoregamma=True)
+    else:
+      return imageio.imread(f)
+
+  if not load_imgs:
+    imgs = None
+  else:
+    imgs = [imread(f)[..., :3] / 255.0 for f in imgfiles]
+    imgs = np.stack(imgs, -1)
+    print('Loaded image data', imgs.shape, poses[:, -1, 0])
+
+  return poses, bds, imgs, imgfiles
+
 
 def normalize(x):
   return x / np.linalg.norm(x)
@@ -218,6 +315,127 @@ def recenter_poses_mono(poses, src_vv_poses):
     src_output_poses[i, ...] = np.concatenate([src_vv_poses_[:, :3, :], hwf], 2)
 
   return poses, np.moveaxis(src_output_poses, 1, 0)
+
+def load_llff_data_multicam(
+    basedir,
+    camera_indices,
+    num_avg_imgs,
+    factor=8,
+    render_idx=8,
+    recenter=True,
+    bd_factor=0.75,
+    spherify=False,
+    load_imgs=True,
+):
+  """Load LLFF forward-facing data.
+  
+  Args:
+    basedir: base directory
+    camera_indices: select which cameras to use from the nvidia data
+    factor: resize factor
+    render_idx: rendering frame index from the video
+    recenter: recentor camera poses
+    bd_factor: scale factor for bounds
+    spherify: spherify the camera poses
+    load_imgs: load images from the disk
+
+  Returns:
+    images: video frames
+    poses: corresponding camera parameters
+    bds: bounds
+    render_poses: rendering camera poses 
+    i_test: test index
+    imgfiles: list of image path
+    scale: scene scale
+  """
+  out = _load_data_multicam(
+      basedir, camera_indices, factor=None, load_imgs=load_imgs
+  )
+
+  if out is None:
+    return
+  else:
+    poses, bds, imgs, imgfiles = out
+
+  # print(poses.shape)
+  # print(bds.shape)
+  # print(imgfiles[200])
+  # print(imgs)
+  # exit()
+
+  # Correct rotation matrix ordering and move variable dim to axis 0
+  poses = np.concatenate(
+      [poses[:, 1:2, :], -poses[:, 0:1, :], poses[:, 2:, :]], 1
+  )
+  poses = np.moveaxis(poses, -1, 0).astype(np.float32)
+
+  print(poses.shape)
+  # exit()
+
+  if imgs is not None:
+    imgs = np.moveaxis(imgs, -1, 0).astype(np.float32)
+    images = imgs
+    images = images.astype(np.float32)
+  else:
+    images = None
+
+  bds = np.moveaxis(bds, -1, 0).astype(np.float32)
+
+  # Rescale if bd_factor is provided
+  scale = 1.0 if bd_factor is None else 1.0 / (bds.min() * bd_factor)
+
+  poses[:, :3, 3] *= scale
+  bds *= scale
+
+  if recenter:
+    poses = recenter_poses(poses)
+
+  print(recenter)
+
+  spiral = True
+  if spiral:
+    print('================= render_path_spiral ==========================')
+    c2w = poses_avg(poses[0:num_avg_imgs])
+    ## Get spiral
+    # Get average pose
+    up = normalize(poses[:, :3, 1].sum(0))
+
+    # Find a reasonable "focus depth" for this dataset
+    close_depth, inf_depth = bds.min() * 0.9, bds.max() * 2.0
+    dt = 0.75
+    mean_dz = 1.0 / (((1.0 - dt) / close_depth + dt / inf_depth))
+    focal = mean_dz * 1.5
+
+    # Get radii for spiral path
+    # shrink_factor = 0.8
+    zdelta = close_depth * 0.2
+    tt = poses[:, :3, 3]  # ptstocam(poses[:3,3,:].T, c2w).T
+    rads = np.percentile(np.abs(tt), 80, 0)
+    c2w_path = c2w
+    n_views = 120
+    n_rots = 2
+
+    print(c2w_path.shape)
+
+    # Generate poses for spiral path
+    render_poses = render_path_spiral(
+        c2w_path, up, rads, focal, zdelta, zrate=0.5, rots=n_rots, N=n_views
+    )
+  else:
+    raise NotImplementedError
+
+  render_poses = np.array(render_poses).astype(np.float32)
+
+  print(render_poses.shape)
+
+  dists = np.sum(np.square(c2w[:3, 3] - poses[:, :3, 3]), -1)
+  i_test = np.argmin(dists)
+  poses = poses.astype(np.float32)
+
+  print('bds ', bds.min(), bds.max())
+  # exit()
+
+  return images, poses, bds, render_poses, i_test, imgfiles, scale
 
 
 def load_llff_data(

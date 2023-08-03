@@ -1,0 +1,68 @@
+### INPUT
+expname = Balloon2-long_6f_64-fine_mix-color_coord_new_char_ft
+
+rootdir = /home/zhengqili/filestore/IBR/UCSD-Coord-exp/Fine_exp_new/IBRNet_tc_oh_mix-color_largeMLP_st-dy-fact-single-fe_Charbonier-1.1_ft
+
+folder_path = /home/zhengqili/filestore/NSFF/nerf_data/nvidia_data_long
+
+coarse_dir = /home/zhengqili/filestore/IBR/UCSD-Coord-exp/Coarse_exp_new/IBRNet_tc_oh_mix-color_largeMLP_st-dy-fact-single-fe_Charbonier-1.1/out/balloon2-long_6f_64-coarse_mix-color_new_charbonier-4096occ_weights_mode-0_w-disp-0.0500_anneal_cycle-1_sfm_reg-1_w-flow-0.0050_w-distortion-0.0010_w-se-1.00-0.0005
+
+no_reload = False
+render_stride = 1
+distributed = False
+no_load_opt = True
+no_load_scheduler = True
+n_iters = 200001
+
+## dataset
+train_dataset = Nvidia
+train_scenes = Balloon2
+eval_dataset = Nvidia
+eval_scenes = Balloon2
+
+### TRAINING
+N_rand = 3072
+lrate_feature = 4e-4
+lrate_mlp = 2e-4
+lrate_decay_factor = 0.5
+init_decay_epoch = 100
+
+### TESTING
+chunk_size = 4096
+
+### RENDERING
+N_importance = 64
+N_samples = 64
+inv_uniform = True
+white_bkgd = False
+coarse_only = True
+
+### CONSOLE AND TENSORBOARD
+i_img = 10000
+i_print = 10000 
+i_weights = 10000
+
+anti_alias_pooling = 0
+input_dir = True
+input_xyz = False
+
+w_cycle = 0.1
+w_disp = 5e-2
+w_flow = 5e-3
+
+w_distortion = 1e-3
+w_sf_zero = 0.05
+w_sf_sm = 0.05
+
+w_skew_entropy = 5e-4
+skewness = 1.0
+lr_multipler = 1.0
+
+occ_weights_mode = 2
+
+decay_rate = 10
+anneal_cycle = True
+
+sfm_reg = True
+
+mask_static = True
