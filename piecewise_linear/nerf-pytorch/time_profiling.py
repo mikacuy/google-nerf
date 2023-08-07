@@ -346,6 +346,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             total_time = time.time() - start_time
             print( f"Render time {total_time}")
             LOG_FOUT.write("Render time: " + str(total_time)+'\n')
+            exit()
             
             # compute depth rmse
             depth_rmse = compute_rmse(extras['depth_map'][target_valid_depth], target_depth[:, :, 0][target_valid_depth])
