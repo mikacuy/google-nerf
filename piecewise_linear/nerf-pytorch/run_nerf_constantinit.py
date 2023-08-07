@@ -893,12 +893,12 @@ def config_parser():
                         help='will take every 1/N images as LLFF test set, paper uses 8')
 
     # logging/saving options
-    parser.add_argument("--num_iterations", type=int, default=200000, 
+    parser.add_argument("--num_iterations", type=int, default=500000, 
                         help='number of iterations for training')
 
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=1000, 
+    parser.add_argument("--i_img",     type=int, default=600000, 
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000, 
                         help='frequency of weight ckpt saving')
