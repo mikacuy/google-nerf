@@ -769,9 +769,8 @@ def render_rays(ray_batch,
         #     z_samples, u = sample_pdf_return_u(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest, load_u=None)
 
         # pred_depth_hyp = z_samples
-        pred_depth_hyp = None
 
-    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'pred_hyp' : pred_depth_hyp}
+    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
