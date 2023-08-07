@@ -384,6 +384,133 @@ def optimize_camera_embedding(image, pose, H, W, intrinsic, args, render_kwargs_
             print("Step {}: PSNR: {} ({:.2f}min)".format(i, psnr, (time.time() - start_time) / 60))
     render_kwargs_test["embedded_cam"] = best_embedded_cam
 
+def test_images_samples(count, indices, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, \
+    embedcam_fn=None, with_test_time_optimization=False):
+    far = render_kwargs_test['far']
+
+    if count is None:
+        # take all images in order
+        count = len(indices)
+        img_i = indices
+    else:
+        # take random images
+        if count > len(indices):
+            count = len(indices)
+        img_i = np.random.choice(indices, size=count, replace=False)
+
+    rgbs_res = torch.empty(count, 3, H, W)
+    rgbs0_res = torch.empty(count, 3, H, W)
+    target_rgbs_res = torch.empty(count, 3, H, W)
+    depths_res = torch.empty(count, 1, H, W)
+    depths0_res = torch.empty(count, 1, H, W)
+    target_depths_res = torch.empty(count, 1, H, W)
+    target_valid_depths_res = torch.empty(count, 1, H, W, dtype=bool)
+    
+    mean_metrics = MeanTracker()
+    mean_depth_metrics = MeanTracker() # track separately since they are not always available
+    for n, img_idx in enumerate(img_i):
+        print("Render image {}/{}".format(n + 1, count))
+
+        # if n>8:
+        #     break
+
+        target = images[img_idx]
+
+        target_depth = depths[img_idx]
+        target_valid_depth = valid_depths[img_idx]
+
+        pose = poses[img_idx, :3,:4]
+        intrinsic = intrinsics[img_idx, :]
+
+        if args.input_ch_cam > 0:
+            if embedcam_fn is None:
+                # use zero embedding at test time or optimize for the latent code
+                render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
+                if with_test_time_optimization:
+                    optimize_camera_embedding(target, pose, H, W, intrinsic, args, render_kwargs_test)
+                    result_dir = os.path.join(args.ckpt_dir, args.expname, "test_latent_codes_" + args.scene_id)
+                    os.makedirs(result_dir, exist_ok=True)
+                    np.savetxt(os.path.join(result_dir, str(img_idx) + ".txt"), render_kwargs_test["embedded_cam"].cpu().numpy())
+            else:
+                render_kwargs_test["embedded_cam"] = embedcam_fn(torch.tensor(img_idx, device=device))
+        
+        with torch.no_grad():
+            # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+            # print(render_kwargs_test)
+            rgb, _, _, extras = render(H, W, intrinsic, chunk=args.chunk, c2w=pose, **render_kwargs_test)
+            
+            ### 
+
+            # print(extras["pred_hyp"].shape)
+            # print(target_depth[:, :, 0].shape)
+
+            ### Either use expected depth or target depth
+            # target_hypothesis_repeated = target_depth[:, :, 0].unsqueeze(-1).repeat(1, 1, extras["pred_hyp"].shape[-1])
+            target_hypothesis_repeated = extras['depth_map'].unsqueeze(-1).repeat(1, 1, extras["pred_hyp"].shape[-1])
+
+            # print(target_hypothesis_repeated.shape)
+            dists = torch.norm(extras["pred_hyp"].unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=2, dim=-1)
+            # print(dists.shape)
+
+            depth_rmse = torch.mean(dists, axis=-1)
+            # print(depth_rmse.shape)
+
+            depth_rmse = depth_rmse[target_valid_depth]
+            # print(depth_rmse.shape)
+            # depth_rmse = depth_rmse[depth_rmse<0.3]
+            # print(depth_rmse.shape)
+            # exit()
+
+            depth_rmse = torch.mean(depth_rmse)
+
+            if not torch.isnan(depth_rmse):
+                depth_metrics = {"importance_sampling_error" : depth_rmse.item()}
+                mean_depth_metrics.add(depth_metrics)
+
+    #         # compute color metrics
+    #         img_loss = img2mse(rgb, target)
+    #         psnr = mse2psnr(img_loss)
+    #         print("PSNR: {}".format(psnr))
+    #         rgb = torch.clamp(rgb, 0, 1)
+    #         ssim = structural_similarity(rgb.cpu().numpy(), target.cpu().numpy(), data_range=1., channel_axis=-1)
+    #         lpips = lpips_alex(rgb.permute(2, 0, 1).unsqueeze(0), target.permute(2, 0, 1).unsqueeze(0), normalize=True)[0]
+            
+    #         # store result
+    #         rgbs_res[n] = rgb.clamp(0., 1.).permute(2, 0, 1).cpu()
+    #         target_rgbs_res[n] = target.permute(2, 0, 1).cpu()
+    #         depths_res[n] = (extras['depth_map'] / far).unsqueeze(0).cpu()
+    #         target_depths_res[n] = (target_depth[:, :, 0] / far).unsqueeze(0).cpu()
+    #         target_valid_depths_res[n] = target_valid_depth.unsqueeze(0).cpu()
+    #         metrics = {"img_loss" : img_loss.item(), "psnr" : psnr.item(), "ssim" : ssim, "lpips" : lpips[0, 0, 0],}
+    #         if 'rgb0' in extras:
+    #             img_loss0 = img2mse(extras['rgb0'], target)
+    #             psnr0 = mse2psnr(img_loss0)
+    #             depths0_res[n] = (extras['depth0'] / far).unsqueeze(0).cpu()
+    #             rgbs0_res[n] = torch.clamp(extras['rgb0'], 0, 1).permute(2, 0, 1).cpu()
+    #             metrics.update({"img_loss0" : img_loss0.item(), "psnr0" : psnr0.item()})
+    #         mean_metrics.add(metrics)
+    
+    # res = { "rgbs" :  rgbs_res, "target_rgbs" : target_rgbs_res, "depths" : depths_res, "target_depths" : target_depths_res, \
+    #     "target_valid_depths" : target_valid_depths_res}
+    # if 'rgb0' in extras:
+    #     res.update({"rgbs0" : rgbs0_res, "depths0" : depths0_res,})
+
+    mean_metrics = mean_depth_metrics
+    # all_mean_metrics.add({**mean_metrics.as_dict(), **mean_depth_metrics.as_dict()})
+    # all_mean_metrics.add({**mean_depth_metrics.as_dict()})
+
+    result_dir = os.path.join(args.ckpt_dir, args.expname, "test_predicted_samples_error" + "_" + str(args.N_importance))
+
+    os.makedirs(result_dir, exist_ok=True)
+    with open(os.path.join(result_dir, 'metrics_bugfix.txt'), 'w') as f:
+        mean_metrics.print(f)
+
+    # print("Result...")
+    # mean_metrics.print(f)
+
+    return mean_metrics
+
+
 def render_images_with_metrics(count, indices, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, \
     embedcam_fn=None, with_test_time_optimization=False):
     far = render_kwargs_test['far']
@@ -2068,7 +2195,7 @@ def run_nerf():
         param.requires_grad = False
 
     # render test set and compute statistics
-    if "test" in args.task: 
+    if args.task == "test": 
         with_test_time_optimization = False
         if args.task == "test_opt":
             with_test_time_optimization = True
@@ -2093,6 +2220,24 @@ def run_nerf():
         vposes = torch.Tensor(poses[i_video]).to(device)
         vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
         render_video(vposes, H, W, vintrinsics, str(0), args, render_kwargs_test)
+
+    elif args.task =="test_samples_error":
+
+        with_test_time_optimization = False
+
+        images = torch.Tensor(images[i_test]).to(device)
+        if gt_depths is None:
+            depths = torch.Tensor(depths[i_test]).to(device)
+            valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
+        else:
+            depths = torch.Tensor(gt_depths[i_test]).to(device)
+            valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
+        poses = torch.Tensor(poses[i_test]).to(device)
+        intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
+        i_test = i_test - i_test[0]
+        mean_metrics_test = test_images_samples(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+            render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
+
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')

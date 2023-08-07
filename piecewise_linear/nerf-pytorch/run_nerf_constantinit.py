@@ -26,7 +26,7 @@ import shutil
 from run_nerf_helpers import *
 
 from load_llff import load_llff_data
-from load_dtu import load_dtu, load_dtu2
+# from load_dtu import load_dtu, load_dtu2
 from load_deepvoxels import load_dv_data
 from load_blender import load_blender_data, load_scene_blender_fixed_dist_new, load_scene_blender2
 from load_LINEMOD import load_LINEMOD_data
@@ -214,6 +214,87 @@ def render_path(render_poses, hwf, K, chunk, render_kwargs, gt_imgs=None, savedi
 
     return rgbs, disps
 
+def test_images_samples(count, indices, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, render_kwargs_test, \
+    embedcam_fn=None, with_test_time_optimization=False):
+    far = render_kwargs_test['far']
+
+    if count is None:
+        # take all images in order
+        count = len(indices)
+        img_i = indices
+    else:
+        # take random images
+        if count > len(indices):
+            count = len(indices)
+        img_i = np.random.choice(indices, size=count, replace=False)
+
+    rgbs_res = torch.empty(count, 3, H, W)
+    rgbs0_res = torch.empty(count, 3, H, W)
+    target_rgbs_res = torch.empty(count, 3, H, W)
+    depths_res = torch.empty(count, 1, H, W)
+    depths0_res = torch.empty(count, 1, H, W)
+    target_depths_res = torch.empty(count, 1, H, W)
+    target_valid_depths_res = torch.empty(count, 1, H, W, dtype=bool)
+    
+    mean_metrics = MeanTracker()
+    mean_depth_metrics = MeanTracker() # track separately since they are not always available
+    for n, img_idx in enumerate(img_i):
+        print("Render image {}/{}".format(n + 1, count))
+
+        target = images[img_idx]
+
+        target_depth = torch.zeros((target.shape[0], target.shape[1], 1)).to(device)
+        target_valid_depth = torch.zeros((target.shape[0], target.shape[1]), dtype=bool).to(device)
+
+        pose = poses[img_idx, :3,:4]
+        intrinsic = K
+        
+        with torch.no_grad():
+            # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+            # print(render_kwargs_test)
+            rgb, _, _, extras = render(H, W, intrinsic, chunk=args.chunk, c2w=pose, **render_kwargs_test)
+            
+            ### 
+
+            print(extras["pred_hyp"].shape)
+            print(extras['depth_map'].shape)
+
+            target_hypothesis_repeated = extras['depth_map'].unsqueeze(-1).repeat(1, 1, extras["pred_hyp"].shape[-1])
+            print(target_hypothesis_repeated.shape)
+            dists = torch.norm(extras["pred_hyp"].unsqueeze(-1) - target_hypothesis_repeated.unsqueeze(-1), p=2, dim=-1)
+            print(dists.shape)
+
+            mask = extras['depth_map'] < 4.0
+            print(torch.sum(mask))
+            print(mask.shape)
+
+            dist_masked = dists[mask, ...]
+            print(dist_masked.shape)
+            # dists = torch.norm(extras["pred_hyp"][target_valid_depth] - extras['depth_map'][target_valid_depth].unsqueeze(-1), p=2, dim=-1)
+            # print(dists.shape)
+            
+            exit()
+
+
+            depth_rmse = torch.mean(dists)
+
+            if not torch.isnan(depth_rmse):
+                depth_metrics = {"importance_sampling_error" : depth_rmse.item()}
+                mean_depth_metrics.add(depth_metrics)
+
+
+    mean_metrics = mean_depth_metrics
+    # all_mean_metrics.add({**mean_metrics.as_dict(), **mean_depth_metrics.as_dict()})
+    # all_mean_metrics.add({**mean_depth_metrics.as_dict()})
+
+    result_dir = os.path.join(args.ckpt_dir, args.expname, "test_samples_error" + "_" + str(args.N_importance))
+
+    os.makedirs(result_dir, exist_ok=True)
+    with open(os.path.join(result_dir, 'metrics_expecteddepth.txt'), 'w') as f:
+        mean_metrics.print(f)
+
+
+    return mean_metrics
 
 def render_images_with_metrics(count, indices, images, depths, valid_depths, poses, H, W, K, lpips_alex, args, render_kwargs_test, \
     embedcam_fn=None, with_test_time_optimization=False):
@@ -378,7 +459,7 @@ def create_nerf(args):
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
-    optimizer_coarse = torch.optim.Adam(params=coarse_grad_vars, lr=args.coarse_lrate, betas=(0.9, 0.999))
+    # optimizer_coarse = torch.optim.Adam(params=coarse_grad_vars, lr=args.coarse_lrate, betas=(0.9, 0.999))
 
     start = 0
 
@@ -435,7 +516,8 @@ def create_nerf(args):
 
     render_kwargs_test['raw_noise_std'] = 0.
 
-    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse
+    # return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse
+    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, None
 
 def compute_weights(raw, z_vals, rays_d, noise=0.):
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
@@ -681,7 +763,14 @@ def render_rays(ray_batch,
 
         rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
 
-    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map}
+        if mode == "linear":
+            z_samples, T_below, tau_below, bin_below, u = sample_pdf_reformulation_return_u(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, load_u=None, quad_solution_v2=quad_solution_v2)
+        elif mode == "constant":
+            z_samples, u = sample_pdf_return_u(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest, load_u=None)
+
+        pred_depth_hyp = z_samples
+
+    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'pred_hyp' : pred_depth_hyp}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
@@ -1290,7 +1379,8 @@ def train():
                     torchvision.utils.make_grid(images_train["depths"], nrow=1), \
                     torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
                 # compute validation metrics and visualize 8 validation images
-                mean_metrics_val, images_val = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, render_kwargs_test, with_test_time_optimization=False)
+                # mean_metrics_val, images_val = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, render_kwargs_test, with_test_time_optimization=False)
+                mean_metrics_val, images_val = render_images_with_metrics(20, i_test, images, None, None, poses, H, W, K, lpips_alex, args, render_kwargs_test, with_test_time_optimization=False)
                 tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
                 tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
                 tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
@@ -1501,6 +1591,24 @@ def train():
             mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=False)
             write_images_with_metrics_testdist(images_test, mean_metrics_test, far, args, test_dist, with_test_time_optimization=with_test_time_optimization)        
+
+    elif args.task =="test_samples_error":
+
+        with_test_time_optimization = False
+
+        images = torch.Tensor(images[i_test]).to(device)
+
+        poses = torch.Tensor(poses[i_test]).to(device)
+
+        K = np.array([
+            [focal, 0, 0.5*W],
+            [0, focal, 0.5*H],
+            [0, 0, 1]
+        ])
+
+        i_test = i_test - i_test[0]
+        mean_metrics_test = test_images_samples(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, \
+            render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
 
 
 if __name__=='__main__':
