@@ -1,0 +1,7 @@
+  # Usage: data_dir is input video directory path,
+  # cvd_dir is saved depth directory resulting from running
+  # "test.py" at https://github.com/google/dynamic-video-depth
+
+  python save_monocular_cameras.py \
+  --data_dir release/kid-running \
+  --cvd_dir release/kid-running/dense/disp

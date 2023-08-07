@@ -348,10 +348,10 @@ def run_optical_flows(args):
                  glob.glob(os.path.join(basedir, 'images/', '*.jpg'))
 
         images = load_image_list(images)
-        for i in range(images.shape[0]-1):
+        for i in range(images.shape[0]-interval):
             print(i)
             image1 = images[i,None]
-            image2 = images[i + 1,None]
+            image2 = images[i + interval,None]
 
             _, flow_up_fwd = model(image1, image2, iters=20, test_mode=True)
             _, flow_up_bwd = model(image2, image1, iters=20, test_mode=True)

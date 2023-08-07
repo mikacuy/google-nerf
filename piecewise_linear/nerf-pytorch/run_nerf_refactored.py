@@ -1236,7 +1236,8 @@ def train():
                     torchvision.utils.make_grid(images_train["depths"], nrow=1), \
                     torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
                 # compute validation metrics and visualize 8 validation images
-                mean_metrics_val, images_val = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, render_kwargs_test, with_test_time_optimization=False)
+                # mean_metrics_val, images_val = render_images_with_metrics(None, i_test, images, None, None, poses, H, W, K, lpips_alex, args, render_kwargs_test, with_test_time_optimization=False)
+                mean_metrics_val, images_val = render_images_with_metrics(20, i_test, images, None, None, poses, H, W, K, lpips_alex, args, render_kwargs_test, with_test_time_optimization=False)
                 tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
                 tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
                 tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
