@@ -261,7 +261,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 mean_depth_metrics.add(depth_metrics)
             
             # compute color metrics
-            img_loss = img2mse(rgb, target)
+            img_loss = img2mse(rgb, target.to(rgb.device))
             psnr = mse2psnr(img_loss)
             print("PSNR: {}".format(psnr))
             rgb = torch.clamp(rgb, 0, 1)
@@ -1118,6 +1118,11 @@ def train():
         poses = torch.Tensor(poses).to(device)
         if use_batching:
             rays_rgb = torch.Tensor(rays_rgb).to(device)
+
+        # print(images)
+        # print(images.shape)
+        # exit()
+
 
 
         N_iters = args.num_iterations + 1
