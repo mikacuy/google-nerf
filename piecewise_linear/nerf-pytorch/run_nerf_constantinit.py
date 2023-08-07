@@ -763,14 +763,15 @@ def render_rays(ray_batch,
 
         rgb_map, disp_map, acc_map, weights, depth_map, tau, T = raw2outputs(raw, z_vals, near, far, rays_d, mode, color_mode, raw_noise_std, pytest=pytest, white_bkgd=white_bkgd, farcolorfix=farcolorfix)
 
-        if mode == "linear":
-            z_samples, T_below, tau_below, bin_below, u = sample_pdf_reformulation_return_u(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, load_u=None, quad_solution_v2=quad_solution_v2)
-        elif mode == "constant":
-            z_samples, u = sample_pdf_return_u(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest, load_u=None)
+        # if mode == "linear":
+        #     z_samples, T_below, tau_below, bin_below, u = sample_pdf_reformulation_return_u(z_vals, weights, tau, T, near, far, N_importance, det=(perturb==0.), pytest=pytest, load_u=None, quad_solution_v2=quad_solution_v2)
+        # elif mode == "constant":
+        #     z_samples, u = sample_pdf_return_u(z_vals_mid, weights[...,1:-1], N_importance, det=(perturb==0.), pytest=pytest, load_u=None)
 
-        pred_depth_hyp = z_samples
+        # pred_depth_hyp = z_samples
 
-    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'pred_hyp' : pred_depth_hyp}
+    # ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'pred_hyp' : pred_depth_hyp}
+    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
@@ -897,7 +898,7 @@ def config_parser():
 
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=600000, 
+    parser.add_argument("--i_img",     type=int, default=1000, 
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000, 
                         help='frequency of weight ckpt saving')
