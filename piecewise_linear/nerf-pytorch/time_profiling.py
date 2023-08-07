@@ -459,7 +459,7 @@ def create_nerf(args):
 
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
-    # optimizer_coarse = torch.optim.Adam(params=coarse_grad_vars, lr=args.coarse_lrate, betas=(0.9, 0.999))
+    optimizer_coarse = torch.optim.Adam(params=coarse_grad_vars, lr=args.coarse_lrate, betas=(0.9, 0.999))
 
     start = 0
 
@@ -517,7 +517,7 @@ def create_nerf(args):
     render_kwargs_test['raw_noise_std'] = 0.
 
     # return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse
-    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, None
+    return render_kwargs_train, render_kwargs_test, start, grad_vars, optimizer, optimizer_coarse
 
 def compute_weights(raw, z_vals, rays_d, noise=0.):
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
