@@ -1438,6 +1438,10 @@ def train():
             global_step += 1
 
 
+        dt = time.time()-time0
+        print(f"Total time: {dt} seconds.")
+        exit()
+
         ### Test after training
         if args.dataset == "llff":
             images = torch.Tensor(images).to(device)
