@@ -1265,8 +1265,8 @@ def train():
         # writer = SummaryWriter(os.path.join(basedir, 'summaries', expname))
         
         start = start + 1
+        time0 = time.time()
         for i in trange(start, N_iters):
-            time0 = time.time()
 
             # Sample random ray batch
             if use_batching:
