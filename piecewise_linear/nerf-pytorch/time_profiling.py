@@ -337,7 +337,15 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         with torch.no_grad():
             # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
             # print(render_kwargs_test)
+
+            LOG_FOUT = open(os.path.join(args.ckpt_dir, args.expname, 'profile_render.txt'), 'w')
+
+
+            start_time = time.time()
             rgb, _, _, extras = render(H, W, intrinsic, chunk=args.chunk, c2w=pose, **render_kwargs_test)
+            total_time = time.time() - start_time
+            print( f"Render time {total_time}")
+            LOG_FOUT.write("Render time: " + str(total_time)+'\n')
             
             # compute depth rmse
             depth_rmse = compute_rmse(extras['depth_map'][target_valid_depth], target_depth[:, :, 0][target_valid_depth])
