@@ -337,7 +337,15 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         with torch.no_grad():
             # rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
             # print(render_kwargs_test)
+
+            LOG_FOUT = open(os.path.join(args.ckpt_dir, args.expname, 'profile_render.txt'), 'w')
+
+
+            start_time = time.time()
             rgb, _, _, extras = render(H, W, intrinsic, chunk=args.chunk, c2w=pose, **render_kwargs_test)
+            total_time = time.time() - start_time
+            print( f"Render time {total_time}")
+            LOG_FOUT.write("Render time: " + str(total_time)+'\n')
             
             # compute depth rmse
             depth_rmse = compute_rmse(extras['depth_map'][target_valid_depth], target_depth[:, :, 0][target_valid_depth])
@@ -963,49 +971,49 @@ def train():
         with open(args_file, 'w') as af:
             json.dump(vars(args), af, indent=4)
 
-    else:
-        if args.expname is None:
-            print("Error: Specify experiment name for test or video")
-            exit()
-        tmp_task = args.task
-        tmp_data_dir = args.data_dir
-        tmp_scene_id = args.scene_id
-        tmp_dataset = args.dataset
-        tmp_test_dist = args.test_dist
-        tmp_ckpt_dir = args.ckpt_dir
-        tmp_set_near_plane = args.set_near_plane
+    # else:
+    #     if args.expname is None:
+    #         print("Error: Specify experiment name for test or video")
+    #         exit()
+    #     tmp_task = args.task
+    #     tmp_data_dir = args.data_dir
+    #     tmp_scene_id = args.scene_id
+    #     tmp_dataset = args.dataset
+    #     tmp_test_dist = args.test_dist
+    #     tmp_ckpt_dir = args.ckpt_dir
+    #     tmp_set_near_plane = args.set_near_plane
 
-        tmp_white_bkgd = args.white_bkgd
-        tmp_eval_scene_id = args.eval_scene_id
-        tmp_eval_data_dir = args.eval_data_dir
-        # tmp_white_bkgd = False
-        tmp_test_skip = args.testskip
+    #     tmp_white_bkgd = args.white_bkgd
+    #     tmp_eval_scene_id = args.eval_scene_id
+    #     tmp_eval_data_dir = args.eval_data_dir
+    #     # tmp_white_bkgd = False
+    #     tmp_test_skip = args.testskip
 
-        # tmp_mode = args.mode
-        # tmp_N_samples = args.N_samples
-        # tmp_N_importance = args.N_importance
+    #     # tmp_mode = args.mode
+    #     # tmp_N_samples = args.N_samples
+    #     # tmp_N_importance = args.N_importance
 
-        # load nerf parameters from training
-        args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
-        with open(args_file, 'r') as af:
-            args_dict = json.load(af)
-        args = Namespace(**args_dict)
-        # task and paths are not overwritten
-        args.task = tmp_task
-        args.data_dir = tmp_data_dir
-        args.ckpt_dir = tmp_ckpt_dir
-        # args.mode = tmp_mode
-        args.train_jsonfile = 'transforms_train.json'
-        args.set_near_plane = tmp_set_near_plane
-        # args.N_samples = tmp_N_samples
-        # args.N_importance = tmp_N_importance
-        args.dataset = tmp_dataset
-        args.test_dist = tmp_test_dist
-        args.scene_id = tmp_scene_id
-        args.white_bkgd = tmp_white_bkgd 
-        args.eval_scene_id = tmp_eval_scene_id 
-        args.eval_data_dir = tmp_eval_data_dir
-        args.testskip = tmp_test_skip
+    #     # load nerf parameters from training
+    #     args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
+    #     with open(args_file, 'r') as af:
+    #         args_dict = json.load(af)
+    #     args = Namespace(**args_dict)
+    #     # task and paths are not overwritten
+    #     args.task = tmp_task
+    #     args.data_dir = tmp_data_dir
+    #     args.ckpt_dir = tmp_ckpt_dir
+    #     # args.mode = tmp_mode
+    #     args.train_jsonfile = 'transforms_train.json'
+    #     args.set_near_plane = tmp_set_near_plane
+    #     # args.N_samples = tmp_N_samples
+    #     # args.N_importance = tmp_N_importance
+    #     args.dataset = tmp_dataset
+    #     args.test_dist = tmp_test_dist
+    #     args.scene_id = tmp_scene_id
+    #     args.white_bkgd = tmp_white_bkgd 
+    #     args.eval_scene_id = tmp_eval_scene_id 
+    #     args.eval_data_dir = tmp_eval_data_dir
+    #     args.testskip = tmp_test_skip
 
     print('\n'.join(f'{k}={v}' for k, v in vars(args).items()))
     args.n_gpus = torch.cuda.device_count()
