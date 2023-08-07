@@ -261,7 +261,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 mean_depth_metrics.add(depth_metrics)
             
             # compute color metrics
-            img_loss = img2mse(rgb, target.to(rgb.device))
+            img_loss = img2mse(rgb, target)
             psnr = mse2psnr(img_loss)
             print("PSNR: {}".format(psnr))
             rgb = torch.clamp(rgb, 0, 1)
@@ -1233,6 +1233,9 @@ def train():
 
             if i%args.i_img==0:
                 # visualize 2 train images
+                print(images)
+                print(images.shape)
+                exit()
                 _, images_train = render_images_with_metrics(2, i_train, images, None, None, \
                     poses, H, W, K, lpips_alex, args, render_kwargs_test, embedcam_fn=None)
                 tb.add_image('train_image',  torch.cat((
