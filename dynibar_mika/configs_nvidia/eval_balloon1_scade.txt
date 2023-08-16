@@ -1,4 +1,6 @@
 expname = balloon1_long_testmikaocc_weights_mode-2_w-disp-0.0500_anneal_cycle-1_sfm_reg-1_w-flow-0.0050_w-distortion-0.0010_w-se-1.00-0.0005
+# expname = balloon1_long_nodispocc_weights_mode-2_w-disp-0.0000_anneal_cycle-1_sfm_reg-1_w-flow-0.0050_w-distortion-0.0010_w-se-1.00-0.0005
+# expname = balloon1_long_noflowocc_weights_mode-2_w-disp-0.0500_anneal_cycle-1_sfm_reg-1_w-flow-0.0000_w-distortion-0.0010_w-se-1.00-0.0005
 
 rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika
 

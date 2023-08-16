@@ -1,0 +1,14 @@
+file /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia/balloon1/renderings/3_11_1gt.jpg
+duration 0.5 
+file /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia/balloon1/renderings/4_11_1gt.jpg
+duration 0.5 
+file /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia/balloon1/renderings/5_11_1gt.jpg
+duration 0.5 
+file /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia/balloon1/renderings/6_11_1gt.jpg
+duration 0.5 
+file /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia/balloon1/renderings/7_11_1gt.jpg
+duration 0.5 
+file /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia/balloon1/renderings/8_11_1gt.jpg
+duration 0.5 
+file /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia/balloon1/renderings/9_11_1gt.jpg
+duration 0.5 

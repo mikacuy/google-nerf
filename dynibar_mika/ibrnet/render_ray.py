@@ -11,8 +11,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-# USE_DISTANCE = False
-USE_DISTANCE = True
+USE_DISTANCE = False
+# USE_DISTANCE = True
 USE_SOFTPLUS = True
 VARIANCE_CLAMP = False
 
@@ -773,6 +773,13 @@ def render_rays_mv(
     raw_coeff_y = raw_coeff_xyz[..., num_basis : num_basis * 2]
     raw_coeff_z = raw_coeff_xyz[..., num_basis * 2 : num_basis * 3]
 
+    # print(raw_coeff_x.shape)
+    # print(raw_coeff_y.shape)
+    # print(raw_coeff_z.shape)
+    # print(model.trajectory_basis[ref_frame_idx - 3: ref_frame_idx + 4, :].shape)
+    # exit()
+
+
     ref_traj_pts_dict = {}
     # Always use 6 nearby source views for dynamic model.
     for offset in [-3, -2, -1, 0, 1, 2, 3]:
@@ -786,12 +793,20 @@ def render_rays_mv(
       ref_traj_pts_dict[offset] = traj_pts_ref
 
     pts_3d_seq_ref = []
+    scene_flow = []
     for offset in ref_time_offset:
       pts_3d_seq_ref.append(
           pts_ref + (ref_traj_pts_dict[offset] - ref_traj_pts_dict[0])
       )
+      scene_flow.append(ref_traj_pts_dict[offset] - ref_traj_pts_dict[0])
 
     pts_3d_seq_ref = torch.stack(pts_3d_seq_ref, 0)
+    scene_flow = torch.stack(scene_flow, 0)
+
+    # print("=====3D flow======")
+    # print(pts_3d_seq_ref.shape)
+    # print("==================")
+
     pts_3d_static = pts_ref[None, ...].repeat(
         ray_batch['static_src_rgbs'].shape[1], 1, 1, 1
     )
@@ -882,6 +897,35 @@ def render_rays_mv(
   weights = (
       outputs_coarse_ref['weights'].clone().detach()
   )  # [N_rays, N_samples]
+  
+#   print("Weights coarse.")
+#   print(weights.shape)
+  
+  rendered_3d_flow = torch.sum(weights.unsqueeze(-1).unsqueeze(0) * scene_flow, dim=2)
+  rendered_3d_pts = torch.sum(weights.unsqueeze(-1).unsqueeze(0) * pts_3d_seq_ref, dim=2)
+
+#   print("Rendered flow.")
+#   print(rendered_3d_flow.shape)
+
+  ret['outputs_coarse_ref']['outputs_coarse_rendered_flow'] =  rendered_3d_flow
+  ret['outputs_coarse_ref']['outputs_coarse_rendered_pts'] =  rendered_3d_pts
+
+  ret['outputs_coarse_ref']["trajectory_basis"] = model.trajectory_basis[ref_frame_idx - 3: ref_frame_idx + 4, :]
+
+  phis_concat = torch.cat([raw_coeff_x.unsqueeze(0), raw_coeff_y.unsqueeze(0), raw_coeff_z.unsqueeze(0)], axis=0)
+#   print(phis_concat.shape)
+  
+  phis_concat = torch.permute(phis_concat, (3, 1, 2, 0))
+#   print(phis_concat.shape)
+#   print(weights.shape)
+
+  rendered_phis = torch.sum(weights.unsqueeze(-1).unsqueeze(0) * phis_concat, dim=2)
+
+#   print(rendered_phis.shape)
+  ret['outputs_coarse_ref']['rendered_phis'] = rendered_phis
+#   exit()
+
+
   if inv_uniform:
     inv_z_vals = 1.0 / z_vals
     inv_z_vals_mid = 0.5 * (

@@ -62,6 +62,7 @@ def render_single_image_nvi(
       ('outputs_fine_anchor', OrderedDict()),
       ('outputs_fine_ref', OrderedDict()),
       ('outputs_coarse_ref', OrderedDict()),
+      # ('outputs_coarse_rendered_flow', OrderedDict()),
   ])
 
   N_rays = ray_batch['ray_o'].shape[0]
@@ -117,6 +118,9 @@ def render_single_image_nvi(
       for k in ret['outputs_fine_ref']:
         all_ret['outputs_fine_ref'][k] = []
 
+      # for k in ret['outputs_coarse_rendered_flow']:
+      #   all_ret['outputs_coarse_rendered_flow'][k] = []
+
       if is_train:
         for k in ret['outputs_fine_anchor']:
           all_ret['outputs_fine_anchor'][k] = []
@@ -128,6 +132,9 @@ def render_single_image_nvi(
 
     for k in ret['outputs_fine_ref']:
       all_ret['outputs_fine_ref'][k].append(ret['outputs_fine_ref'][k].cpu())
+
+    # for k in ret['outputs_coarse_rendered_flow']:
+    #   all_ret['outputs_coarse_rendered_flow'][k].append(ret['outputs_coarse_rendered_flow'][k].cpu())
 
     if is_train:
       for k in ret['outputs_fine_anchor']:
@@ -141,6 +148,9 @@ def render_single_image_nvi(
   # merge chunk results and reshape
   for k in all_ret['outputs_coarse_ref']:
     if k == 'random_sigma':
+      continue
+
+    if k == 'trajectory_basis':
       continue
 
     if len(all_ret['outputs_coarse_ref'][k][0].shape) == 4:
