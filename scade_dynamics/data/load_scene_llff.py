@@ -97,7 +97,7 @@ def batch_parse_llff_poses(poses):
   all_c2w_mats = np.stack(all_c2w_mats)
   return all_intrinsics, all_c2w_mats
 
-def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True, frame_indices=[0, 74], downsample_scale=None):
+def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True, frame_indices=[0, 74], downsample_scale=None, with_depth=False, cimle_dir=None, num_hypothesis=20):
   """Function for loading LLFF data."""
   poses_arr = np.load(os.path.join(basedir, 'poses_bounds_gl2llff.npy'))
   poses = poses_arr[:, :-2].reshape([-1, 3, 5])
@@ -174,6 +174,61 @@ def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True, fr
   # print(poses.shape)
   # print(bds.shape)
 #   exit()
+
+  if with_depth:
+    ############################################    
+    #### Load cimle depth maps ####
+    ############################################    
+    ## For now only for train poses
+    leres_dir = os.path.join(basedir, "scade_hypothesis", cimle_dir)
+    hypothesis_dir = sorted(os.listdir(leres_dir))
+
+    hypothesis_dir_selected = [os.path.join(leres_dir, hypothesis_dir[x]) for x in frame_indices]
+
+    all_depth_hypothesis = []
+
+    for cam_idx in camera_indices:
+      for i in range(len(hypothesis_dir_selected)):
+        
+        curr_depth_hypotheses = []
+        curr_dir = hypothesis_dir_selected[i]
+
+        for j in range(num_hypothesis):
+          cimle_depth_name = os.path.join(curr_dir, 'cam%02d.png'%cam_idx +"_"+str(j)+".npy")
+          print(cimle_depth_name)
+          exit()
+          
+          cimle_depth = np.load(cimle_depth_name).astype(np.float32)          
+
+    #   curr_hypothesis_files = [
+    #     os.path.join(hypothesis_dir_selected[i], 'cam%02d.png'%cam_idx)
+    #     for i in range(len(hypothesis_dir_selected))
+    #   ]
+
+    # for i in range(len(train_idx)):
+    #     filename = filenames[train_idx[i]]
+    #     img_id = filename.split("/")[-1].split(".")[0]
+    #     curr_depth_hypotheses = []
+
+    #     for j in range(num_hypothesis):
+    #         cimle_depth_name = os.path.join(leres_dir, img_id+"_"+str(j)+".npy")
+    #         cimle_depth = np.load(cimle_depth_name).astype(np.float32)
+
+    #         ## To adhere to the shape of depths
+    #         # cimle_depth = cimle_depth.T ## Buggy version
+    #         cimle_depth = cimle_depth
+            
+    #         cimle_depth = np.expand_dims(cimle_depth, -1)
+    #         curr_depth_hypotheses.append(cimle_depth)
+
+    #     curr_depth_hypotheses = np.array(curr_depth_hypotheses)
+    #     all_depth_hypothesis.append(curr_depth_hypotheses)
+
+    # all_depth_hypothesis = np.array(all_depth_hypothesis)
+
+    # ### Clamp depth hypothesis to near plane and far plane
+    # all_depth_hypothesis = np.clip(all_depth_hypothesis, near, far)
+    # #########################################
 
   if poses.shape[-1] != len(imgfiles):
     print(
@@ -454,3 +509,180 @@ def load_llff_data_multicam(
   return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, render_poses, None
 
 
+def load_llff_data_multicam_withdepth(
+    basedir,
+    camera_indices,
+    factor=8,
+    render_idx=8,
+    recenter=True,
+    bd_factor=0.75,
+    spherify=False,
+    load_imgs=True,
+    downsample=2.0,
+    frame_indices = [0],
+    cimle_dir = "dump"
+):
+  """Load LLFF forward-facing data.
+  
+  Args:
+    basedir: base directory
+    camera_indices: select which cameras to use from the nvidia data
+    factor: resize factor
+    render_idx: rendering frame index from the video
+    recenter: recentor camera poses
+    bd_factor: scale factor for bounds
+    spherify: spherify the camera poses
+    load_imgs: load images from the disk
+
+  Returns:
+    images: video frames
+    poses: corresponding camera parameters
+    bds: bounds
+    render_poses: rendering camera poses 
+    i_test: test index
+    imgfiles: list of image path
+    scale: scene scale
+  """
+  all_camera_indices = np.arange(16)
+  out = _load_data_multicam(
+      basedir, all_camera_indices, factor=None, load_imgs=load_imgs, frame_indices=frame_indices, downsample_scale=downsample, \
+        with_depth=True, cimle_dir=cimle_dir
+  )
+
+  if out is None:
+    return
+  else:
+    poses, bds, imgs, imgfiles = out
+
+  poses = np.moveaxis(poses, -1, 0)
+  bds = np.moveaxis(bds, -1, 0)
+  imgs = np.moveaxis(imgs, -1, 0)
+
+  # print(poses.shape)
+  # print(bds.shape)
+  # print(imgfiles[10])
+  print(imgs.shape)
+  # exit()
+
+  ##### Pose and bounds correction ###
+  # Step 1: rescale focal length according to training resolution
+  H, W, focal = poses[0, :, -1]  # original intrinsics, same for all images
+
+  ### Need to set this up if we want to resize
+  focal = focal/downsample
+  H = int(H/downsample)
+  W = int(W/downsample)
+
+  # Step 2: correct poses
+  # Original poses has rotation in form "down right back", change to "right up back"
+  # See https://github.com/bmild/nerf/issues/34
+  poses = np.concatenate([poses[..., 1:2], -poses[..., :1], poses[..., 2:4]], -1)
+  # (N_images, 3, 4) exclude H, W, focal
+  poses, pose_avg = center_poses(poses)
+  # print('pose_avg in read_meta', self.pose_avg)
+  # self.poses = poses @ self.blender2opencv
+
+  # Step 3: correct scale so that the nearest depth is at a little more than 1.0
+  # See https://github.com/bmild/nerf/issues/34
+  near_original = bds.min()
+  scale_factor = near_original * bd_factor  # 0.75 is the default parameter
+  print('scale_factor', scale_factor)
+  # the nearest depth is at 1/0.75=1.33
+  bds /= scale_factor
+  poses[..., 3] /= scale_factor
+
+  near = np.min(bds[..., 0])*0.8
+  far = np.max(bds[..., 1])*1.2  # focus on central object only
+
+  # print(poses.shape)
+  # print(bds.shape)
+  # print(near)
+  # print(far)
+  # exit()
+  ##############################
+
+  all_imgs = []
+  all_poses = []
+  all_intrinsics = []
+  
+  for i in range(poses.shape[0]):
+
+      c2w = torch.FloatTensor(poses[i])
+
+      img = imgs[i]
+      all_imgs.append(img)
+      all_poses.append(poses[i])
+
+      fx, fy, cx, cy = focal, focal, W/2.0, H/2.0
+      all_intrinsics.append(np.array((fx, fy, cx, cy)))
+
+
+  all_imgs = np.array(imgs)
+  all_poses = np.array(all_poses)
+  all_intrinsics = np.array(all_intrinsics)
+
+  if len(camera_indices) == 16:
+    ### Fix this ####
+    i_test = np.arange(3, poses.shape[0], 5)
+    i_train = np.setdiff1d(np.arange(poses.shape[0]), i_test)
+    # print(i_test)
+    # print(i_train)
+    
+    i_split = [i_train, i_test]
+
+    # print(i_split)
+    # exit()
+  else:
+    i_train = np.array(camera_indices)
+    i_test = np.setdiff1d(all_camera_indices, i_train)
+    i_split = [i_train, i_test]
+
+    # print(i_train)
+    # print(i_test)
+
+
+  spiral = True
+  if spiral:
+    print('================= render_path_spiral ==========================')
+    c2w = poses_avg(poses)
+    ## Get spiral
+    # Get average pose
+    up = normalize(poses[:, :3, 1].sum(0))
+
+    # Find a reasonable "focus depth" for this dataset
+    close_depth, inf_depth = bds.min() * 0.9, bds.max() * 2.0
+    dt = 0.75
+    mean_dz = 1.0 / (((1.0 - dt) / close_depth + dt / inf_depth))
+    focal = mean_dz * 1.5
+
+    # Get radii for spiral path
+    # shrink_factor = 0.8
+    zdelta = close_depth * 0.2
+    tt = poses[:, :3, 3]  # ptstocam(poses[:3,3,:].T, c2w).T
+    rads = np.percentile(np.abs(tt), 80, 0)
+    c2w_path = c2w
+    n_views = 120
+    n_rots = 2
+
+    print(c2w_path.shape)
+
+    # Generate poses for spiral path
+    render_poses = render_path_spiral(
+        c2w_path, up, rads, focal, zdelta, zrate=0.5, rots=n_rots, N=n_views
+    )
+  else:
+    raise NotImplementedError
+
+  render_poses = np.array(render_poses).astype(np.float32)
+
+  print(render_poses.shape)
+
+
+  
+  print("=====Done loading data.=======")
+  print(all_imgs.shape)
+  print(all_poses.shape)
+  print(all_intrinsics.shape)
+
+
+  return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, render_poses, None
