@@ -841,13 +841,13 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     print('VAL views are', i_val)
     print('TEST views are', i_test)
 
-    if use_depth:
-        # use ground truth depth for validation and test if available
-        if gt_depths is not None:
-            depths[i_test] = gt_depths[i_test]
-            valid_depths[i_test] = gt_valid_depths[i_test]
-            depths[i_val] = gt_depths[i_val]
-            valid_depths[i_val] = gt_valid_depths[i_val]
+    # if use_depth:
+    #     # use ground truth depth for validation and test if available
+    #     if gt_depths is not None:
+    #         depths[i_test] = gt_depths[i_test]
+    #         valid_depths[i_test] = gt_valid_depths[i_test]
+    #         depths[i_val] = gt_depths[i_val]
+    #         valid_depths[i_val] = gt_valid_depths[i_val]
 
     i_relevant_for_training = np.concatenate((i_train, i_val), 0)
     # i_relevant_for_training = i_train
@@ -865,10 +865,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
 
     if use_depth:
-        depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
-        valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
-        test_depths = depths[i_test]
-        test_valid_depths = valid_depths[i_test]
+        # depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
+        # valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
+        # test_depths = depths[i_test]
+        # test_valid_depths = valid_depths[i_test]
+        depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+        valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
         all_depth_hypothesis = torch.Tensor(all_depth_hypothesis).to(device)
 
     else:        
@@ -975,7 +977,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         optimizer.zero_grad()
 
         if use_depth:
-            target_d = target_d.squeeze(-1)
+            # target_d = target_d.squeeze(-1)
             optimizer_ss.zero_grad()
         
         img_loss = img2mse(rgb, target_s)
@@ -1194,7 +1196,7 @@ def config_parser():
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
-    parser.add_argument('--scaleshift_lr', default= 0.0000001, type=float)
+    parser.add_argument('--scaleshift_lr', default= 0.00001, type=float)
     parser.add_argument('--scale_init', default= 1.0, type=float)
     parser.add_argument('--shift_init', default= 0.0, type=float)
     parser.add_argument("--freeze_ss", type=int, default=400000, 
@@ -1270,7 +1272,7 @@ def run_nerf():
     frame_idx = args.frame_idx
 
     images, _, _, poses, H, W, intrinsics, near, far, i_split,\
-          render_poses, _ = load_llff_data_multicam_withdepth(
+          render_poses, all_depth_hypothesis = load_llff_data_multicam_withdepth(
         scene_data_dir,
         camera_indices,
         factor=8,
@@ -1280,7 +1282,8 @@ def run_nerf():
         spherify=False,
         load_imgs=True,
         frame_indices=frame_idx,
-        cimle_dir=args.cimle_dir
+        cimle_dir=args.cimle_dir,
+        num_hypothesis = args.num_hypothesis
     )
 
     print(images.shape)
@@ -1314,7 +1317,7 @@ def run_nerf():
     lpips_alex = LPIPS()
 
     if args.task == "train":
-        train_nerf(images, None, None, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, None, None, None)
+        train_nerf(images, None, None, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, None, None, all_depth_hypothesis, use_depth=True)
         exit()
  
     # create nerf model for testing

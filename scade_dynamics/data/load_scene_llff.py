@@ -194,41 +194,22 @@ def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True, fr
         curr_dir = hypothesis_dir_selected[i]
 
         for j in range(num_hypothesis):
-          cimle_depth_name = os.path.join(curr_dir, 'cam%02d.png'%cam_idx +"_"+str(j)+".npy")
-          print(cimle_depth_name)
-          exit()
-          
-          cimle_depth = np.load(cimle_depth_name).astype(np.float32)          
+          cimle_depth_name = os.path.join(curr_dir, 'cam%02d'%cam_idx +"_"+str(j)+".npy")        
+          cimle_depth = np.load(cimle_depth_name).astype(np.float32)
+          cimle_depth = cv2.resize(cimle_depth, (int(cimle_depth.shape[1]/downsample_scale), int(cimle_depth.shape[0]/downsample_scale)), interpolation=cv2.INTER_NEAREST)          
 
-    #   curr_hypothesis_files = [
-    #     os.path.join(hypothesis_dir_selected[i], 'cam%02d.png'%cam_idx)
-    #     for i in range(len(hypothesis_dir_selected))
-    #   ]
+          # print(cimle_depth)
+          # print(cimle_depth.shape)
 
-    # for i in range(len(train_idx)):
-    #     filename = filenames[train_idx[i]]
-    #     img_id = filename.split("/")[-1].split(".")[0]
-    #     curr_depth_hypotheses = []
+          cimle_depth = np.expand_dims(cimle_depth, -1)
+          curr_depth_hypotheses.append(cimle_depth)
 
-    #     for j in range(num_hypothesis):
-    #         cimle_depth_name = os.path.join(leres_dir, img_id+"_"+str(j)+".npy")
-    #         cimle_depth = np.load(cimle_depth_name).astype(np.float32)
-
-    #         ## To adhere to the shape of depths
-    #         # cimle_depth = cimle_depth.T ## Buggy version
-    #         cimle_depth = cimle_depth
-            
-    #         cimle_depth = np.expand_dims(cimle_depth, -1)
-    #         curr_depth_hypotheses.append(cimle_depth)
-
-    #     curr_depth_hypotheses = np.array(curr_depth_hypotheses)
-    #     all_depth_hypothesis.append(curr_depth_hypotheses)
-
-    # all_depth_hypothesis = np.array(all_depth_hypothesis)
-
-    # ### Clamp depth hypothesis to near plane and far plane
-    # all_depth_hypothesis = np.clip(all_depth_hypothesis, near, far)
-    # #########################################
+        curr_depth_hypotheses = np.array(curr_depth_hypotheses)
+        all_depth_hypothesis.append(curr_depth_hypotheses
+        )
+    all_depth_hypothesis = np.array(all_depth_hypothesis)
+    print(all_depth_hypothesis.shape)
+    # exit()
 
   if poses.shape[-1] != len(imgfiles):
     print(
@@ -267,7 +248,11 @@ def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True, fr
   all_images = np.stack(all_images, -1)
   print('Loaded image data', all_images.shape, poses[:, -1, 0])
   
-  return poses, bds, all_images, imgfiles
+  if not with_depth:
+    return poses, bds, all_images, imgfiles
+  else:
+    return poses, bds, all_images, imgfiles, all_depth_hypothesis
+   
 
 
 def normalize(x):
@@ -520,7 +505,8 @@ def load_llff_data_multicam_withdepth(
     load_imgs=True,
     downsample=2.0,
     frame_indices = [0],
-    cimle_dir = "dump"
+    cimle_dir = "dump",
+    num_hypothesis = 20
 ):
   """Load LLFF forward-facing data.
   
@@ -546,13 +532,13 @@ def load_llff_data_multicam_withdepth(
   all_camera_indices = np.arange(16)
   out = _load_data_multicam(
       basedir, all_camera_indices, factor=None, load_imgs=load_imgs, frame_indices=frame_indices, downsample_scale=downsample, \
-        with_depth=True, cimle_dir=cimle_dir
+        with_depth=True, cimle_dir=cimle_dir, num_hypothesis = num_hypothesis
   )
 
   if out is None:
     return
   else:
-    poses, bds, imgs, imgfiles = out
+    poses, bds, imgs, imgfiles, all_depth_hypothesis = out
 
   poses = np.moveaxis(poses, -1, 0)
   bds = np.moveaxis(bds, -1, 0)
@@ -640,6 +626,7 @@ def load_llff_data_multicam_withdepth(
     # print(i_train)
     # print(i_test)
 
+  all_depth_hypothesis = np.clip(all_depth_hypothesis, near, far)
 
   spiral = True
   if spiral:
@@ -685,4 +672,4 @@ def load_llff_data_multicam_withdepth(
   print(all_intrinsics.shape)
 
 
-  return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, render_poses, None
+  return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, render_poses, all_depth_hypothesis
