@@ -10,3 +10,4 @@ logs*
 *.pth
 *pyc
 *dump_*
+scade_dynamics/log_
