@@ -1026,8 +1026,9 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             if args.input_ch_cam > 0:
                 save_dict['embedded_cam'] = embedcam_fn
 
-            save_dict['depth_shifts'] = DEPTH_SHIFTS
-            save_dict['depth_scales'] = DEPTH_SCALES
+            if use_depth:
+                save_dict['depth_shifts'] = DEPTH_SHIFTS
+                save_dict['depth_scales'] = DEPTH_SCALES
 
             torch.save(save_dict, path)
             print('Saved checkpoints at', path)

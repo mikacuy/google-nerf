@@ -310,8 +310,9 @@ def load_llff_data_multicam(
     imgfiles: list of image path
     scale: scene scale
   """
+  all_camera_indices = np.arange(16)
   out = _load_data_multicam(
-      basedir, camera_indices, factor=None, load_imgs=load_imgs, frame_indices=frame_indices, downsample_scale=downsample
+      basedir, all_camera_indices, factor=None, load_imgs=load_imgs, frame_indices=frame_indices, downsample_scale=downsample
   )
 
   if out is None:
@@ -386,16 +387,24 @@ def load_llff_data_multicam(
   all_poses = np.array(all_poses)
   all_intrinsics = np.array(all_intrinsics)
 
-  ### Fix this ####
-  i_test = np.arange(3, poses.shape[0], 5)
-  i_train = np.setdiff1d(np.arange(poses.shape[0]), i_test)
-  # print(i_test)
-  # print(i_train)
-  
-  i_split = [i_train, i_test]
+  if len(camera_indices) == 16:
+    ### Fix this ####
+    i_test = np.arange(3, poses.shape[0], 5)
+    i_train = np.setdiff1d(np.arange(poses.shape[0]), i_test)
+    # print(i_test)
+    # print(i_train)
+    
+    i_split = [i_train, i_test]
 
-  # print(i_split)
-  # exit()
+    # print(i_split)
+    # exit()
+  else:
+    i_train = np.array(camera_indices)
+    i_test = np.setdiff1d(all_camera_indices, i_train)
+    i_split = [i_train, i_test]
+
+    # print(i_train)
+    # print(i_test)
 
 
   spiral = True
