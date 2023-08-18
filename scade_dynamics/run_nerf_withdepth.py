@@ -853,10 +853,15 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     # i_relevant_for_training = i_train
 
     # keep test data on cpu until needed
-    test_images = images[i_test]
-    test_poses = poses[i_test]
-    test_intrinsics = intrinsics[i_test]
-    i_test = i_test - i_test[0]
+    # test_images = images[i_test]
+    # test_poses = poses[i_test]
+    # test_intrinsics = intrinsics[i_test]
+    # i_test = i_test - i_test[0]
+
+    test_images = images
+    test_poses = poses
+    test_intrinsics = intrinsics
+    i_test = i_test
 
     # move training data to gpu
     images = torch.Tensor(images[i_relevant_for_training]).to(device)
