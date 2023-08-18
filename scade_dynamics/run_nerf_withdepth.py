@@ -1094,8 +1094,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         if (i + 1) == N_iters:
             torch.cuda.empty_cache()
             images = torch.Tensor(test_images).to(device)
-            depths = torch.Tensor(test_depths).to(device)
-            valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
+            # depths = torch.Tensor(test_depths).to(device)
+            # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
+            depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+            valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
+
             poses = torch.Tensor(test_poses).to(device)
             intrinsics = torch.Tensor(test_intrinsics).to(device)
             mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
