@@ -459,8 +459,6 @@ def create_nerf(args, scene_render_params):
                                                                   netchunk=args.netchunk_per_gpu*args.n_gpus)
       # Load checkpoints
       path = os.path.join(args.pretrained_dir, "frame_" + str(frame_idx))
-      print(path)
-      exit()
       ckpts = [os.path.join(path, f) for f in sorted(os.listdir(path)) if '000.tar' in f]
       print('Found ckpts', ckpts)
       ckpt = None
