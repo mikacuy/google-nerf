@@ -853,10 +853,15 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     # i_relevant_for_training = i_train
 
     # keep test data on cpu until needed
-    test_images = images[i_test]
-    test_poses = poses[i_test]
-    test_intrinsics = intrinsics[i_test]
-    i_test = i_test - i_test[0]
+    # test_images = images[i_test]
+    # test_poses = poses[i_test]
+    # test_intrinsics = intrinsics[i_test]
+    # i_test = i_test - i_test[0]
+
+    test_images = images
+    test_poses = poses
+    test_intrinsics = intrinsics
+    i_test = i_test
 
     # move training data to gpu
     images = torch.Tensor(images[i_relevant_for_training]).to(device)
@@ -1096,7 +1101,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
             depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
             valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
-            
+
             poses = torch.Tensor(test_poses).to(device)
             intrinsics = torch.Tensor(test_intrinsics).to(device)
             mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
