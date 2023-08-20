@@ -864,16 +864,20 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     i_test = i_test
 
     # move training data to gpu
-    images = torch.Tensor(images[i_relevant_for_training]).to(device)
+    # images = torch.Tensor(images[i_relevant_for_training]).to(device)
+    # poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
+    # intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
 
-    poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
-    intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
+    images = torch.Tensor(images).to(device)
+    poses = torch.Tensor(poses).to(device)
+    intrinsics = torch.Tensor(intrinsics).to(device)
 
     if use_depth:
         # depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
         # valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
         # test_depths = depths[i_test]
         # test_valid_depths = valid_depths[i_test]
+        
         depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
         valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
         all_depth_hypothesis = torch.Tensor(all_depth_hypothesis).to(device)
@@ -1338,16 +1342,41 @@ def run_nerf():
         with_test_time_optimization = False
         if args.task == "test_opt":
             with_test_time_optimization = True
-        images = torch.Tensor(images[i_test]).to(device)
-        if gt_depths is None:
-            depths = torch.Tensor(depths[i_test]).to(device)
-            valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
-        else:
-            depths = torch.Tensor(gt_depths[i_test]).to(device)
-            valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
-        poses = torch.Tensor(poses[i_test]).to(device)
-        intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
-        i_test = i_test - i_test[0]
+        
+        # images = torch.Tensor(images[i_test]).to(device)
+        # if gt_depths is None:
+        #     depths = torch.Tensor(depths[i_test]).to(device)
+        #     valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
+        # else:
+        #     depths = torch.Tensor(gt_depths[i_test]).to(device)
+        #     valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
+        # poses = torch.Tensor(poses[i_test]).to(device)
+        # intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
+        # i_test = i_test - i_test[0]
+
+        images = torch.Tensor(images).to(device)
+        poses = torch.Tensor(poses).to(device)
+        intrinsics = torch.Tensor(intrinsics).to(device)
+        i_test = i_test
+        depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+        valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
+
+        # print(images.shape)
+        # print(poses.shape)
+        # print(intrinsics.shape)
+        # print(depths.shape)
+        # print(valid_depths.shape)
+        # print()
+
+        print("Train split")
+        print(i_train)
+        print("Test split")
+        print(i_test)
+
+        # print(i_train)
+        # print(i_test)
+        # exit()
+
         mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)

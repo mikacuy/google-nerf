@@ -324,7 +324,9 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
     for n, img_idx in enumerate(img_i):
-        print("Render image {}/{}".format(n + 1, count), end="")
+        print("Render image {}/{}".format(n + 1, count))
+        print(img_idx)
+
         target = images[img_idx]
         target_depth = depths[img_idx]
         target_valid_depth = valid_depths[img_idx]
@@ -394,13 +396,17 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     return all_mean_metrics, res
 
 def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False):
-    result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
+    result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images2_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     os.makedirs(result_dir, exist_ok=True)
-    for n, (rgb, depth) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
-            images["depths"].permute(0, 2, 3, 1).cpu().numpy())):
+    for n, (rgb, depth, gt_rgb) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
+            images["depths"].permute(0, 2, 3, 1).cpu().numpy(), images["target_rgbs"].permute(0, 2, 3, 1).cpu().numpy())):
 
         # write rgb
         cv2.imwrite(os.path.join(result_dir, str(n) + "_rgb" + ".jpg"), cv2.cvtColor(to8b(rgb), cv2.COLOR_RGB2BGR))
+
+        # write gt
+        cv2.imwrite(os.path.join(result_dir, str(n) + "_gt" + ".png"), cv2.cvtColor(to8b(gt_rgb), cv2.COLOR_RGB2BGR))
+
         # write depth
         cv2.imwrite(os.path.join(result_dir, str(n) + "_d" + ".png"), to16b(depth))
 
@@ -849,7 +855,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             depths[i_val] = gt_depths[i_val]
             valid_depths[i_val] = gt_valid_depths[i_val]
 
-    i_relevant_for_training = np.concatenate((i_train, i_val), 0)
+    # i_relevant_for_training = np.concatenate((i_train, i_val), 0)
     # i_relevant_for_training = i_train
 
     # keep test data on cpu until needed
@@ -864,14 +870,19 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     i_test = i_test
 
     # move training data to gpu
-    images = torch.Tensor(images[i_relevant_for_training]).to(device)
+    # images = torch.Tensor(images[i_relevant_for_training]).to(device)
+    # poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
+    # intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
 
-    poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
-    intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
+    images = torch.Tensor(images).to(device)
+    poses = torch.Tensor(poses).to(device)
+    intrinsics = torch.Tensor(intrinsic).to(device)
 
     if use_depth:
-        depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
-        valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
+        # depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
+        # valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
+        depths = torch.Tensor(depths).to(device)
+        valid_depths = torch.Tensor(valid_depths).bool().to(device)
         test_depths = depths[i_test]
         test_valid_depths = valid_depths[i_test]
         all_depth_hypothesis = torch.Tensor(all_depth_hypothesis).to(device)
@@ -1334,16 +1345,40 @@ def run_nerf():
         with_test_time_optimization = False
         if args.task == "test_opt":
             with_test_time_optimization = True
-        images = torch.Tensor(images[i_test]).to(device)
-        if gt_depths is None:
-            depths = torch.Tensor(depths[i_test]).to(device)
-            valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
-        else:
-            depths = torch.Tensor(gt_depths[i_test]).to(device)
-            valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
-        poses = torch.Tensor(poses[i_test]).to(device)
-        intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
-        i_test = i_test - i_test[0]
+
+        # images = torch.Tensor(images[i_test]).to(device)
+        # if gt_depths is None:
+        #     depths = torch.Tensor(depths[i_test]).to(device)
+        #     valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
+        # else:
+        #     depths = torch.Tensor(gt_depths[i_test]).to(device)
+        #     valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
+        # poses = torch.Tensor(poses[i_test]).to(device)
+        # intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
+        # i_test = i_test - i_test[0]
+
+        images = torch.Tensor(images).to(device)
+        poses = torch.Tensor(poses).to(device)
+        intrinsics = torch.Tensor(intrinsics).to(device)
+        
+        i_test = i_test
+        # i_test = i_train
+
+        depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+        valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
+
+        # print(images.shape)
+        # print(poses.shape)
+        # print(intrinsics.shape)
+        # print(depths.shape)
+        # print(valid_depths.shape)
+        # print()
+        print("Train split")
+        print(i_train)
+        print("Test split")
+        print(i_test)
+        # exit()
+
         mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
