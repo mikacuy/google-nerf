@@ -855,20 +855,27 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     #         depths[i_val] = gt_depths[i_val]
     #         valid_depths[i_val] = gt_valid_depths[i_val]
 
-    i_relevant_for_training = np.concatenate((i_train, i_val), 0)
+    # i_relevant_for_training = np.concatenate((i_train, i_val), 0)
     # i_relevant_for_training = i_train
 
     # keep test data on cpu until needed
-    test_images = images[:, i_test]
-    test_poses = poses[:, i_test]
-    test_intrinsics = intrinsics[:, i_test]
-    i_test = i_test - i_test[0]
+    # test_images = images[:, i_test]
+    # test_poses = poses[:, i_test]
+    # test_intrinsics = intrinsics[:, i_test]
+    # i_test = i_test - i_test[0]
+    test_images = images
+    test_poses = poses
+    test_intrinsics = intrinsics
+    i_test = i_test
 
     # move training data to gpu
-    images = torch.Tensor(images[:, i_relevant_for_training]).to(device)
+    # images = torch.Tensor(images[:, i_relevant_for_training]).to(device)
+    # poses = torch.Tensor(poses[:, i_relevant_for_training]).to(device)
+    # intrinsics = torch.Tensor(intrinsics[:, i_relevant_for_training]).to(device)
 
-    poses = torch.Tensor(poses[:, i_relevant_for_training]).to(device)
-    intrinsics = torch.Tensor(intrinsics[:, i_relevant_for_training]).to(device)
+    images = torch.Tensor(images).to(device)
+    poses = torch.Tensor(poses).to(device)
+    intrinsics = torch.Tensor(intrinsics).to(device)
 
     if use_depth:
         # depths = torch.Tensor(depths[i_relevant_for_training]).to(device)

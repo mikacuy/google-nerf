@@ -849,7 +849,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     #         depths[i_val] = gt_depths[i_val]
     #         valid_depths[i_val] = gt_valid_depths[i_val]
 
-    i_relevant_for_training = np.concatenate((i_train, i_val), 0)
+    # i_relevant_for_training = np.concatenate((i_train, i_val), 0)
     # i_relevant_for_training = i_train
 
     # keep test data on cpu until needed
@@ -877,7 +877,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         # valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
         # test_depths = depths[i_test]
         # test_valid_depths = valid_depths[i_test]
-        
+
         depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
         valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
         all_depth_hypothesis = torch.Tensor(all_depth_hypothesis).to(device)
