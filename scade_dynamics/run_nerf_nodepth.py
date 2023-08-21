@@ -876,7 +876,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     images = torch.Tensor(images).to(device)
     poses = torch.Tensor(poses).to(device)
-    intrinsics = torch.Tensor(intrinsic).to(device)
+    intrinsics = torch.Tensor(intrinsics).to(device)
 
     if use_depth:
         # depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
