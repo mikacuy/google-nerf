@@ -184,7 +184,7 @@ def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True, fr
     leres_dir = os.path.join(basedir, "scade_hypothesis", cimle_dir)
     hypothesis_dir = sorted(os.listdir(leres_dir))
 
-    hypothesis_dir_selected = [os.path.join(leres_dir, hypothesis_dir[x]) for x in frame_indices]
+    hypothesis_dir_selected = [os.path.join(leres_dir, "%05d"%x) for x in frame_indices]
 
     all_depth_hypothesis = []
 
