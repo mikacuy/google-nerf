@@ -226,7 +226,7 @@ def _load_data_multicam(basedir, camera_indices, factor=None, load_imgs=True, fr
   def imread(f):
     convert_fn = cv2.COLOR_BGR2RGB
     img = cv2.imread(f, cv2.IMREAD_UNCHANGED)
-    img = (cv2.cvtColor(img, convert_fn)
+    img = cv2.cvtColor(img, convert_fn)
     return img
     # if f.endswith('png'):
     #   return imageio.imread(f, ignoregamma=True)
