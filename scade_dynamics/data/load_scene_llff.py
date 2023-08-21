@@ -451,41 +451,57 @@ def load_llff_data_multicam(
     # print(i_test)
 
 
-  spiral = True
-  if spiral:
-    print('================= render_path_spiral ==========================')
-    c2w = poses_avg(poses)
-    ## Get spiral
-    # Get average pose
-    up = normalize(poses[:, :3, 1].sum(0))
+  ### Get video poses from the json file
+  json_fname =  os.path.join(basedir, 'transforms_video.json')
 
-    # Find a reasonable "focus depth" for this dataset
-    close_depth, inf_depth = bds.min() * 0.9, bds.max() * 2.0
-    dt = 0.75
-    mean_dz = 1.0 / (((1.0 - dt) / close_depth + dt / inf_depth))
-    focal = mean_dz * 1.5
+  with open(json_fname, 'r') as fp:
+      meta = json.load(fp)
 
-    # Get radii for spiral path
-    # shrink_factor = 0.8
-    zdelta = close_depth * 0.2
-    tt = poses[:, :3, 3]  # ptstocam(poses[:3,3,:].T, c2w).T
-    rads = np.percentile(np.abs(tt), 80, 0)
-    c2w_path = c2w
-    n_views = 120
-    n_rots = 2
+  video_poses = []
+  video_intrinsics = []
 
-    print(c2w_path.shape)
+  for frame in meta['frames']:
+    video_poses.append(np.array(frame['transform_matrix']))
+    fx, fy, cx, cy = frame['fx'], frame['fy'], frame['cx'], frame['cy']
+    video_intrinsics.append(np.array((fx, fy, cx, cy)))
 
-    # Generate poses for spiral path
-    render_poses = render_path_spiral(
-        c2w_path, up, rads, focal, zdelta, zrate=0.5, rots=n_rots, N=n_views
-    )
-  else:
-    raise NotImplementedError
+  # spiral = True
+  # if spiral:
+  #   print('================= render_path_spiral ==========================')
+  #   c2w = poses_avg(poses)
+  #   ## Get spiral
+  #   # Get average pose
+  #   up = normalize(poses[:, :3, 1].sum(0))
 
-  render_poses = np.array(render_poses).astype(np.float32)
+  #   # Find a reasonable "focus depth" for this dataset
+  #   close_depth, inf_depth = bds.min() * 0.9, bds.max() * 2.0
+  #   dt = 0.75
+  #   mean_dz = 1.0 / (((1.0 - dt) / close_depth + dt / inf_depth))
+  #   focal = mean_dz * 1.5
 
-  print(render_poses.shape)
+  #   # Get radii for spiral path
+  #   # shrink_factor = 0.8
+  #   zdelta = close_depth * 0.2
+  #   tt = poses[:, :3, 3]  # ptstocam(poses[:3,3,:].T, c2w).T
+  #   rads = np.percentile(np.abs(tt), 80, 0)
+  #   c2w_path = c2w
+  #   n_views = 120
+  #   n_rots = 2
+
+  #   print(c2w_path.shape)
+
+  #   # Generate poses for spiral path
+  #   render_poses = render_path_spiral(
+  #       c2w_path, up, rads, focal, zdelta, zrate=0.5, rots=n_rots, N=n_views
+  #   )
+  # else:
+  #   raise NotImplementedError
+
+  video_poses = np.array(video_poses).astype(np.float32)
+  video_intrinsics = np.array(video_intrinsics).astype(np.float32)
+
+  # print(render_poses.shape)
+
 
 
   
@@ -495,7 +511,7 @@ def load_llff_data_multicam(
   print(all_intrinsics.shape)
 
 
-  return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, render_poses, None
+  return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, video_poses, video_intrinsics, None
 
 
 def load_llff_data_multicam_withdepth(
@@ -614,7 +630,12 @@ def load_llff_data_multicam_withdepth(
   if len(camera_indices) == 16:
     ### Fix this ####
     i_test = np.arange(3, poses.shape[0], 5)
-    i_train = np.setdiff1d(np.arange(poses.shape[0]), i_test)
+
+    # i_train = np.setdiff1d(np.arange(poses.shape[0]), i_test)
+
+    ### Hack to use all cameras as train set --> Harded now, please fix Mika!
+    i_train = np.arange(poses.shape[0])
+
     # print(i_test)
     # print(i_train)
     
