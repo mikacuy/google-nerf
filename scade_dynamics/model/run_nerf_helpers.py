@@ -84,7 +84,9 @@ def compute_monosdf_styleloss(pred_depth, target_depth, mask=None):
     prediction_ssi = scale.view(-1, 1, 1) * pred_depth + shift.view(-1, 1, 1)
 
     loss = torch.norm(prediction_ssi - target_depth, p=2, dim=-1)
-    loss = torch.mean(loss)
+    loss = torch.mean(loss, dim=-1)
+    loss = torch.min(loss)
+
 
     return loss
 

@@ -26,7 +26,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
 from model import NeRF, get_embedder, get_rays, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
-    compute_depth_loss, select_coordinates, to16b, compute_space_carving_loss, \
+    compute_depth_loss, select_coordinates, to16b, compute_monosdf_styleloss, \
     sample_pdf_return_u, sample_pdf_joint_return_u
 from data import create_random_subsets, load_llff_data_multicam_withdepth, convert_depth_completion_scaling_to_m, \
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
@@ -1028,12 +1028,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         
         loss = img_loss
 
-        if use_depth and (args.space_carving_weight>0. and i>args.warm_start_nerf):
-            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint, norm_p=args.norm_p, threshold=args.space_carving_threshold, mask=space_carving_mask)
-            
-            loss = loss + args.space_carving_weight * space_carving_loss
+        if use_depth and args.monosdf_weight > 0.:
+            monosdf_loss = compute_monosdf_styleloss(extras['depth_map'], target_h, mask=None)
+            loss = loss + args.monosdf_weight * monosdf_loss
+
         else:
-            space_carving_loss = torch.mean(torch.zeros([rgb.shape[0]]).to(rgb.device))
+            monosdf_loss = torch.mean(torch.zeros([rgb.shape[0]]).to(rgb.device))
 
         if 'rgb0' in extras:
             img_loss0 = img2mse(extras['rgb0'], target_s)
@@ -1081,8 +1081,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         if i%args.i_print==0:
             tb.add_scalars('mse', {'train': img_loss.item()}, i)
 
-            if args.space_carving_weight > 0.:
-                tb.add_scalars('space_carving_loss', {'train': space_carving_loss.item()}, i)
+            if args.monosdf_weight > 0.:
+                tb.add_scalars('monosdf_loss', {'train': monosdf_loss.item()}, i)
 
             tb.add_scalars('psnr', {'train': psnr.item()}, i)
             if 'rgb0' in extras:
@@ -1095,7 +1095,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
                 tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
 
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()}")
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} MonoSDF: {monosdf_loss.item()}")
             
         if i%args.i_img==0:
             # visualize 2 train images
@@ -1237,8 +1237,8 @@ def config_parser():
                         help='dump_dir name for prior depth hypotheses')
     parser.add_argument("--num_hypothesis", type=int, default=20, 
                         help='number of cimle hypothesis')
-    parser.add_argument("--space_carving_weight", type=float, default=0.007,
-                        help='weight of the depth loss, values <=0 do not apply depth loss')
+    parser.add_argument("--monosdf_weight", type=float, default=0.001,
+                        help='weight of monosdf style loss.')
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 

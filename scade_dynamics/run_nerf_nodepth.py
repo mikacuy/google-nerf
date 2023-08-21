@@ -1289,7 +1289,7 @@ def run_nerf():
     frame_idx = args.frame_idx
 
     images, _, _, poses, H, W, intrinsics, near, far, i_split,\
-          render_poses, _ =load_llff_data_multicam(
+          video_poses, video_intrinsics, _ =load_llff_data_multicam(
         scene_data_dir,
         camera_indices,
         factor=8,
@@ -1383,9 +1383,9 @@ def run_nerf():
             render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
     elif args.task == "video":
-        vposes = torch.Tensor(poses[i_video]).to(device)
-        vintrinsics = torch.Tensor(intrinsics[i_video]).to(device)
-        render_video(vposes, H, W, vintrinsics, str(0), args, render_kwargs_test)
+        vposes = torch.Tensor(video_poses).to(device)
+        vintrinsics = torch.Tensor(video_intrinsics).to(device)
+        render_video(vposes, H, W, vintrinsics, "video_out", args, render_kwargs_test)
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')
