@@ -33,6 +33,9 @@ from data import create_random_subsets, load_llff_data_multicam, convert_depth_c
 from train_utils import MeanTracker, update_learning_rate, get_learning_rate
 from metric import compute_rmse
 
+import imageio
+from natsort import natsorted 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
 
@@ -239,46 +242,46 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     video_depth_colored_dir = os.path.join(args.ckpt_dir, args.expname, 'video_depth_colored_' + filename)
 
 
-    if os.path.exists(video_dir):
-        shutil.rmtree(video_dir)
-    if os.path.exists(video_depth_dir):
-        shutil.rmtree(video_depth_dir)
-    if os.path.exists(video_depth_colored_dir):
-        shutil.rmtree(video_depth_colored_dir)        
-    os.makedirs(video_dir, exist_ok=True)
-    os.makedirs(video_depth_dir, exist_ok=True)
-    os.makedirs(video_depth_colored_dir, exist_ok=True)
+    # if os.path.exists(video_dir):
+    #     shutil.rmtree(video_dir)
+    # if os.path.exists(video_depth_dir):
+    #     shutil.rmtree(video_depth_dir)
+    # if os.path.exists(video_depth_colored_dir):
+    #     shutil.rmtree(video_depth_colored_dir)        
+    # os.makedirs(video_dir, exist_ok=True)
+    # os.makedirs(video_depth_dir, exist_ok=True)
+    # os.makedirs(video_depth_colored_dir, exist_ok=True)
 
-    depth_scale = render_kwargs_test["far"]
-    max_depth_in_video = 0
+    # depth_scale = render_kwargs_test["far"]
+    # max_depth_in_video = 0
 
-    for img_idx in range(0, len(poses), 3):
-    # for img_idx in range(200):
-        pose = poses[img_idx, :3,:4]
-        intrinsic = intrinsics[img_idx, :]
-        with torch.no_grad():
-            if args.input_ch_cam > 0:
-                render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
-            # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
-            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, with_5_9=False, **render_kwargs_test)
-            rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
-            video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
+    # for img_idx in range(0, len(poses), 3):
+    # # for img_idx in range(200):
+    #     pose = poses[img_idx, :3,:4]
+    #     intrinsic = intrinsics[img_idx, :]
+    #     with torch.no_grad():
+    #         if args.input_ch_cam > 0:
+    #             render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
+    #         # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
+    #         rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, with_5_9=False, **render_kwargs_test)
+    #         rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
+    #         video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
 
-            max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
-            depth_colored_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
-            depth = (extras['depth_map']).cpu().numpy()*1000.
-            depth = (depth).astype(np.uint16)
+    #         max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
+    #         depth_colored_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
+    #         depth = (extras['depth_map']).cpu().numpy()*1000.
+    #         depth = (depth).astype(np.uint16)
 
-            # max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
-            # depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
-            # video_frame = np.concatenate((video_frame, depth_frame), 1)
-            # depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
-            # depth_std = depth_var.clamp(0., 1.).sqrt()
-            # video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
+    #         # max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
+    #         # depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
+    #         # video_frame = np.concatenate((video_frame, depth_frame), 1)
+    #         # depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
+    #         # depth_std = depth_var.clamp(0., 1.).sqrt()
+    #         # video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
 
-            cv2.imwrite(os.path.join(video_dir, str(img_idx) + '.png'), video_frame)        
-            cv2.imwrite(os.path.join(video_depth_dir, str(img_idx) + '.png'), depth)
-            cv2.imwrite(os.path.join(video_depth_colored_dir, str(img_idx) + '.png'), depth_colored_frame)
+    #         cv2.imwrite(os.path.join(video_dir, str(img_idx) + '.png'), video_frame)        
+    #         cv2.imwrite(os.path.join(video_depth_dir, str(img_idx) + '.png'), depth)
+    #         cv2.imwrite(os.path.join(video_depth_colored_dir, str(img_idx) + '.png'), depth_colored_frame)
 
     video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
     print(video_dir)
