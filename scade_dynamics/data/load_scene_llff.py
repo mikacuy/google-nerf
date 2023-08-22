@@ -713,3 +713,133 @@ def load_llff_data_multicam_withdepth(
 
 
   return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, video_poses, video_intrinsics, all_depth_hypothesis
+
+
+def load_scene_mika(basedir, camera_indices, cimle_dir, num_hypothesis=20, downsample=2.0,
+    frame_indices = [0]):
+
+    all_imgs = []
+    all_poses = []
+    all_intrinsics = []
+
+    images_basedir = os.path.join(basedir, "mv_images_withdepth", "%05d"%frame_indices[0])
+    ### This currently only supports single frame index
+    if os.path.exists(os.path.join(images_basedir, 'transforms_train.json')):
+
+        json_fname =  os.path.join(images_basedir, 'transforms_train.json')
+
+        with open(json_fname, 'r') as fp:
+            meta = json.load(fp)
+
+        near = float(meta['near'])
+        far = float(meta['far'])
+        depth_scaling_factor = float(meta['depth_scaling_factor'])
+        
+        all_imgs = []
+        all_poses = []
+        all_intrinsics = []
+
+        indices = []
+        
+        for frame in meta['frames']:
+          
+          indices.append(int(frame['file_path'].split("/")[-1].split(".")[0][-2:]))
+          
+          img = cv2.imread(os.path.join(images_basedir, frame['file_path']), cv2.IMREAD_UNCHANGED)
+          if img.shape[-1] == 4:
+              convert_fn = cv2.COLOR_BGRA2RGBA
+          else:
+              convert_fn = cv2.COLOR_BGR2RGB
+          img = (cv2.cvtColor(img, convert_fn) / 255.).astype(np.float32)
+          img = cv2.resize(img, (int(img.shape[1]/downsample), int(img.shape[0]/downsample)), interpolation=cv2.INTER_LINEAR)
+              
+          all_imgs.append(img)
+
+          all_poses.append(np.array(frame['transform_matrix']))
+          H, W = img.shape[:2]
+          fx, fy, cx, cy = frame['fx']/downsample, frame['fy']/downsample, frame['cx'], frame['cy']
+          all_intrinsics.append(np.array((fx, fy, cx, cy)))
+
+        # print(indices)
+        idx_sorted = np.argsort(indices)
+        # print(idx_sorted)
+        # exit()
+
+    all_imgs = np.array(all_imgs)[idx_sorted]
+    all_poses = np.array(all_poses)[idx_sorted]
+    all_intrinsics = np.array(all_intrinsics)[idx_sorted]
+
+    if len(camera_indices) == 16:
+      ### Fix this ####
+      i_test = np.arange(3, all_poses.shape[0], 5)
+
+      # i_train = np.setdiff1d(np.arange(poses.shape[0]), i_test)
+
+      ### Hack to use all cameras as train set --> Harded now, please fix Mika!
+      i_train = np.arange(all_poses.shape[0])
+      
+      i_split = [i_train, i_test]
+
+    else:
+      i_train = np.array(camera_indices)
+      i_test = np.setdiff1d(all_camera_indices, i_train)
+      i_split = [i_train, i_test]
+
+
+    ############################################    
+    #### Load cimle depth maps ####
+    ############################################    
+    leres_dir = os.path.join(basedir, "scade_hypothesis", cimle_dir)
+    hypothesis_dir = sorted(os.listdir(leres_dir))
+
+    hypothesis_dir_selected = [os.path.join(leres_dir, "%05d"%x) for x in frame_indices]
+
+    all_depth_hypothesis = []
+
+    for cam_idx in camera_indices:
+      for i in range(len(hypothesis_dir_selected)):
+        
+        curr_depth_hypotheses = []
+        curr_dir = hypothesis_dir_selected[i]
+
+        for j in range(num_hypothesis):
+          cimle_depth_name = os.path.join(curr_dir, 'cam%02d'%cam_idx +"_"+str(j)+".npy")        
+          cimle_depth = np.load(cimle_depth_name).astype(np.float32)
+          cimle_depth = cv2.resize(cimle_depth, (int(cimle_depth.shape[1]/downsample), int(cimle_depth.shape[0]/downsample)), interpolation=cv2.INTER_NEAREST)          
+
+          cimle_depth = np.expand_dims(cimle_depth, -1)
+          curr_depth_hypotheses.append(cimle_depth)
+
+        curr_depth_hypotheses = np.array(curr_depth_hypotheses)
+        all_depth_hypothesis.append(curr_depth_hypotheses
+        )
+    all_depth_hypothesis = np.array(all_depth_hypothesis)
+    print(all_depth_hypothesis.shape)
+
+    ### Clamp depth hypothesis to near plane and far plane
+    all_depth_hypothesis = np.clip(all_depth_hypothesis, near, far)
+    #########################################
+
+    ### Get video poses from the json file --> need to update this to colmap one
+    json_fname =  os.path.join(images_basedir, 'transforms_video.json')
+
+    with open(json_fname, 'r') as fp:
+        meta = json.load(fp)
+
+    video_poses = []
+    video_intrinsics = []
+
+    for frame in meta['frames']:
+      video_poses.append(np.array(frame['transform_matrix']))
+      fx, fy, cx, cy = frame['fx'], frame['fy'], frame['cx'], frame['cy']
+      video_intrinsics.append(np.array((fx, fy, cx, cy)))
+
+    video_poses = np.array(video_poses).astype(np.float32)
+    video_intrinsics = np.array(video_intrinsics).astype(np.float32)
+    
+    print("=====Done loading data.=======")
+    print(all_imgs.shape)
+    print(all_poses.shape)
+    print(all_intrinsics.shape)
+
+    return all_imgs, None, None, all_poses, H, W, all_intrinsics, near, far, i_split, video_poses, video_intrinsics, all_depth_hypothesis
