@@ -29,7 +29,7 @@ from model import NeRF, get_embedder, get_rays, sample_pdf, sample_pdf_joint, im
     compute_depth_loss, select_coordinates, to16b, compute_space_carving_loss, \
     sample_pdf_return_u, sample_pdf_joint_return_u
 from data import create_random_subsets, load_llff_data_multicam, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_mika
 from train_utils import MeanTracker, update_learning_rate, get_learning_rate
 from metric import compute_rmse
 
@@ -1140,6 +1140,8 @@ def config_parser():
                         help='config file path')
     parser.add_argument("--expname", type=str, default=None, 
                         help='specify the experiment, required for "test" and "video", optional for "train"')
+    parser.add_argument("--dataset", type=str, default="llff", 
+                        help='dataset used -- selects which dataloader"')
 
     # training options
     parser.add_argument("--netdepth", type=int, default=8, 
@@ -1211,7 +1213,7 @@ def config_parser():
     parser.add_argument("--train_jsonfile", type=str, default='transforms_train.json',
                         help='json file containing training images')
 
-    parser.add_argument("--cimle_dir", type=str, default="dump_0826_pretrained_dd_scene0710_train/",
+    parser.add_argument("--cimle_dir", type=str, default="dump_0718_noalign/",
                         help='dump_dir name for prior depth hypotheses')
     parser.add_argument("--num_hypothesis", type=int, default=20, 
                         help='number of cimle hypothesis')
@@ -1295,18 +1297,26 @@ def run_nerf():
     camera_indices = args.camera_indices
     frame_idx = args.frame_idx
 
-    images, _, _, poses, H, W, intrinsics, near, far, i_split,\
-          render_poses, _ =load_llff_data_multicam(
-        scene_data_dir,
-        camera_indices,
-        factor=8,
-        render_idx=8,
-        recenter=True,
-        bd_factor=4.0,
-        spherify=False,
-        load_imgs=True,
-        frame_indices=frame_idx
-    )
+    if args.dataset == "llff":
+        images, _, _, poses, H, W, intrinsics, near, far, i_split,\
+            video_poses, video_intrinsics, all_depth_hypothesis = load_llff_data_multicam_withdepth(
+            scene_data_dir,
+            camera_indices,
+            factor=8,
+            render_idx=8,
+            recenter=True,
+            bd_factor=4.0,
+            spherify=False,
+            load_imgs=True,
+            frame_indices=frame_idx,
+            cimle_dir=args.cimle_dir,
+            num_hypothesis = args.num_hypothesis
+        )
+    
+    elif args.dataset == "scannet":
+        images, _, _, poses, H, W, intrinsics, near, far, i_split,\
+            video_poses, video_intrinsics, all_depth_hypothesis = load_scene_mika(scene_data_dir, camera_indices, args.cimle_dir, num_hypothesis = args.num_hypothesis,
+            frame_indices = frame_idx)
 
     print(images.shape)
 
@@ -1394,8 +1404,12 @@ def run_nerf():
     data = {"near": near, "far": far, "depth_scaling_factor": 1000., "frames": frames}
     print(json.dumps(data, indent=4))
 
-    with open(os.path.join(scene_data_dir, "transforms_video.json"), "w") as outfile:
-        json.dump(data, outfile)
+    if args.dataset == "llff":
+        with open(os.path.join(scene_data_dir, "transforms_video.json"), "w") as outfile:
+            json.dump(data, outfile)
+    elif args.dataset == "scannet":
+        with open(os.path.join(scene_data_dir, "mv_images_withdepth", "%05d"%frame_idx[0], "transforms_video.json"), "w") as outfile:
+            json.dump(data, outfile)        
 
     print()
     print("Num frames: ")

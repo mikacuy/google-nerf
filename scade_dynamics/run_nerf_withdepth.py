@@ -29,7 +29,7 @@ from model import NeRF, get_embedder, get_rays, sample_pdf, sample_pdf_joint, im
     compute_depth_loss, select_coordinates, to16b, compute_space_carving_loss, \
     sample_pdf_return_u, sample_pdf_joint_return_u
 from data import create_random_subsets, load_llff_data_multicam_withdepth, convert_depth_completion_scaling_to_m, \
-    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_mika
 from train_utils import MeanTracker, update_learning_rate, get_learning_rate
 from metric import compute_rmse
 
@@ -1160,8 +1160,10 @@ def config_parser():
     parser.add_argument('task', type=str, help='one out of: "train", "test", "test_with_opt", "video"')
     parser.add_argument('--config', is_config_file=True, 
                         help='config file path')
-    parser.add_argument("--expname", type=str, default=None, 
+    parser.add_argument("--expname", type=str, default="test", 
                         help='specify the experiment, required for "test" and "video", optional for "train"')
+    parser.add_argument("--dataset", type=str, default="llff", 
+                        help='dataset used -- selects which dataloader"')
 
     # training options
     parser.add_argument("--netdepth", type=int, default=8, 
@@ -1220,7 +1222,7 @@ def config_parser():
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--ckpt_dir", type=str, default="",
+    parser.add_argument("--ckpt_dir", type=str, default="log_test",
                         help='checkpoint directory')
 
     # data options
@@ -1284,7 +1286,7 @@ def config_parser():
         default=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], type=list_of_ints,
         help='camera indices in the rig to use',
     )     
-    parser.add_argument("--frame_idx", type=list_of_ints, default=0, 
+    parser.add_argument("--frame_idx", type=list_of_ints, default=[0], 
                         help='Frame index to train the nerf model.')   
     ##################################
 
@@ -1317,20 +1319,26 @@ def run_nerf():
     camera_indices = args.camera_indices
     frame_idx = args.frame_idx
 
-    images, _, _, poses, H, W, intrinsics, near, far, i_split,\
-          video_poses, video_intrinsics, all_depth_hypothesis = load_llff_data_multicam_withdepth(
-        scene_data_dir,
-        camera_indices,
-        factor=8,
-        render_idx=8,
-        recenter=True,
-        bd_factor=4.0,
-        spherify=False,
-        load_imgs=True,
-        frame_indices=frame_idx,
-        cimle_dir=args.cimle_dir,
-        num_hypothesis = args.num_hypothesis
-    )
+    if args.dataset == "llff":
+        images, _, _, poses, H, W, intrinsics, near, far, i_split,\
+            video_poses, video_intrinsics, all_depth_hypothesis = load_llff_data_multicam_withdepth(
+            scene_data_dir,
+            camera_indices,
+            factor=8,
+            render_idx=8,
+            recenter=True,
+            bd_factor=4.0,
+            spherify=False,
+            load_imgs=True,
+            frame_indices=frame_idx,
+            cimle_dir=args.cimle_dir,
+            num_hypothesis = args.num_hypothesis
+        )
+    
+    elif args.dataset == "scannet":
+        images, _, _, poses, H, W, intrinsics, near, far, i_split,\
+            video_poses, video_intrinsics, all_depth_hypothesis = load_scene_mika(scene_data_dir, camera_indices, args.cimle_dir, num_hypothesis = args.num_hypothesis,
+            frame_indices = frame_idx)
 
     print(images.shape)
     # exit()
