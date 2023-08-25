@@ -348,7 +348,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     with torch.no_grad():
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = 'cpu'
+
         extractor = ViTExtractor(args.model_type, args.stride, device=device)
         image_batch, image_pil = extractor.preprocess(args.image_path, args.load_size)
         print(f"Image {args.image_path} is preprocessed to tensor of size {image_batch.shape}.")
