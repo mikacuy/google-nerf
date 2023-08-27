@@ -64,9 +64,12 @@ def read_files(rgb_file, downsample_scale=None):
 
 #     return gt_depth
 
-def load_ground_truth_depth(depth_file, depth_scaling_factor, near, far):
+def load_ground_truth_depth(depth_file, depth_scaling_factor, near, far, downsample_scale=None):
     gt_depth = cv2.imread(depth_file, cv2.IMREAD_UNCHANGED).astype(np.float64)[...,0]
     gt_depth = (gt_depth / depth_scaling_factor).astype(np.float32)
+
+    if downsample_scale is not None:
+        gt_depth = cv2.resize(gt_depth, (int(gt_depth.shape[1]/downsample_scale), int(gt_depth.shape[0]/downsample_scale)), interpolation=cv2.INTER_NEAREST)
 
     return gt_depth
 
