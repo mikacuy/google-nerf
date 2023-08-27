@@ -1351,7 +1351,7 @@ def run_nerf():
 
     elif args.dataset == "blender":
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-            video_poses, video_intrinsics, _  = load_scene_blender_depth(scene_data_dir, half_res=False)
+            video_poses, video_intrinsics, _  = load_scene_blender_depth(scene_data_dir, half_res=True)
 
         all_depth_hypothesis = None
 
