@@ -7,12 +7,9 @@ import cv2
 import torchvision.transforms as transforms
 import imageio
 import torch
-<<<<<<< HEAD
-=======
 import torch.nn.functional as F
 
 from skimage.transform import resize
->>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
 
 #### For Pose Corrections ####
 BLENDER2OPENCV = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
@@ -164,9 +161,6 @@ def load_scene_blender_depth(basedir, half_res=True, train_skip=1, test_skip=5):
     print(video_poses.shape)
     print(video_intrinsics.shape)
 
-<<<<<<< HEAD
-    return all_imgs, depths, valid_depths, all_poses, H, W, all_intrinsics, near, far, i_split, video_poses, video_intrinsics, None
-=======
     return all_imgs, depths, valid_depths, all_poses, H, W, all_intrinsics, near, far, i_split, video_poses, video_intrinsics, None
 
 def read_feature(fname, feat_dim, H, W):
@@ -301,4 +295,3 @@ def load_scene_blender_depth_features(basedir, feature_dir, half_res=True, train
 
     # return all_imgs, depths, valid_depths, all_poses, H, W, all_intrinsics, near, far, i_split, video_poses, video_intrinsics, None, all_features_fnames
     return all_imgs, depths, valid_depths, all_poses, H, W, all_intrinsics, near, far, i_split, video_poses, video_intrinsics, None, all_features, all_features_fnames
->>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
