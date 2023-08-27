@@ -1,0 +1,11 @@
+python run_nerf_withdepth.py train --dataset blender --ckpt_dir log_blender --expname hotdog \
+--data_dir /home/mikacuy/Desktop/coord-mvs/hotdog_data_v1/ --scene_id hotdog_single_shadowfix 
+
+python run_nerf_withdepth.py train --dataset blender --ckpt_dir log_blender --expname hotdog_edited \
+--data_dir /home/mikacuy/Desktop/coord-mvs/hotdog_data_v1/ --scene_id hotdog_single_shadowfix_edited 
+
+python run_nerf_withdepth.py train --dataset blender --ckpt_dir log_blender_withdepth --expname hotdog \
+--data_dir /home/mikacuy/Desktop/coord-mvs/hotdog_data_v1/ --scene_id hotdog_single_shadowfix --use_depth=1 --space_carving_weight 0.007 --freeze_ss 0
+
+python run_nerf_withdepth.py train --dataset blender --ckpt_dir log_blender_withdepth --expname hotdog_edited \
+--data_dir /home/mikacuy/Desktop/coord-mvs/hotdog_data_v1/ --scene_id hotdog_single_shadowfix_edited --use_depth=1 --space_carving_weight 0.007 --freeze_ss 0

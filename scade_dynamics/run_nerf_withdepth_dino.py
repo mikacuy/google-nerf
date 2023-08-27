@@ -25,7 +25,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF, get_embedder, get_rays, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF_semantics, get_embedder, get_rays, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, compute_space_carving_loss, \
     sample_pdf_return_u, sample_pdf_joint_return_u
 from data import create_random_subsets, load_llff_data_multicam_withdepth, convert_depth_completion_scaling_to_m, \
@@ -465,7 +465,7 @@ def create_nerf(args, scene_render_params):
     output_ch = 5 if args.N_importance > 0 else 4
     skips = [4]
 
-    model = NeRF(D=args.netdepth, W=args.netwidth,
+    model = NeRF_semantics(D=args.netdepth, W=args.netwidth,
                      input_ch=input_ch, output_ch=output_ch, skips=skips,
                      input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
 
@@ -482,7 +482,7 @@ def create_nerf(args, scene_render_params):
 
     model_fine = None
     if args.N_importance > 0:
-        model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
+        model_fine = NeRF_semantics(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
                           input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
             
@@ -575,6 +575,8 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, pytest=False):
         depth_map: [num_rays]. Estimated distance to object.
     """
     rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3]
+    features = raw[...,4:]
+
     noise = 0.
     if raw_noise_std > 0.:
         noise = torch.randn(raw[...,3].shape) * raw_noise_std
@@ -589,11 +591,13 @@ def raw2outputs(raw, z_vals, rays_d, raw_noise_std=0, pytest=False):
     
     rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
 
+    feature_map = torch.sum(weights[...,None].detach() * features, -2)
+
     depth_map = torch.sum(weights * z_vals, -1)
     disp_map = 1./torch.max(1e-10 * torch.ones_like(depth_map), depth_map / torch.sum(weights, -1))
     acc_map = torch.sum(weights, -1)
 
-    return rgb_map, disp_map, acc_map, weights, depth_map
+    return rgb_map, disp_map, acc_map, weights, depth_map, feature_map
 
 def perturb_z_vals(z_vals, pytest):
     # get intervals between samples
@@ -691,7 +695,7 @@ def render_rays(ray_batch,
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
 
     raw = network_query_fn(pts, viewdirs, embedded_cam, network_fn)
-    rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
+    rgb_map, disp_map, acc_map, weights, depth_map, feature_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
 
     ### Try without coarse and fine network, but just one network and use additional samples from the distribution of the nerf
@@ -715,7 +719,7 @@ def render_rays(ray_batch,
 
         ### Concatenated output
         raw = torch.gather(raw, 1, indices.unsqueeze(-1).expand_as(raw))
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
+        rgb_map, disp_map, acc_map, weights, depth_map, feature_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
 
         ## Second tier P_depth
@@ -731,7 +735,7 @@ def render_rays(ray_batch,
 
     elif N_importance > 0:
 
-        rgb_map_0, disp_map_0, acc_map_0, depth_map_0, z_vals_0, weights_0 = rgb_map, disp_map, acc_map, depth_map, z_vals, weights
+        rgb_map_0, disp_map_0, acc_map_0, depth_map_0, z_vals_0, weights_0, feature_map_0 = rgb_map, disp_map, acc_map, depth_map, z_vals, weights, feature_map
 
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
 
@@ -751,7 +755,7 @@ def render_rays(ray_batch,
 
         raw = network_query_fn(pts, viewdirs, embedded_cam, run_fn)
 
-        rgb_map, disp_map, acc_map, weights, depth_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
+        rgb_map, disp_map, acc_map, weights, depth_map, feature_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
         ### P_depth from fine network
         z_vals_mid = .5 * (z_vals[...,1:] + z_vals[...,:-1])
@@ -765,7 +769,7 @@ def render_rays(ray_batch,
 
 
     ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights, 'pred_hyp' : pred_depth_hyp,\
-    'u':u}
+    'u':u, 'feature_map': feature_map}
     if retraw:
         ret['raw'] = raw
     if N_importance > 0:
@@ -775,6 +779,7 @@ def render_rays(ray_batch,
         ret['depth0'] = depth_map_0
         ret['z_vals0'] = z_vals_0
         ret['weights0'] = weights_0
+        ret['feature_map_0'] = feature_map_0
         ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
         # ret['pred_hyp'] = pred_depth_hyp
 
@@ -866,43 +871,16 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     print('VAL views are', i_val)
     print('TEST views are', i_test)
 
-    # if use_depth:
-    #     # use ground truth depth for validation and test if available
-    #     if gt_depths is not None:
-    #         depths[i_test] = gt_depths[i_test]
-    #         valid_depths[i_test] = gt_valid_depths[i_test]
-    #         depths[i_val] = gt_depths[i_val]
-    #         valid_depths[i_val] = gt_valid_depths[i_val]
-
-    # i_relevant_for_training = np.concatenate((i_train, i_val), 0)
-    # i_relevant_for_training = i_train
-
-    # keep test data on cpu until needed
-    # test_images = images[i_test]
-    # test_poses = poses[i_test]
-    # test_intrinsics = intrinsics[i_test]
-    # i_test = i_test - i_test[0]
-
     test_images = images
     test_poses = poses
     test_intrinsics = intrinsics
     i_test = i_test
-
-    # move training data to gpu
-    # images = torch.Tensor(images[i_relevant_for_training]).to(device)
-    # poses = torch.Tensor(poses[i_relevant_for_training]).to(device)
-    # intrinsics = torch.Tensor(intrinsics[i_relevant_for_training]).to(device)
 
     images = torch.Tensor(images).to(device)
     poses = torch.Tensor(poses).to(device)
     intrinsics = torch.Tensor(intrinsics).to(device)
 
     if use_depth:
-        # depths = torch.Tensor(depths[i_relevant_for_training]).to(device)
-        # valid_depths = torch.Tensor(valid_depths[i_relevant_for_training]).bool().to(device)
-        # test_depths = depths[i_test]
-        # test_valid_depths = valid_depths[i_test]
-
         if args.dataset != "blender":
             depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
             valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
@@ -1016,6 +994,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         render_kwargs_train["cached_u"] = None
 
         rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint, **render_kwargs_train)
+
+        print(rgb.shape)
+        print(extras["feature_map"].shape)
+        exit()
 
         # compute loss and optimize
         optimizer.zero_grad()
@@ -1361,10 +1343,6 @@ def run_nerf():
             images = images[...,:3] 
 
     print(images.shape)
-    # exit()
-
-    # images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-    # gt_depths, gt_valid_depths, all_depth_hypothesis = load_scene_scannet(scene_data_dir, args.cimle_dir, args.num_hypothesis, 'transforms_train.json')
 
     i_train, i_test = i_split
 
@@ -1402,17 +1380,6 @@ def run_nerf():
         with_test_time_optimization = False
         if args.task == "test_opt":
             with_test_time_optimization = True
-        
-        # images = torch.Tensor(images[i_test]).to(device)
-        # if gt_depths is None:
-        #     depths = torch.Tensor(depths[i_test]).to(device)
-        #     valid_depths = torch.Tensor(valid_depths[i_test]).bool().to(device)
-        # else:
-        #     depths = torch.Tensor(gt_depths[i_test]).to(device)
-        #     valid_depths = torch.Tensor(gt_valid_depths[i_test]).bool().to(device)
-        # poses = torch.Tensor(poses[i_test]).to(device)
-        # intrinsics = torch.Tensor(intrinsics[i_test]).to(device)
-        # i_test = i_test - i_test[0]
 
         images = torch.Tensor(images).to(device)
         poses = torch.Tensor(poses).to(device)
@@ -1421,21 +1388,10 @@ def run_nerf():
         depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
         valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
 
-        # print(images.shape)
-        # print(poses.shape)
-        # print(intrinsics.shape)
-        # print(depths.shape)
-        # print(valid_depths.shape)
-        # print()
-
         print("Train split")
         print(i_train)
         print("Test split")
         print(i_test)
-
-        # print(i_train)
-        # print(i_test)
-        # exit()
 
         mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
             render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
