@@ -105,7 +105,7 @@ def load_scene_blender_depth(basedir, half_res=True, train_skip=1, test_skip=5):
 
             max_depth = frame["max_depth"]
             depth_scaling_factor = (255. / max_depth)
-            depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'].split("/")[-1]+"0030.png"), depth_scaling_factor, near, far)
+            depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'].split("/")[-1]+"0030.png"), depth_scaling_factor, near, far, downsample_scale=downsample)
 
             if depth.ndim == 2:
                 depth = np.expand_dims(depth, -1)
@@ -233,7 +233,7 @@ def load_scene_blender_depth_features(basedir, feature_dir, half_res=True, train
 
             max_depth = frame["max_depth"]
             depth_scaling_factor = (255. / max_depth)
-            depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'].split("/")[-1]+"0030.png"), depth_scaling_factor, near, far)
+            depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'].split("/")[-1]+"0030.png"), depth_scaling_factor, near, far, downsample_scale=downsample)
 
             if depth.ndim == 2:
                 depth = np.expand_dims(depth, -1)

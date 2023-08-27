@@ -1122,6 +1122,13 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 shift_mean = torch.mean(DEPTH_SHIFTS[i_train])
                 tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
                 tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
+            
+            if args.feature_weight > 0. :
+                tb.add_scalars('feature_loss', {'train': feature_loss.item()}, i)
+            
+            if 'feature_map_0' in extras:
+                tb.add_scalars('feature_loss_0', {'train': feature_loss_0.item()}, i)
+
 
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Feature loss: {feature_loss.item()}")
             
