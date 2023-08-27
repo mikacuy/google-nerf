@@ -275,8 +275,14 @@ class NeRF_semantics(nn.Module):
             self.feature_linear = DenseLayer(W, W, activation="linear")
             self.alpha_linear = DenseLayer(W, 1, activation="linear")
             self.rgb_linear = DenseLayer(W//2, 3, activation="linear")
+            
+            if semantic_dim < 512:
+                self.semantic_linear = nn.Sequential(DenseLayer(W, W*2, activation="relu"), DenseLayer(W*2, semantic_dim, activation="linear"))
+            
+            ## Make larger model
+            else:
+                self.semantic_linear = nn.Sequential(DenseLayer(W, W*4, activation="relu"), DenseLayer(W*4, semantic_dim, activation="linear"))
 
-            self.semantic_linear = nn.Sequential(DenseLayer(W, W*2, activation="relu"), DenseLayer(W*2, semantic_dim, activation="linear"))
         else:
             self.output_linear = DenseLayer(W, output_ch, activation="linear")
 

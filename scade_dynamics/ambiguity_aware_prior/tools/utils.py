@@ -37,7 +37,7 @@ def reconstruct_3D(depth, f):
     # pcd = pcd.astype(np.int)
     return pcd
 
-def reconstruct_3D_intrinsics(depth, intrinsic):
+def reconstruct_3D_intrinsics(depth, intrinsic, valid=None):
     """
     Reconstruct depth to 3D pointcloud with the provided focal length.
     Return:
@@ -60,9 +60,15 @@ def reconstruct_3D_intrinsics(depth, intrinsic):
     y = (v - cv) * depth / fy
     z = depth
 
-    x = np.reshape(x, (width * height, 1)).astype(np.float)
-    y = np.reshape(y, (width * height, 1)).astype(np.float)
-    z = np.reshape(z, (width * height, 1)).astype(np.float)
+    if valid is None:
+        x = np.reshape(x, (width * height, 1)).astype(np.float)
+        y = np.reshape(y, (width * height, 1)).astype(np.float)
+        z = np.reshape(z, (width * height, 1)).astype(np.float)
+    else:
+        x = np.reshape(x[valid], (-1, 1)).astype(np.float)
+        y = np.reshape(y[valid], (-1, 1)).astype(np.float)
+        z = np.reshape(z[valid], (-1, 1)).astype(np.float)        
+    
     pcd = np.concatenate((x, y, z), axis=1)
     # pcd = pcd.astype(np.int)
     return pcd
@@ -74,7 +80,7 @@ def save_point_cloud(pcd, rgb, filename, binary=True):
       @pcd: Nx3 matrix, the XYZ coordinates
       @rgb: NX3 matrix, the rgb colors for each 3D point
     """
-    assert pcd.shape[0] == rgb.shape[0]
+    # assert pcd.shape[0] == rgb.shape[0]
 
     if rgb is None:
         gray_concat = np.tile(np.array([128], dtype=np.uint8), (pcd.shape[0], 3))
@@ -156,6 +162,40 @@ def reconstruct_depth_intrinsics(depth, rgb, dir, pcd_name, intrinsic, scale=1.0
     rgb_n = np.reshape(rgb, (-1, 3))
     save_point_cloud(pcd, rgb_n, os.path.join(dir, pcd_name + '.ply'))
 
+def reconstruct_depth_intrinsics_transform(depth, rgb, dir, pcd_name, intrinsic, pose, scale=1.0):
+    """
+    para disp: disparity, [h, w]
+    para rgb: rgb image, [h, w, 3], in rgb format
+    """
+    rgb = np.squeeze(rgb)
+    depth = np.squeeze(depth)
+
+    mask = depth < 1e-8
+    depth[mask] = 0
+
+    # print(depth.max())
+    # exit()
+    # depth = depth / depth.max() * scale
+    depth = depth * scale
+    
+    pcd = reconstruct_3D_intrinsics(depth, intrinsic)
+
+    # pose = np.linalg.inv(pose)
+
+    # print(pose)
+    # print(pose[:3, :3])
+    # print(pose[:3, 3])
+    # print(pose.shape)
+    # print(pcd.shape)
+    # exit()
+
+    # pcd = pcd @ pose[:3, :3]  + pose[:3, 3]
+    pcd = np.sum(pcd[..., np.newaxis, :] * pose[:3, :3], -1)  + pose[:3, -1]
+    # print(pcd.shape)
+    # exit()
+
+    rgb_n = np.reshape(rgb, (-1, 3))
+    save_point_cloud(pcd, rgb_n, os.path.join(dir, pcd_name + '.ply'))
 
 def get_nonoccluded_points(pointcloud, focal, input_rgb):
     cu = input_rgb.shape[1] / 2.

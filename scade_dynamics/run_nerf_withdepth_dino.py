@@ -29,7 +29,11 @@ from model import NeRF_semantics, get_embedder, get_rays, sample_pdf, sample_pdf
     compute_depth_loss, select_coordinates, to16b, compute_space_carving_loss, \
     sample_pdf_return_u, sample_pdf_joint_return_u
 from data import create_random_subsets, load_llff_data_multicam_withdepth, convert_depth_completion_scaling_to_m, \
+<<<<<<< HEAD
     convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_mika, load_scene_blender_depth
+=======
+    convert_m_to_depth_completion_scaling, get_pretrained_normalize, resize_sparse_depth, load_scene_mika, load_scene_blender_depth, load_scene_blender_depth_features, read_feature
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
 from train_utils import MeanTracker, update_learning_rate, get_learning_rate
 from metric import compute_rmse
 
@@ -467,7 +471,11 @@ def create_nerf(args, scene_render_params):
 
     model = NeRF_semantics(D=args.netdepth, W=args.netwidth,
                      input_ch=input_ch, output_ch=output_ch, skips=skips,
+<<<<<<< HEAD
                      input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
+=======
+                     input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
 
     model = nn.DataParallel(model).to(device)
     grad_vars = list(model.parameters())
@@ -484,7 +492,11 @@ def create_nerf(args, scene_render_params):
     if args.N_importance > 0:
         model_fine = NeRF_semantics(D=args.netdepth_fine, W=args.netwidth_fine,
                           input_ch=input_ch, output_ch=output_ch, skips=skips,
+<<<<<<< HEAD
                           input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs)
+=======
+                          input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
             
         model_fine = nn.DataParallel(model_fine).to(device)
 
@@ -808,7 +820,11 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
     batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     return batch_rays, target_s, target_d, target_vd, img_i
 
+<<<<<<< HEAD
 def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, args, space_carving_idx=None, cached_u=None, gt_valid_depths=None):
+=======
+def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, curr_features, args, space_carving_idx=None, cached_u=None, gt_valid_depths=None):
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W), indexing='ij'), -1)  # (H, W, 2)
     # img_i = np.random.choice(i_train)
     
@@ -827,6 +843,10 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
     target_s = target[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
     target_d = target_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1) or (N_rand, 2)
     target_vd = target_valid_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1)
+<<<<<<< HEAD
+=======
+    target_feat = curr_features[select_coords[:, 0], select_coords[:, 1]] 
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
     target_h = target_hypothesis[:, select_coords[:, 0], select_coords[:, 1]]
 
     if space_carving_idx is not None:
@@ -854,10 +874,18 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
 
     batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     
+<<<<<<< HEAD
     return batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u
 
 
 def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis, is_init_scales=False, scales_init=None, shifts_init=None, use_depth=False):
+=======
+    return batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat
+
+
+def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis, is_init_scales=False, \
+              scales_init=None, shifts_init=None, use_depth=False, features_fnames=None, features=None):
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
     np.random.seed(0)
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
@@ -970,6 +998,16 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         ### Scale the hypotheses by scale and shift
         img_i = np.random.choice(i_train)
 
+<<<<<<< HEAD
+=======
+        ### Load feature
+        # feat_fname = features_fnames[img_i]
+        # curr_features = read_feature(feat_fname, args.feat_dim, H, W)
+
+        curr_features = features[img_i]
+        curr_features = curr_features.to(device)
+
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
         if use_depth:
             curr_scale = DEPTH_SCALES[img_i]
             curr_shift = DEPTH_SHIFTS[img_i]
@@ -979,10 +1017,17 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
                     intrinsics, all_depth_hypothesis, args, None, None)
             else:
+<<<<<<< HEAD
                 batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
                     intrinsics, gt_depths_train, args, None, None, gt_valid_depths_train)
 
             target_h = target_h*curr_scale + curr_shift        
+=======
+                batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, \
+                    intrinsics, gt_depths_train, curr_features, args, None, None, gt_valid_depths_train)
+
+            target_h = target_h*curr_scale + curr_shift   
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
 
         else:
             batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, \
@@ -994,11 +1039,17 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         render_kwargs_train["cached_u"] = None
 
         rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint, **render_kwargs_train)
+<<<<<<< HEAD
 
         print(rgb.shape)
         print(extras["feature_map"].shape)
         exit()
 
+=======
+        
+        pred_features = extras["feature_map"]
+        
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
         # compute loss and optimize
         optimizer.zero_grad()
 
@@ -1017,11 +1068,38 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             loss = loss + args.space_carving_weight * space_carving_loss
         else:
             space_carving_loss = torch.mean(torch.zeros([rgb.shape[0]]).to(rgb.device))
+<<<<<<< HEAD
+=======
+        
+        if args.feature_weight > 0. :
+          feature_loss = torch.norm(pred_features - target_feat, p=1, dim=-1)
+
+          ## Only use foreground
+          feature_loss = feature_loss * space_carving_mask
+
+          feature_loss = torch.mean(feature_loss)
+          loss = loss + args.feature_weight * feature_loss
+
+        else:
+          feature_loss = torch.mean(torch.zeros([rgb.shape[0]]).to(rgb.device))
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
 
         if 'rgb0' in extras:
             img_loss0 = img2mse(extras['rgb0'], target_s)
             psnr0 = mse2psnr(img_loss0)
             loss = loss + img_loss0
+<<<<<<< HEAD
+=======
+        
+        if 'feature_map_0' in extras:
+          feature_loss_0 = torch.norm(extras['feature_map_0'] - target_feat, p=1, dim=-1)
+
+          ## Only use foreground
+          feature_loss_0 = feature_loss_0 * space_carving_mask
+
+          feature_loss_0 = torch.mean(feature_loss_0)
+          loss = loss + args.feature_weight * feature_loss_0
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
 
         loss.backward()
 
@@ -1078,7 +1156,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
                 tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
 
+<<<<<<< HEAD
             tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()}")
+=======
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Feature loss: {feature_loss.item()}")
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
             
         if i%args.i_img==0:
             # visualize 2 train images
@@ -1227,6 +1309,16 @@ def config_parser():
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
+<<<<<<< HEAD
+=======
+    parser.add_argument("--feature_dir", type=str, default="hotdog_single_shadowfix_dino_features_small/",
+                        help='dump_dir name for prior depth hypotheses')
+    parser.add_argument("--feat_dim", type=int, default=768, 
+                        help='dino feature dimension')
+    parser.add_argument("--feature_weight", type=float, default=0.004,
+                        help='weight for feature')
+
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
     parser.add_argument('--scaleshift_lr', default= 0.00001, type=float)
     parser.add_argument('--scale_init', default= 1.0, type=float)
     parser.add_argument('--shift_init', default= 0.0, type=float)
@@ -1332,8 +1424,14 @@ def run_nerf():
         valid_depths = None
 
     elif args.dataset == "blender":
+<<<<<<< HEAD
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
             video_poses, video_intrinsics, _  = load_scene_blender_depth(scene_data_dir, half_res=False)
+=======
+        scene_feature_dir = os.path.join(args.data_dir, args.feature_dir)
+        images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
+            video_poses, video_intrinsics, _, all_features, all_features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, half_res=True, feat_dim = args.feat_dim)
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
 
         all_depth_hypothesis = None
 
@@ -1367,7 +1465,11 @@ def run_nerf():
     lpips_alex = LPIPS()
 
     if args.task == "train":
+<<<<<<< HEAD
         train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, None, None, all_depth_hypothesis, use_depth=args.use_depth)
+=======
+        train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, None, None, all_depth_hypothesis, use_depth=args.use_depth, features_fnames=all_features_fnames, features=all_features)
+>>>>>>> 6ccfcaf7fde08d6581a9805962934ff94543fe3f
         exit()
  
     # create nerf model for testing
