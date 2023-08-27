@@ -213,12 +213,13 @@ def load_scene_blender_depth_features(basedir, feature_dir, half_res=True, train
 
             if feat_dim == 768:
               curr_feat = curr_feat.reshape((199, 199, feat_dim))
+              
             elif feat_dim == 384:
               curr_feat = curr_feat.reshape((99, 99, feat_dim))
-
+              curr_feat = curr_feat.permute(2, 0, 1).unsqueeze(0).float()
+              curr_feat = F.interpolate(curr_feat, size=(img.shape[0], img.shape[1]), mode='bilinear').squeeze().permute(1,2,0)
             # print(curr_feat.shape)
-            curr_feat = curr_feat.permute(2, 0, 1).unsqueeze(0).float()
-            curr_feat = F.interpolate(curr_feat, size=(img.shape[0], img.shape[1]), mode='bilinear').squeeze().permute(1,2,0)
+
             all_features.append(curr_feat)
 
             curr_feat_fname = os.path.join(feature_dir, frame['file_path'].split("/")[-1] + '.pth')

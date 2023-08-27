@@ -475,10 +475,16 @@ def create_nerf(args, scene_render_params):
     grad_vars = []
     grad_names = []
 
-    for name, param in model.named_parameters():
-        grad_vars.append(param)
-        grad_names.append(name)
+    seman_grad_vars = []
+    seman_grad_names = []
 
+    for name, param in model.named_parameters():
+        if "semantic" in name:
+          seman_grad_vars.append(param)
+          seman_grad_names.append(name)
+        else:
+          grad_vars.append(param)
+          grad_names.append(name)
 
     model_fine = None
     if args.N_importance > 0:
@@ -489,8 +495,12 @@ def create_nerf(args, scene_render_params):
         model_fine = nn.DataParallel(model_fine).to(device)
 
         for name, param in model_fine.named_parameters():
-            grad_vars.append(param)
-            grad_names.append(name)
+            if "semantic" in name:
+              seman_grad_vars.append(param)
+              seman_grad_names.append(name)
+            else:
+              grad_vars.append(param)
+              grad_names.append(name)
 
     network_query_fn = lambda inputs, viewdirs, embedded_cam, network_fn : run_network(inputs, viewdirs, embedded_cam, network_fn,
                                                                 embed_fn=embed_fn,
@@ -502,6 +512,8 @@ def create_nerf(args, scene_render_params):
     # Create optimizer
     optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
 
+    print("Using different learning rate for feature layers.")
+    optimizer.add_param_group({"params": seman_grad_vars, "lr":args.seman_lrate})
 
     start = 0
 
@@ -977,6 +989,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         # curr_features = read_feature(feat_fname, args.feat_dim, H, W)
 
         curr_features = features[img_i]
+
+        if args.feat_dim == 768:
+            curr_features = curr_features.permute(2, 0, 1).unsqueeze(0).float()
+            curr_features = F.interpolate(curr_features, size=(H, W), mode='bilinear').squeeze().permute(1,2,0)
+
         curr_features = curr_features.to(device)
 
         if use_depth:
@@ -1255,12 +1272,15 @@ def config_parser():
     parser.add_argument("--warm_start_nerf", type=int, default=0, 
                         help='number of iterations to train only vanilla nerf without additional losses.')
 
+    ### Feature related
     parser.add_argument("--feature_dir", type=str, default="hotdog_single_shadowfix_dino_features_small/",
                         help='dump_dir name for prior depth hypotheses')
     parser.add_argument("--feat_dim", type=int, default=768, 
                         help='dino feature dimension')
     parser.add_argument("--feature_weight", type=float, default=0.004,
                         help='weight for feature')
+    parser.add_argument("--seman_lrate", type=float, default=5e-4, 
+                        help='learning rate')
 
     parser.add_argument('--scaleshift_lr', default= 0.00001, type=float)
     parser.add_argument('--scale_init', default= 1.0, type=float)
@@ -1278,7 +1298,7 @@ def config_parser():
     parser.add_argument('--mask_corners', default= False, type=bool)
 
     parser.add_argument('--load_pretrained', default= False, type=bool)
-    parser.add_argument("--pretrained_dir", type=str, default="pretrained_models/scannet/scene758_scade/",
+    parser.add_argument("--pretrained_dir", type=str, default="log_blender_withdepth/hotdog/",
                         help='folder directory name for where the pretrained model that we want to load is')
 
     parser.add_argument("--input_ch_cam", type=int, default=0,
