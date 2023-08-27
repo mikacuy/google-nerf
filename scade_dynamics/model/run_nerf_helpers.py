@@ -248,6 +248,73 @@ class NeRF(nn.Module):
 
         return outputs    
 
+class NeRF_semantics(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, input_ch_cam=0, output_ch=4, skips=[4], use_viewdirs=False, semantic_dim = 384):
+        """ 
+        """
+        super(NeRF_semantics, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        self.input_ch_views = input_ch_views
+        self.input_ch_cam = input_ch_cam
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
+        
+        self.pts_linears = nn.ModuleList(
+            [DenseLayer(input_ch, W, activation="relu")] + [DenseLayer(W, W, activation="relu") if i not in self.skips else DenseLayer(W + input_ch, W, activation="relu") for i in range(D-1)])
+        
+        ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
+        self.views_linears = nn.ModuleList([DenseLayer(input_ch_views + input_ch_cam + W, W//2, activation="relu")])
+
+        ### Implementation according to the paper
+        # self.views_linears = nn.ModuleList(
+        #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
+        
+        if use_viewdirs:
+            self.feature_linear = DenseLayer(W, W, activation="linear")
+            self.alpha_linear = DenseLayer(W, 1, activation="linear")
+            self.rgb_linear = DenseLayer(W//2, 3, activation="linear")
+            
+            if semantic_dim < 512:
+                self.semantic_linear = nn.Sequential(DenseLayer(W, W*2, activation="relu"), DenseLayer(W*2, semantic_dim, activation="linear"))
+            
+            ## Make larger model
+            else:
+                self.semantic_linear = nn.Sequential(DenseLayer(W, W*4, activation="relu"), DenseLayer(W*4, semantic_dim, activation="linear"))
+
+        else:
+            self.output_linear = DenseLayer(W, output_ch, activation="linear")
+
+    def forward(self, x):
+        input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views + self.input_ch_cam], dim=-1)
+        h = input_pts
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        if self.use_viewdirs:
+            alpha = self.alpha_linear(h)
+
+            sem_features = self.semantic_linear(h)
+
+            feature = self.feature_linear(h)
+            h = torch.cat([feature, input_views], -1)
+        
+            for i, l in enumerate(self.views_linears):
+                h = self.views_linears[i](h)
+                h = F.relu(h)
+
+            rgb = self.rgb_linear(h)
+            outputs = torch.cat([rgb, F.softplus(alpha, beta=10), sem_features], -1)
+        else:
+            outputs = self.output_linear(h)
+            outputs = torch.cat([outputs[..., :3], F.softplus(outputs[..., 3:], beta=10)], -1)
+
+        return outputs    
+
     def load_weights_from_keras(self, weights):
         assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
         

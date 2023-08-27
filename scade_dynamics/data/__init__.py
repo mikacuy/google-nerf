@@ -3,3 +3,4 @@ from .scannet_dataset import ScanNetDataset, convert_depth_completion_scaling_to
 from .load_scene import load_scene, load_scene_scannet, load_scene_processed, load_scene_nogt
 from .dataset_sampling import create_random_subsets
 from .load_scene_llff import load_llff_data_multicam, load_llff_data_multicam_withdepth, load_scene_mika
+from .load_scene_blender import load_scene_blender_depth, load_scene_blender_depth_features, read_feature

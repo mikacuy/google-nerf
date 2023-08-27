@@ -40,12 +40,13 @@ parser.add_argument('--phase', type=str, default='test', help='Training flag')
 
 
 parser.add_argument('--dataroot', default='/home/mikacuy/Desktop/coord-mvs/walking_dvd/', help='Root dir for dataset')
-parser.add_argument('--dump_dir', default= "dump_0820_aligned/", type=str)
+# parser.add_argument('--dump_dir', default= "dump_0820_aligned/", type=str)
+parser.add_argument('--dump_dir', default= "dump_0822_aligned_visu9_noinv/", type=str)
 parser.add_argument('--scene_id', default= "", type=str)
 
 parser.add_argument('--backbone', default= "resnext101", type=str)
 parser.add_argument('--d_latent', default= 32, type=int)
-parser.add_argument('--num_samples', default= 20, type=int)
+parser.add_argument('--num_samples', default= 5, type=int)
 parser.add_argument('--rescaled', default=False, type=bool)
 
 parser.add_argument('--ada_version', default= "v2", type=str)
@@ -377,8 +378,10 @@ sfm_dir = os.path.join(DATA_ROOT, "mv_images_withdepth")
 imgs_list = os.listdir(image_dir)
 imgs_list.sort()
 
-to_select = ["00000", "00074"]
-depth_scaling_factor = 1000.
+# to_select = ["00000", "00074"]
+to_select = ["00074"]
+
+# depth_scaling_factor = 1000.
 
 for fol_idx in range(FLAGS.start_frame, len(imgs_list)):
 
@@ -386,12 +389,42 @@ for fol_idx in range(FLAGS.start_frame, len(imgs_list)):
 
     if img_fol not in to_select:
       continue
-    
+
+    #### Load json ####
+    json_fname =  os.path.join(sfm_dir, img_fol, 'transforms_train.json')
+    with open(json_fname, 'r') as fp:
+        meta = json.load(fp)
+
+        all_poses = []
+        all_intrinsics = []
+        indices = []
+        
+        for frame in meta['frames']:
+          
+          indices.append(int(frame['file_path'].split("/")[-1].split(".")[0][-2:]))
+          
+          all_poses.append(np.array(frame['transform_matrix']))
+          fx, fy, cx, cy = frame['fx'], frame['fy'], frame['cx'], frame['cy']
+          all_intrinsics.append(np.array((fx, fy, cx, cy)))
+
+        # print(indices)
+        idx_sorted = np.argsort(indices)
+
+        all_poses = np.array(all_poses)[idx_sorted]
+        all_intrinsics = np.array(all_intrinsics)[idx_sorted]
+    ###################
+
+    depth_scaling_factor = float(meta['depth_scaling_factor'])
+
     ### Create dump and hyp dir
     curr_dump_dir = os.path.join(DUMP_DIR, img_fol)
     if not os.path.exists(curr_dump_dir): os.mkdir(curr_dump_dir)
     curr_temp_fol = os.path.join(curr_dump_dir, "tmp")
     if not os.path.exists(curr_temp_fol): os.mkdir(curr_temp_fol)
+    curr_pc_fol = os.path.join(curr_dump_dir, "pc")
+    if not os.path.exists(curr_pc_fol): os.mkdir(curr_pc_fol)
+    curr_sfm_fol = os.path.join(curr_dump_dir, "sfm")
+    if not os.path.exists(curr_sfm_fol): os.mkdir(curr_sfm_fol)
 
     ### Create output dir for the multiple hypothesis
     curr_hypothesis_outdir = os.path.join(hypothesis_outdir, img_fol)
@@ -400,9 +433,8 @@ for fol_idx in range(FLAGS.start_frame, len(imgs_list)):
     if not os.path.exists(curr_hypothesis_outdir): os.makedirs(curr_hypothesis_outdir)    
 
     curr_img_list = os.listdir(os.path.join(image_dir, img_fol))
+    curr_img_list.sort()
     imgs_path = [os.path.join(image_dir,img_fol, i) for i in curr_img_list]
-    print(len(imgs_path))
-    # exit()
 
     print("Processing " + img_fol + "...")
 
@@ -455,6 +487,7 @@ for fol_idx in range(FLAGS.start_frame, len(imgs_list)):
 
             ### To align depth
             curr_sfm_depth_path = os.path.join(sfm_dir, img_fol, "train/depth/", curr_img_path.split("/")[-1])
+            print(curr_sfm_depth_path)
             sfm_depth_img = cv2.imread(curr_sfm_depth_path, cv2.IMREAD_UNCHANGED).astype(np.float64)
             sfm_depth_img = (sfm_depth_img/depth_scaling_factor).astype(np.float32)
             valid_sfm_depth = sfm_depth_img > 0.5    
@@ -497,6 +530,17 @@ for fol_idx in range(FLAGS.start_frame, len(imgs_list)):
 
                     plt.imsave(os.path.join(curr_temp_fol, img_name+'-depth.png'), curr_pred_sfm_depth_metric, cmap='rainbow')
                     image_fname.append(os.path.join(curr_temp_fol, img_name+'-depth.png'))
+                    reconstruct_depth_intrinsics(curr_pred_sfm_depth_metric, rgb_c, curr_pc_fol, img_name+'-pc', all_intrinsics[i])
+
+                    curr_pose = all_poses[i]
+                    # curr_pose = np.linalg.inv(curr_pose)
+
+                    reconstruct_depth_intrinsics_transform(curr_pred_sfm_depth_metric, rgb_c, curr_pc_fol, img_name+'-pcworld', all_intrinsics[i], curr_pose)
+
+                    ### Output sparse SfM points
+                    pcd = reconstruct_3D_intrinsics(sfm_depth_img, all_intrinsics[i], valid=valid_sfm_depth) ##(N,3)
+                    pcd = np.sum(pcd[..., np.newaxis, :] * curr_pose[:3, :3], -1)  + curr_pose[:3, -1]
+                    save_point_cloud(pcd, None, os.path.join(curr_sfm_fol, img_name+'-sfm'+".ply"), binary=True)
 
                     ### Change to using aligned depth instead
                     all_pred_depths.append(curr_pred_sfm_depth_metric)

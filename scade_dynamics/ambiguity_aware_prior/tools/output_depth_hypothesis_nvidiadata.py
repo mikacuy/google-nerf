@@ -393,6 +393,7 @@ for fol_idx in range(FLAGS.start_frame, len(imgs_list)):
     if not os.path.exists(curr_hypothesis_outdir): os.makedirs(curr_hypothesis_outdir)    
 
     curr_img_list = os.listdir(os.path.join(image_dir, img_fol))
+    curr_img_list.sort()
     imgs_path = [os.path.join(image_dir,img_fol, i) for i in curr_img_list]
     print(len(imgs_path))
     # exit()
@@ -445,8 +446,6 @@ for fol_idx in range(FLAGS.start_frame, len(imgs_list)):
             # rgb = rgb[:, :, ::-1] ## dataloader is bgr
             rgb = 255 * (rgb - rgb.min()) / (rgb.max() - rgb.min())
             rgb = np.array(rgb, np.int)
-
-    
 
             ### Iterate over the minibatch
             image_fname = []
