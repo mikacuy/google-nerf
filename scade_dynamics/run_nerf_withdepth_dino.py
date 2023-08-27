@@ -336,7 +336,7 @@ def optimize_camera_embedding(image, pose, H, W, intrinsic, args, render_kwargs_
     render_kwargs_test["embedded_cam"] = best_embedded_cam
 
 def render_images_with_metrics(count, indices, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, \
-    embedcam_fn=None, with_test_time_optimization=False):
+    embedcam_fn=None, with_test_time_optimization=False, features=None):
     far = render_kwargs_test['far']
 
     if count is None:
@@ -354,6 +354,8 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     depths0_res = torch.empty(count, 1, H, W)
     target_depths_res = torch.empty(count, 1, H, W)
     target_valid_depths_res = torch.empty(count, 1, H, W, dtype=bool)
+
+    feats_res = torch.empty(count, args.feat_dim, H, W)
     
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
@@ -364,6 +366,15 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         target_valid_depth = valid_depths[img_idx]
         pose = poses[img_idx, :3,:4]
         intrinsic = intrinsics[img_idx, :]
+
+        curr_features = features[img_idx]
+
+        if args.feat_dim == 768:
+            curr_features = curr_features.permute(2, 0, 1).unsqueeze(0).float()
+            curr_features = F.interpolate(curr_features, size=(H, W), mode='bilinear').squeeze().permute(1,2,0)
+
+        curr_features = curr_features.to(device)
+
 
         if args.input_ch_cam > 0:
             if embedcam_fn is None:
@@ -378,7 +389,17 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 render_kwargs_test["embedded_cam"] = embedcam_fn[img_idx]
         
         with torch.no_grad():
-            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, **render_kwargs_test)
+            if args.feat_dim == 768:
+                rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk //16), c2w=pose, **render_kwargs_test)
+            else:
+                rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 4), c2w=pose, **render_kwargs_test)
+
+            pred_features = extras["feature_map"]
+            feature_loss = torch.norm(pred_features - curr_features, p=1, dim=-1)
+
+            ## Only use foreground
+            feature_loss = feature_loss * target_valid_depth
+            feature_loss = torch.mean(feature_loss)
             
             # compute depth rmse
             depth_rmse = compute_rmse(extras['depth_map'][target_valid_depth], target_depth[:, :, 0][target_valid_depth])
@@ -400,6 +421,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             img_loss = img2mse(rgb, target)
             psnr = mse2psnr(img_loss)
             print("PSNR: {}".format(psnr))
+            print("Feature loss: {}".format(feature_loss))
             rgb = torch.clamp(rgb, 0, 1)
             ssim = structural_similarity(rgb.cpu().numpy(), target.cpu().numpy(), data_range=1., channel_axis=-1)
             lpips = lpips_alex(rgb.permute(2, 0, 1).unsqueeze(0), target.permute(2, 0, 1).unsqueeze(0), normalize=True)[0]
@@ -410,17 +432,27 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             depths_res[n] = (extras['depth_map'] / far).unsqueeze(0).cpu()
             target_depths_res[n] = (target_depth[:, :, 0] / far).unsqueeze(0).cpu()
             target_valid_depths_res[n] = target_valid_depth.unsqueeze(0).cpu()
-            metrics = {"img_loss" : img_loss.item(), "psnr" : psnr.item(), "ssim" : ssim, "lpips" : lpips[0, 0, 0],}
+
+            feats_res[n] = pred_features.permute(2, 0, 1).cpu()
+
+            metrics = {"img_loss" : img_loss.item(), "psnr" : psnr.item(), "ssim" : ssim, "lpips" : lpips[0, 0, 0], 'feature_loss':feature_loss.item()}
             if 'rgb0' in extras:
                 img_loss0 = img2mse(extras['rgb0'], target)
                 psnr0 = mse2psnr(img_loss0)
                 depths0_res[n] = (extras['depth0'] / far).unsqueeze(0).cpu()
                 rgbs0_res[n] = torch.clamp(extras['rgb0'], 0, 1).permute(2, 0, 1).cpu()
-                metrics.update({"img_loss0" : img_loss0.item(), "psnr0" : psnr0.item()})
+
+                pred_features = extras["feature_map_0"]
+                feature_loss_0 = torch.norm(pred_features - curr_features, p=1, dim=-1)
+                ## Only use foreground
+                feature_loss_0 = feature_loss_0 * target_valid_depth
+                feature_loss_0 = torch.mean(feature_loss_0)                
+
+                metrics.update({"img_loss0" : img_loss0.item(), "psnr0" : psnr0.item(), "feature_loss_0": feature_loss_0.item()})
             mean_metrics.add(metrics)
     
     res = { "rgbs" :  rgbs_res, "target_rgbs" : target_rgbs_res, "depths" : depths_res, "target_depths" : target_depths_res, \
-        "target_valid_depths" : target_valid_depths_res}
+        "target_valid_depths" : target_valid_depths_res, "pred_features" : feats_res}
     if 'rgb0' in extras:
         res.update({"rgbs0" : rgbs0_res, "depths0" : depths0_res,})
     all_mean_metrics = MeanTracker()
@@ -1135,7 +1167,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         if i%args.i_img==0:
             # visualize 2 train images
             _, images_train = render_images_with_metrics(2, i_train, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, embedcam_fn=embedcam_fn)
+                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, embedcam_fn=embedcam_fn, features=features)
             tb.add_image('train_image',  torch.cat((
                 torchvision.utils.make_grid(images_train["rgbs"], nrow=1), \
                 torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
@@ -1143,16 +1175,19 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                 torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
             # compute validation metrics and visualize 8 validation images
             mean_metrics_val, images_val = render_images_with_metrics(2, i_val, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
+                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, features=features)
             tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
             tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
             tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
             tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
+            tb.add_scalar('feature_loss', mean_metrics_val.get("feature_loss"), i)
             if mean_metrics_val.has("depth_rmse"):
                 tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
             if 'rgbs0' in images_val:
                 tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
                 tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
+                tb.add_scalar('feature_loss_0', mean_metrics_val.get("feature_loss_0"), i)
+
             if 'rgbs0' in images_val:
                 tb.add_image('val_image',  torch.cat((
                     torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
@@ -1253,7 +1288,7 @@ def config_parser():
     # logging/saving options
     parser.add_argument("--i_print",   type=int, default=100, 
                         help='frequency of console printout and metric logging')
-    parser.add_argument("--i_img",     type=int, default=1000,
+    parser.add_argument("--i_img",     type=int, default=10,
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=100000,
                         help='frequency of weight ckpt saving')
@@ -1282,7 +1317,7 @@ def config_parser():
     ### Feature related
     parser.add_argument("--feature_dir", type=str, default="hotdog_single_shadowfix_dino_features_small/",
                         help='dump_dir name for prior depth hypotheses')
-    parser.add_argument("--feat_dim", type=int, default=768, 
+    parser.add_argument("--feat_dim", type=int, default=384, 
                         help='dino feature dimension')
     parser.add_argument("--feature_weight", type=float, default=0.004,
                         help='weight for feature')
