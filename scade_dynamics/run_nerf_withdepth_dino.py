@@ -36,6 +36,10 @@ from metric import compute_rmse
 import imageio
 from natsort import natsorted 
 
+from sklearn.decomposition import PCA
+import PIL.Image
+from PIL import Image
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
 
@@ -240,7 +244,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_' + filename)
     video_depth_dir = os.path.join(args.ckpt_dir, args.expname, 'video_depth_' + filename)
     video_depth_colored_dir = os.path.join(args.ckpt_dir, args.expname, 'video_depth_colored_' + filename)
-
+    video_feat_dir = os.path.join(args.ckpt_dir, args.expname, 'video_feat_' + filename)
 
     if os.path.exists(video_dir):
         shutil.rmtree(video_dir)
@@ -248,24 +252,34 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
         shutil.rmtree(video_depth_dir)
     if os.path.exists(video_depth_colored_dir):
         shutil.rmtree(video_depth_colored_dir)        
+    if os.path.exists(video_feat_dir):
+        shutil.rmtree(video_feat_dir)   
     os.makedirs(video_dir, exist_ok=True)
     os.makedirs(video_depth_dir, exist_ok=True)
     os.makedirs(video_depth_colored_dir, exist_ok=True)
+    os.makedirs(video_feat_dir, exist_ok=True)
 
     depth_scale = render_kwargs_test["far"]
     max_depth_in_video = 0
 
-    for img_idx in range(0, len(poses), 3):
+    idx_to_take = range(0, len(poses), 3)
+    pred_feats_res = torch.empty(len(idx_to_take), H, W, args.feat_dim)
+
+    for n in range(len(idx_to_take)):
     # for img_idx in range(200):
+        img_idx = idx_to_take[n]
         pose = poses[img_idx, :3,:4]
         intrinsic = intrinsics[img_idx, :]
         with torch.no_grad():
             if args.input_ch_cam > 0:
                 render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
             # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
-            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 2), c2w=pose, with_5_9=False, **render_kwargs_test)
+            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 8), c2w=pose, with_5_9=False, **render_kwargs_test)
             rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
             video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
+
+            pred_features = extras["feature_map"]
+            pred_feats_res[n] = pred_features.cpu()
 
             max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
             depth_colored_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
@@ -283,15 +297,56 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
             cv2.imwrite(os.path.join(video_depth_dir, str(img_idx) + '.png'), depth)
             cv2.imwrite(os.path.join(video_depth_colored_dir, str(img_idx) + '.png'), depth_colored_frame)
 
+    ### Visualizing features
+    pred_feats_res = pred_feats_res.detach().cpu().numpy()
+    pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
+
+    pca = PCA(n_components=4).fit(pred_feats_res)
+    pred_pca_descriptors = pca.transform(pred_feats_res)
+
+    pred_pca_descriptors = pred_pca_descriptors.reshape((len(idx_to_take), H, W, -1))
+
+    comp_min = pred_pca_descriptors.min(axis=(0, 1, 2))[-3:]
+    comp_max = pred_pca_descriptors.max(axis=(0, 1, 2))[-3:]
+    for n, img_idx in enumerate(range(0, len(poses), 3)):
+      curr_feat = pred_pca_descriptors[n]
+      pred_features = curr_feat[:, :, -3:]
+   
+      pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
+      pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
+      pred_features_pil.save(os.path.join(video_feat_dir, str(img_idx) + '.png'))
+
     video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
-    print(video_dir)
     imgs = os.listdir(video_dir)
     imgs = natsorted(imgs)
-    print(imgs)
+    print(len(imgs))
 
     imageio.mimsave(video_file,
                     [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
                     fps=10, macro_block_size=1)
+    print("Done with " + video_file + ".")
+
+    ## depth
+    video_file = os.path.join(args.ckpt_dir, args.expname, filename + '_depth.mp4')
+    imgs = os.listdir(video_depth_colored_dir)
+    imgs = natsorted(imgs)
+    print(len(imgs))
+
+    imageio.mimsave(video_file,
+                    [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
+                    fps=10, macro_block_size=1)
+    print("Done with " + video_file + ".")
+
+    ## feature
+    video_file = os.path.join(args.ckpt_dir, args.expname, filename + '_feature.mp4')
+    imgs = os.listdir(video_feat_dir)
+    imgs = natsorted(imgs)
+    print(len(imgs))
+
+    imageio.mimsave(video_file,
+                    [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
+                    fps=10, macro_block_size=1)
+    print("Done with " + video_file + ".")
 
     # video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
     # subprocess.call(["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(video_dir, "%d.jpg"), "-c:v", "libx264", "-profile:v", "high", "-crf", str(fps), video_file])
@@ -336,7 +391,7 @@ def optimize_camera_embedding(image, pose, H, W, intrinsic, args, render_kwargs_
     render_kwargs_test["embedded_cam"] = best_embedded_cam
 
 def render_images_with_metrics(count, indices, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, \
-    embedcam_fn=None, with_test_time_optimization=False, features=None):
+    embedcam_fn=None, with_test_time_optimization=False, features=None, mode="train"):
     far = render_kwargs_test['far']
 
     if count is None:
@@ -355,7 +410,8 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     target_depths_res = torch.empty(count, 1, H, W)
     target_valid_depths_res = torch.empty(count, 1, H, W, dtype=bool)
 
-    feats_res = torch.empty(count, args.feat_dim, H, W)
+    pred_feats_res = torch.empty(count, H, W, args.feat_dim)
+    gt_feats_res = torch.empty(count, H, W, args.feat_dim)
     
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
@@ -375,7 +431,6 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
 
         curr_features = curr_features.to(device)
 
-
         if args.input_ch_cam > 0:
             if embedcam_fn is None:
                 # use zero embedding at test time or optimize for the latent code
@@ -392,7 +447,10 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             if args.feat_dim == 768:
                 rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk //16), c2w=pose, **render_kwargs_test)
             else:
-                rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 4), c2w=pose, **render_kwargs_test)
+                if mode != "test":
+                  rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 4), c2w=pose, **render_kwargs_test)
+                else:
+                  rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 16), c2w=pose, **render_kwargs_test)
 
             pred_features = extras["feature_map"]
             feature_loss = torch.norm(pred_features - curr_features, p=1, dim=-1)
@@ -433,7 +491,8 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             target_depths_res[n] = (target_depth[:, :, 0] / far).unsqueeze(0).cpu()
             target_valid_depths_res[n] = target_valid_depth.unsqueeze(0).cpu()
 
-            feats_res[n] = pred_features.permute(2, 0, 1).cpu()
+            pred_feats_res[n] = pred_features.cpu()
+            gt_feats_res[n] = curr_features.cpu()
 
             metrics = {"img_loss" : img_loss.item(), "psnr" : psnr.item(), "ssim" : ssim, "lpips" : lpips[0, 0, 0], 'feature_loss':feature_loss.item()}
             if 'rgb0' in extras:
@@ -451,8 +510,22 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 metrics.update({"img_loss0" : img_loss0.item(), "psnr0" : psnr0.item(), "feature_loss_0": feature_loss_0.item()})
             mean_metrics.add(metrics)
     
+    ### PCA on dino features for visualization
+    pred_feats_res = pred_feats_res.detach().cpu().numpy()
+    pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
+
+    gt_feats_res = gt_feats_res.detach().cpu().numpy()
+    gt_feats_res = gt_feats_res.reshape((-1, args.feat_dim))
+
+    pca = PCA(n_components=4).fit(gt_feats_res)
+    pred_pca_descriptors = pca.transform(pred_feats_res)
+    gt_pca_descriptors = pca.transform(gt_feats_res)
+
+    pred_pca_descriptors = pred_pca_descriptors.reshape((count, H, W, -1))
+    gt_pca_descriptors = gt_pca_descriptors.reshape((count, H, W, -1))
+
     res = { "rgbs" :  rgbs_res, "target_rgbs" : target_rgbs_res, "depths" : depths_res, "target_depths" : target_depths_res, \
-        "target_valid_depths" : target_valid_depths_res, "pred_features" : feats_res}
+        "target_valid_depths" : target_valid_depths_res, "pred_features" : pred_pca_descriptors, "gt_features": gt_pca_descriptors}
     if 'rgb0' in extras:
         res.update({"rgbs0" : rgbs0_res, "depths0" : depths0_res,})
     all_mean_metrics = MeanTracker()
@@ -462,13 +535,27 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
 def write_images_with_metrics(images, mean_metrics, far, args, with_test_time_optimization=False):
     result_dir = os.path.join(args.ckpt_dir, args.expname, "test_images_" + ("with_optimization_" if with_test_time_optimization else "") + args.scene_id)
     os.makedirs(result_dir, exist_ok=True)
-    for n, (rgb, depth) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
-            images["depths"].permute(0, 2, 3, 1).cpu().numpy())):
+
+    comp_min = images["gt_features"].min(axis=(0, 1, 2))[-3:]
+    comp_max = images["gt_features"].max(axis=(0, 1, 2))[-3:]
+
+    for n, (rgb, depth, pred_features, gt_features) in enumerate(zip(images["rgbs"].permute(0, 2, 3, 1).cpu().numpy(), \
+            images["depths"].permute(0, 2, 3, 1).cpu().numpy(), images["pred_features"], images["gt_features"])):
 
         # write rgb
         cv2.imwrite(os.path.join(result_dir, str(n) + "_rgb" + ".jpg"), cv2.cvtColor(to8b(rgb), cv2.COLOR_RGB2BGR))
         # write depth
         cv2.imwrite(os.path.join(result_dir, str(n) + "_d" + ".png"), to16b(depth))
+
+        pred_features = pred_features[:, :, -3:]
+        gt_features = gt_features[:, :, -3:]
+
+        pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
+        gt_features_img = (gt_features - comp_min) / (comp_max - comp_min)
+        pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
+        gt_features_pil = Image.fromarray((gt_features_img * 255).astype(np.uint8))
+        pred_features_pil.save(os.path.join(result_dir, str(n) + "_fpred" + ".png"))
+        gt_features_pil.save(os.path.join(result_dir, str(n) + "_gtpred" + ".png"))
 
     with open(os.path.join(result_dir, 'metrics.txt'), 'w') as f:
         mean_metrics.print(f)
@@ -1483,16 +1570,23 @@ def run_nerf():
         poses = torch.Tensor(poses).to(device)
         intrinsics = torch.Tensor(intrinsics).to(device)
         i_test = i_test
-        depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
-        valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
+
+        if args.dataset == "blender":
+          depths = torch.Tensor(depths).to(device)
+          valid_depths = torch.Tensor(valid_depths).bool().to(device)          
+        else:
+          depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+          valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
 
         print("Train split")
         print(i_train)
         print("Test split")
         print(i_test)
 
-        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
-            render_kwargs_test, with_test_time_optimization=with_test_time_optimization)
+        # mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+        #     render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
+        mean_metrics_test, images_test = render_images_with_metrics(2, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+          render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
     elif args.task == "video":
         vposes = torch.Tensor(video_poses).to(device)
