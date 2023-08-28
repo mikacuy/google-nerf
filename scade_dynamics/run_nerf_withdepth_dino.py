@@ -246,18 +246,18 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     video_depth_colored_dir = os.path.join(args.ckpt_dir, args.expname, 'video_depth_colored_' + filename)
     video_feat_dir = os.path.join(args.ckpt_dir, args.expname, 'video_feat_' + filename)
 
-    if os.path.exists(video_dir):
-        shutil.rmtree(video_dir)
-    if os.path.exists(video_depth_dir):
-        shutil.rmtree(video_depth_dir)
-    if os.path.exists(video_depth_colored_dir):
-        shutil.rmtree(video_depth_colored_dir)        
-    if os.path.exists(video_feat_dir):
-        shutil.rmtree(video_feat_dir)   
-    os.makedirs(video_dir, exist_ok=True)
-    os.makedirs(video_depth_dir, exist_ok=True)
-    os.makedirs(video_depth_colored_dir, exist_ok=True)
-    os.makedirs(video_feat_dir, exist_ok=True)
+    # if os.path.exists(video_dir):
+    #     shutil.rmtree(video_dir)
+    # if os.path.exists(video_depth_dir):
+    #     shutil.rmtree(video_depth_dir)
+    # if os.path.exists(video_depth_colored_dir):
+    #     shutil.rmtree(video_depth_colored_dir)        
+    # if os.path.exists(video_feat_dir):
+    #     shutil.rmtree(video_feat_dir)   
+    # os.makedirs(video_dir, exist_ok=True)
+    # os.makedirs(video_depth_dir, exist_ok=True)
+    # os.makedirs(video_depth_colored_dir, exist_ok=True)
+    # os.makedirs(video_feat_dir, exist_ok=True)
 
     depth_scale = render_kwargs_test["far"]
     max_depth_in_video = 0
@@ -265,56 +265,56 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     idx_to_take = range(0, len(poses), 3)
     pred_feats_res = torch.empty(len(idx_to_take), H, W, args.feat_dim)
 
-    for n in range(len(idx_to_take)):
-    # for img_idx in range(200):
-        img_idx = idx_to_take[n]
-        pose = poses[img_idx, :3,:4]
-        intrinsic = intrinsics[img_idx, :]
-        with torch.no_grad():
-            if args.input_ch_cam > 0:
-                render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
-            # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
-            rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 8), c2w=pose, with_5_9=False, **render_kwargs_test)
-            rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
-            video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
+    # for n in range(len(idx_to_take)):
+    # # for img_idx in range(200):
+    #     img_idx = idx_to_take[n]
+    #     pose = poses[img_idx, :3,:4]
+    #     intrinsic = intrinsics[img_idx, :]
+    #     with torch.no_grad():
+    #         if args.input_ch_cam > 0:
+    #             render_kwargs_test["embedded_cam"] = torch.zeros((args.input_ch_cam), device=device)
+    #         # render video in 16:9 with one third rgb, one third depth and one third depth standard deviation
+    #         rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 8), c2w=pose, with_5_9=False, **render_kwargs_test)
+    #         rgb_cpu_numpy_8b = to8b(rgb.cpu().numpy())
+    #         video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
 
-            pred_features = extras["feature_map"]
-            pred_feats_res[n] = pred_features.cpu()
+    #         pred_features = extras["feature_map"]
+    #         pred_feats_res[n] = pred_features.cpu()
 
-            max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
-            depth_colored_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
-            depth = (extras['depth_map']).cpu().numpy()*1000.
-            depth = (depth).astype(np.uint16)
+    #         max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
+    #         depth_colored_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
+    #         depth = (extras['depth_map']).cpu().numpy()*1000.
+    #         depth = (depth).astype(np.uint16)
 
-            # max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
-            # depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
-            # video_frame = np.concatenate((video_frame, depth_frame), 1)
-            # depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
-            # depth_std = depth_var.clamp(0., 1.).sqrt()
-            # video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
+    #         # max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
+    #         # depth_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
+    #         # video_frame = np.concatenate((video_frame, depth_frame), 1)
+    #         # depth_var = ((extras['z_vals'] - extras['depth_map'].unsqueeze(-1)).pow(2) * extras['weights']).sum(-1)
+    #         # depth_std = depth_var.clamp(0., 1.).sqrt()
+    #         # video_frame = np.concatenate((video_frame, cv2.applyColorMap(to8b(depth_std.cpu().numpy()), cv2.COLORMAP_VIRIDIS)), 1)
 
-            cv2.imwrite(os.path.join(video_dir, str(img_idx) + '.png'), video_frame)        
-            cv2.imwrite(os.path.join(video_depth_dir, str(img_idx) + '.png'), depth)
-            cv2.imwrite(os.path.join(video_depth_colored_dir, str(img_idx) + '.png'), depth_colored_frame)
+    #         cv2.imwrite(os.path.join(video_dir, str(img_idx) + '.png'), video_frame)        
+    #         cv2.imwrite(os.path.join(video_depth_dir, str(img_idx) + '.png'), depth)
+    #         cv2.imwrite(os.path.join(video_depth_colored_dir, str(img_idx) + '.png'), depth_colored_frame)
 
-    ### Visualizing features
-    pred_feats_res = pred_feats_res.detach().cpu().numpy()
-    pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
+    # ### Visualizing features
+    # pred_feats_res = pred_feats_res.detach().cpu().numpy()
+    # pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
 
-    pca = PCA(n_components=4).fit(pred_feats_res)
-    pred_pca_descriptors = pca.transform(pred_feats_res)
+    # pca = PCA(n_components=4).fit(pred_feats_res)
+    # pred_pca_descriptors = pca.transform(pred_feats_res)
 
-    pred_pca_descriptors = pred_pca_descriptors.reshape((len(idx_to_take), H, W, -1))
+    # pred_pca_descriptors = pred_pca_descriptors.reshape((len(idx_to_take), H, W, -1))
 
-    comp_min = pred_pca_descriptors.min(axis=(0, 1, 2))[-3:]
-    comp_max = pred_pca_descriptors.max(axis=(0, 1, 2))[-3:]
-    for n, img_idx in enumerate(range(0, len(poses), 3)):
-      curr_feat = pred_pca_descriptors[n]
-      pred_features = curr_feat[:, :, -3:]
+    # comp_min = pred_pca_descriptors.min(axis=(0, 1, 2))[-3:]
+    # comp_max = pred_pca_descriptors.max(axis=(0, 1, 2))[-3:]
+    # for n, img_idx in enumerate(range(0, len(poses), 3)):
+    #   curr_feat = pred_pca_descriptors[n]
+    #   pred_features = curr_feat[:, :, -3:]
    
-      pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
-      pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
-      pred_features_pil.save(os.path.join(video_feat_dir, str(img_idx) + '.png'))
+    #   pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
+    #   pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
+    #   pred_features_pil.save(os.path.join(video_feat_dir, str(img_idx) + '.png'))
 
     video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
     imgs = os.listdir(video_dir)
@@ -333,7 +333,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
+                    [imageio.imread(os.path.join(video_depth_colored_dir, img)) for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
 
@@ -344,7 +344,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
+                    [imageio.imread(os.path.join(video_feat_dir, img)) for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
 

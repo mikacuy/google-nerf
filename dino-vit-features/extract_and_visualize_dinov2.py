@@ -10,7 +10,24 @@ from PIL import Image
 from sklearn.decomposition import PCA
 from typing import List, Tuple
 import os, sys
+import torchvision.transforms as T
 
+def preprocess_image(img, resize_size=420, center_crop_size=420):
+  image_transforms = T.Compose([
+      T.Resize(resize_size, interpolation=T.InterpolationMode.BICUBIC),
+      T.CenterCrop(center_crop_size),
+      T.ToTensor(),
+      T.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+  ])
+
+  no_norm =  T.Compose([
+      T.Resize(resize_size, interpolation=T.InterpolationMode.BICUBIC),
+      T.CenterCrop(center_crop_size),
+      T.ToTensor()
+  ])
+
+  load_size = int(center_crop_size/14.)
+  return image_transforms(img), no_norm(img), (load_size, load_size)
 
 def pca(image_paths, load_size: int = 224, layer: int = 11, facet: str = 'key', bin: bool = False, stride: int = 4,
         model_type: str = 'dino_vits8', n_components: int = 4,
@@ -32,19 +49,27 @@ def pca(image_paths, load_size: int = 224, layer: int = 11, facet: str = 'key', 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     # device = 'cpu'
 
-    extractor = ViTExtractor(model_type, stride, device=device)
     descriptors_list = []
     image_pil_list = []
     num_patches_list = []
-    load_size_list = []
 
     # extract descriptors and saliency maps for each image
     for image_path in image_paths:
         print(image_path)
-        image_batch, image_pil = extractor.preprocess(image_path, load_size)
+        # image_batch, image_pil = extractor.preprocess(image_path, load_size)
 
-        image_pil_list.append(image_pil)
-        descs = extractor.extract_descriptors(image_batch.to(device), layer, facet, bin, include_cls=False)
+        pil_image = Image.open(image_path).convert('RGB')
+        img, img_raw, load_size = preprocess_image(pil_image)
+
+        #### Try dinov2
+        dinov2_vits14 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14')
+        # dinov2_vits14 = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14')
+        with torch.no_grad():
+          # features = dinov2_vits14(img, return_patches=True)[0]
+          descs =  dinov2_vits14.forward_features(img.unsqueeze(0))["x_norm_patchtokens"].unsqueeze(0)
+        ######
+        to_PIL = T.ToPILImage()
+        image_pil_list.append(to_PIL(img_raw))
 
         print(f"Descriptors are of size: {descs.shape}")
         output_path = os.path.join(save_dir, image_path.name[:-4] + ".pth")
@@ -52,18 +77,12 @@ def pca(image_paths, load_size: int = 224, layer: int = 11, facet: str = 'key', 
         print(f"Descriptors saved to: {output_path}")
 
         descs = descs.cpu().numpy()
-
-        curr_num_patches, curr_load_size = extractor.num_patches, extractor.load_size
-        num_patches_list.append(curr_num_patches)
-        load_size_list.append(curr_load_size)
         descriptors_list.append(descs)
+        # num_patches_list.append((16, 16))
+        num_patches_list.append(load_size)
 
     if all_together:
         descriptors = np.concatenate(descriptors_list, axis=2)[0, 0]
-        
-        print(descriptors.shape)
-        exit()
-
         pca = PCA(n_components=n_components).fit(descriptors)
         pca_descriptors = pca.transform(descriptors)
         split_idxs = np.array([num_patches[0] * num_patches[1] for num_patches in num_patches_list])
@@ -152,7 +171,7 @@ if __name__ == "__main__":
                                                                        options: ['key' | 'query' | 'value' | 'token']""")
     parser.add_argument('--layer', default=11, type=int, help="layer to create descriptors from.")
     parser.add_argument('--bin', default='False', type=str2bool, help="create a binned descriptor if True.")
-    parser.add_argument('--n_components', default=4, type=int, help="number of pca components to produce.")
+    parser.add_argument('--n_components', default=3, type=int, help="number of pca components to produce.")
     parser.add_argument('--last_components_rgb', default='True', type=str2bool, help="save last components as rgb image.")
     parser.add_argument('--save_resized', default='True', type=str2bool, help="If true save pca in image resolution.")
     parser.add_argument('--all_together', default='True', type=str2bool, help="If true apply pca on all images together.")
