@@ -29,8 +29,8 @@ def pca(image_paths, load_size: int = 224, layer: int = 11, facet: str = 'key', 
     :return: a list of lists containing an image and its principal components.
     """
     
-    # device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    device = 'cpu'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    #device = 'cpu'
 
     extractor = ViTExtractor(model_type, stride, device=device)
     descriptors_list = []
