@@ -1583,10 +1583,10 @@ def run_nerf():
         print("Test split")
         print(i_test)
 
-        # mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
-        #     render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
-        mean_metrics_test, images_test = render_images_with_metrics(2, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
-          render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
+        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+            render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
+        # mean_metrics_test, images_test = render_images_with_metrics(2, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+        #   render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
         write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
     elif args.task == "video":
         vposes = torch.Tensor(video_poses).to(device)
