@@ -278,7 +278,7 @@ def load_scene_blender_depth_features(basedir, feature_dir, half_res=True, train
     for i in range(render_poses.shape[0]):
         video_poses.append(render_poses[i])
         focal = .5 * W / np.tan(.5 * camera_angle_x)
-        focal /= downsample                               
+        # focal /= downsample                               
 
         H, W = img.shape[:2]
         fx, fy, cx, cy = focal, focal, W/2.0, H/2.0
