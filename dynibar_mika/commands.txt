@@ -5,3 +5,10 @@
   python save_monocular_cameras.py \
   --data_dir release/kid-running \
   --cvd_dir release/kid-running/dense/disp
+
+
+## in NSFF to run optical flow
+python run_flows_video.py --model models/raft-things.pth --data_path /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia_long/Balloon1/dense
+
+## in dynamic-cvd to run depth
+bash ./experiments/davis/train_sequence.sh 0 --track_id dog
