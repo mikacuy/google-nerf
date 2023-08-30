@@ -1,0 +1,1 @@
+python extract_and_visualize.py --model dino_vitb8 --load_size 800 --root_dir /home/mikacuy/coord-mvs/hotdog_data_v1/hotdog_single_shadowfix_edited/ --save_dir /home/mikacuy/coord-mvs/hotdog_data_v1/hotdog_single_shadowfix_edited_dino_features/

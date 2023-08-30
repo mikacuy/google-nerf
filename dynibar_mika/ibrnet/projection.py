@@ -58,6 +58,28 @@ class Projector:
         (num_views,) + original_shape[1:] + (2,)
     ), mask.reshape((num_views,) + original_shape[1:])
 
+  def project_2d(self, xyz, train_cameras):
+    """Project 3D points into views using training camera parameteres."""
+    original_shape = xyz.shape[:-1]
+    xyz = xyz.reshape(original_shape[0], -1, 3)
+
+    num_views = len(train_cameras)
+    train_intrinsics = train_cameras[:, 2:18].reshape(
+        -1, 4, 4
+    )  # [n_views, 4, 4]
+    train_poses = train_cameras[:, -16:].reshape(-1, 4, 4)  # [n_views, 4, 4]
+    xyz_h = torch.cat(
+        [xyz, torch.ones_like(xyz[..., :1])], dim=-1
+    )  # [n_points, 4]
+
+    projections = train_intrinsics.bmm(torch.inverse(train_poses)).bmm(
+        xyz_h.permute(0, 2, 1)
+    )  # [n_views, 4, n_points]
+
+    projections = projections.permute(0, 2, 1)  # [n_views, n_points, 4]
+
+    return projections
+
   def compute_angle(self, xyz_st, xyz, query_camera, train_cameras):
     """Compute difference of viewing angle between rays from source and ones from target view.
     

@@ -1,0 +1,25 @@
+expname = balloon1_coarseonly
+
+rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynamicIBR_zhengqi
+
+folder_path = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia_long
+
+distributed = False
+
+## dataset
+eval_dataset = dynamic-test
+eval_scenes = Balloon1
+### TESTING
+chunk_size = 4096
+
+### RENDERING
+N_importance = 64
+N_samples = 64
+inv_uniform = True
+white_bkgd = False
+coarse_only = True
+
+anti_alias_pooling = 0
+input_dir = True
+input_xyz = False
+

@@ -206,3 +206,12 @@ def compute_space_carving_loss(pred_depth, target_hypothesis, is_joint=False, ma
         loss = torch.mean(ray_mean)  
 
     return loss
+
+def save_current_code(outdir):
+    now = datetime.now()  # current date and time
+    date_time = now.strftime("%m_%d-%H:%M:%S")
+    src_dir = '.'
+    dst_dir = os.path.join(outdir, 'code_{}'.format(date_time))
+    shutil.copytree(src_dir, dst_dir,
+                    ignore=shutil.ignore_patterns('data*', 'pretrained*', 'logs*', 'out*', '*.png', '*.mp4',
+                                                  '*__pycache__*', '*.git*', '*.idea*', '*.zip', '*.jpg'))

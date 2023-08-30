@@ -1,0 +1,30 @@
+expname = balloon1_long_testmikaocc_weights_mode-2_w-disp-0.0500_anneal_cycle-1_sfm_reg-1_w-flow-0.0050_w-distortion-0.0010_w-se-1.00-0.0005
+# expname = balloon1_long_nodispocc_weights_mode-2_w-disp-0.0000_anneal_cycle-1_sfm_reg-1_w-flow-0.0050_w-distortion-0.0010_w-se-1.00-0.0005
+# expname = balloon1_long_noflowocc_weights_mode-2_w-disp-0.0500_anneal_cycle-1_sfm_reg-1_w-flow-0.0000_w-distortion-0.0010_w-se-1.00-0.0005
+
+rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika
+
+folder_path = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia_long
+
+coarse_dir = out
+coarse_only = True
+
+distributed = False
+
+## dataset
+eval_dataset = Nvidia
+eval_scenes = Balloon1
+### TESTING
+chunk_size = 8192
+
+### RENDERING
+N_importance = 64
+N_samples = 64
+inv_uniform = True
+anti_alias_pooling = 0
+
+input_dir = True
+input_xyz = False
+
+# mask_static = True
+# mask_rgb = 0

@@ -1,0 +1,28 @@
+expname = skating-long_6f_64-fine_mix-color_coord_new_char_ft_w-disp-0.1000_w-flow-0.0100_an_cycle-1_w-distortion-0.0010_w-se-0.0005_occ_w_0mask-st_1
+
+rootdir = /home/zhengqili/filestore/IBR/UCSD-Coord-exp/Fine_exp_new/IBRNet_tc_oh_mix-color_largeMLP_st-dy-fact-single-fe_Charbonier-1.1_ft
+
+folder_path = /home/zhengqili/filestore/NSFF/nerf_data/nvidia_data_long
+
+coarse_dir = /home/zhengqili/filestore/IBR/UCSD-Coord-exp/Coarse_exp_new/IBRNet_tc_oh_mix-color_largeMLP_st-dy-fact-single-fe_Charbonier-1.1/out/skating-long_6f_64-coarse_mix-color_new_charbonier-4096occ_weights_mode-0_w-disp-0.1000_anneal_cycle-1_sfm_reg-1_w-flow-0.0100_w-distortion-0.0010_w-se-1.00-0.0005
+
+distributed = False
+
+## dataset
+eval_dataset = Nvidia
+eval_scenes = Skating
+### TESTING
+chunk_size = 8192
+
+### RENDERING
+N_importance = 64
+N_samples = 64
+inv_uniform = True
+white_bkgd = False
+coarse_only = True
+
+anti_alias_pooling = 0
+input_dir = True
+input_xyz = False
+
+mask_static = True

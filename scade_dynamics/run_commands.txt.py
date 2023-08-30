@@ -1,0 +1,1 @@
+python run_nerf_nodepth.py train --ckpt_dir log_test --expname walking_test --camera_indices 0,2,3,10,11 --frame_idx=10

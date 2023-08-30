@@ -11,8 +11,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-# USE_DISTANCE = False
-USE_DISTANCE = True
+USE_DISTANCE = False
+# USE_DISTANCE = True
 USE_SOFTPLUS = True
 VARIANCE_CLAMP = False
 
@@ -773,6 +773,13 @@ def render_rays_mv(
     raw_coeff_y = raw_coeff_xyz[..., num_basis : num_basis * 2]
     raw_coeff_z = raw_coeff_xyz[..., num_basis * 2 : num_basis * 3]
 
+    # print(raw_coeff_x.shape)
+    # print(raw_coeff_y.shape)
+    # print(raw_coeff_z.shape)
+    # print(model.trajectory_basis[ref_frame_idx - 3: ref_frame_idx + 4, :].shape)
+    # exit()
+
+
     ref_traj_pts_dict = {}
     # Always use 6 nearby source views for dynamic model.
     for offset in [-3, -2, -1, 0, 1, 2, 3]:
@@ -786,12 +793,20 @@ def render_rays_mv(
       ref_traj_pts_dict[offset] = traj_pts_ref
 
     pts_3d_seq_ref = []
+    scene_flow = []
     for offset in ref_time_offset:
       pts_3d_seq_ref.append(
           pts_ref + (ref_traj_pts_dict[offset] - ref_traj_pts_dict[0])
       )
+      scene_flow.append(ref_traj_pts_dict[offset] - ref_traj_pts_dict[0])
 
     pts_3d_seq_ref = torch.stack(pts_3d_seq_ref, 0)
+    scene_flow = torch.stack(scene_flow, 0)
+
+    # print("=====3D flow======")
+    # print(pts_3d_seq_ref.shape)
+    # print("==================")
+
     pts_3d_static = pts_ref[None, ...].repeat(
         ray_batch['static_src_rgbs'].shape[1], 1, 1, 1
     )
@@ -882,6 +897,35 @@ def render_rays_mv(
   weights = (
       outputs_coarse_ref['weights'].clone().detach()
   )  # [N_rays, N_samples]
+  
+#   print("Weights coarse.")
+#   print(weights.shape)
+  
+  rendered_3d_flow = torch.sum(weights.unsqueeze(-1).unsqueeze(0) * scene_flow, dim=2)
+  rendered_3d_pts = torch.sum(weights.unsqueeze(-1).unsqueeze(0) * pts_3d_seq_ref, dim=2)
+
+#   print("Rendered flow.")
+#   print(rendered_3d_flow.shape)
+
+  ret['outputs_coarse_ref']['outputs_coarse_rendered_flow'] =  rendered_3d_flow
+  ret['outputs_coarse_ref']['outputs_coarse_rendered_pts'] =  rendered_3d_pts
+
+  ret['outputs_coarse_ref']["trajectory_basis"] = model.trajectory_basis[ref_frame_idx - 3: ref_frame_idx + 4, :]
+
+  phis_concat = torch.cat([raw_coeff_x.unsqueeze(0), raw_coeff_y.unsqueeze(0), raw_coeff_z.unsqueeze(0)], axis=0)
+#   print(phis_concat.shape)
+  
+  phis_concat = torch.permute(phis_concat, (3, 1, 2, 0))
+#   print(phis_concat.shape)
+#   print(weights.shape)
+
+  rendered_phis = torch.sum(weights.unsqueeze(-1).unsqueeze(0) * phis_concat, dim=2)
+
+#   print(rendered_phis.shape)
+  ret['outputs_coarse_ref']['rendered_phis'] = rendered_phis
+#   exit()
+
+
   if inv_uniform:
     inv_z_vals = 1.0 / z_vals
     inv_z_vals_mid = 0.5 * (
@@ -1381,3 +1425,301 @@ def render_rays_mono(
   ret['outputs_coarse_st'] = outputs_coarse_st
 
   return ret
+
+
+def render_rays(frame_idx,
+                time_embedding,
+                time_offset,
+                ray_batch,
+                model,
+                featmaps,
+                projector,
+                N_samples,
+                args,
+                inv_uniform=False,
+                N_importance=0,
+                raw_noise_std=0.,
+                det=False,
+                white_bkgd=False,
+                is_train=True):
+    '''
+    :param ray_batch: {'ray_o': [N_rays, 3] , 'ray_d': [N_rays, 3], 'view_dir': [N_rays, 2]}
+    :param model:  {'net_coarse':  , 'net_fine': }
+    :param N_samples: samples along each ray (for both coarse and fine model)
+    :param inv_uniform: if True, uniformly sample inverse depth for coarse model
+    :param N_importance: additional samples along each ray produced by importance sampling (for fine model)
+    :param det: if True, will deterministicly sample depths
+    :return: {'outputs_coarse': {}, 'outputs_fine': {}}
+    '''
+    OCC_WEIGHTS_MODE = args.occ_weights_mode
+    ref_frame_idx, anchor_frame_idx = frame_idx[0], frame_idx[1]
+    ref_time_embedding, anchor_time_embedding = time_embedding[0], time_embedding[1]
+    ref_time_offset, anchor_time_offset = time_offset[0], time_offset[1]
+    num_frames = int(ref_frame_idx / ref_time_embedding)
+
+    input_ray_dir = F.normalize(ray_batch['ray_d'], dim=-1)
+
+    ret = {'outputs_coarse': None,
+           'outputs_fine': None}
+
+    # pts: [N_rays, N_samples, 3]
+    # z_vals: [N_rays, N_samples]
+    pts_ref, z_vals, s_vals = sample_along_camera_ray(ray_o=ray_batch['ray_o'],
+                                              ray_d=ray_batch['ray_d'],
+                                              depth_range=ray_batch['depth_range'],
+                                              N_samples=N_samples, 
+                                              inv_uniform=inv_uniform, det=det)
+    N_rays, N_samples = pts_ref.shape[:2]
+
+    num_last_samples = int(round(N_samples * 0.1))
+
+    # inference scene motion in global space
+    ref_time_embedding_ = ref_time_embedding[None, None, :].repeat(N_rays, N_samples, 1)
+
+    ref_xyzt = torch.cat([pts_ref, ref_time_embedding_], dim=-1).float().to(pts_ref.device)
+    raw_coeff_xyz = model.motion_mlp(ref_xyzt)
+    raw_coeff_xyz[:, -num_last_samples:, :] *= 0.0
+
+    num_basis = model.traj_basis.shape[1]
+    raw_coeff_x = raw_coeff_xyz[..., 0:num_basis]
+    raw_coeff_y = raw_coeff_xyz[..., num_basis:num_basis*2]
+    raw_coeff_z = raw_coeff_xyz[..., num_basis*2:num_basis*3]
+
+    ref_traj_pts_dict = {}
+    # always compute entire trajectory for target view
+    for offset in [-3, -2, -1, 0, 1, 2, 3]: # HARD CODE!!!
+        traj_pts_ref = compute_traj_pts(raw_coeff_x, raw_coeff_y, raw_coeff_z, 
+                                        model.traj_basis[None, None, ref_frame_idx+offset, :])
+
+        ref_traj_pts_dict[offset] = traj_pts_ref
+
+    pts_3d_seq_ref = []
+    for offset in ref_time_offset: 
+        pts_3d_seq_ref.append(pts_ref + (ref_traj_pts_dict[offset] - ref_traj_pts_dict[0]))
+
+    pts_3d_seq_ref = torch.stack(pts_3d_seq_ref, 0)
+    pts_3d_static = pts_ref[None, ...].repeat(ray_batch['static_src_rgbs'].shape[1], 1, 1, 1)
+
+    # feature query from source view with scene motions, for ref view
+    rgb_feat_ref, ray_diff_ref, mask_ref = projector.compute_with_motions(pts_ref, pts_3d_seq_ref, 
+                                                                          ray_batch['camera'],
+                                                                          ray_batch['src_rgbs'],
+                                                                          ray_batch['src_cameras'],
+                                                                          featmaps=featmaps[0])  # [N_rays, N_samples, N_views, x]
+
+    rgb_feat_static, ray_diff_static, mask_static = projector.compute_with_motions(pts_ref, pts_3d_static, 
+                                                                                   ray_batch['camera'],
+                                                                                   ray_batch['static_src_rgbs'],
+                                                                                   ray_batch['static_src_cameras'],
+                                                                                   featmaps=featmaps[2])  # [N_rays, N_samples, N_views, x]
+
+    pixel_mask_ref = mask_ref[..., 0].sum(dim=2) > 1   # [N_rays, N_samples], should at least have 2 observations
+    pixel_mask_static = mask_static[..., 0].sum(dim=2) > 1   # [N_rays, N_samples], should at least have 2 observations
+
+    ref_time_diff = torch.from_numpy(np.array(ref_time_offset)).to(rgb_feat_ref.device) / float(num_frames)
+    ref_time_diff = ref_time_diff[None, None, :, None].expand(ray_diff_ref.shape[0], ray_diff_ref.shape[1], -1, -1)
+
+    raw_coarse_ref = model.net_coarse_dy(pts_ref,
+                                         rgb_feat_ref, 
+                                         input_ray_dir,
+                                         ray_diff_ref, 
+                                         ref_time_diff,
+                                         mask_ref, 
+                                         ref_time_embedding_)   # [N_rays, N_samples, 4]
+
+    ref_rays_coords = compute_ref_plucker_coordinate(ray_batch['ray_o'], ray_batch['ray_d'])
+    src_rays_coords = compute_src_plucker_coordinate(pts_ref, ray_batch['static_src_cameras'])
+
+    raw_coarse_static = model.net_coarse_st(pts_ref,
+                                            ref_rays_coords,
+                                            src_rays_coords,
+                                            rgb_feat_static, 
+                                            input_ray_dir,
+                                            ray_diff_static, 
+                                            mask_static)   # [N_rays, N_samples, 4]
+
+    outputs_coarse_ref = raw2outputs(raw_coarse_ref, raw_coarse_static,
+                                     z_vals, 
+                                     pixel_mask_ref, pixel_mask_static)
+
+    outputs_coarse_ref_dy = raw2outputs_vanilla(raw_coarse_ref,
+                                               z_vals, 
+                                               pixel_mask_ref)
+
+    # print(ray_batch['src_cameras'].shape)
+    # exit()
+
+    # render_flows = compute_optical_flow(outputs_coarse_ref, 
+    #                                     pts_3d_seq_ref, 
+    #                                     ray_batch['src_cameras'], 
+    #                                     ray_batch['uv_grid'])
+
+    # print(ray_batch['src_cameras'][:, 2:4, :].shape)
+    # exit()
+    
+    ### Hard coded right now it is only one neighborhood
+    render_flows = compute_optical_flow(outputs_coarse_ref, 
+                                        pts_3d_seq_ref[2:4, :, :, :], 
+                                        ray_batch['src_cameras'][:, 2:4, :], 
+                                        ray_batch['uv_grid'])
+
+    outputs_coarse_ref['render_flows'] = render_flows
+    outputs_coarse_ref['s_vals'] = s_vals
+    
+    sf_fields = torch.norm(ref_traj_pts_dict[2] - ref_traj_pts_dict[0], dim=-1)
+    weights = outputs_coarse_ref['weights']
+
+    outputs_coarse_st = raw2outputs_vanilla(raw_coarse_static,
+                                           z_vals, 
+                                           pixel_mask_static)
+
+    #### For SCADE loss ####
+    static_weights = outputs_coarse_st["weights"]
+    dynamic_weights = outputs_coarse_ref_dy["weights"]
+    combined_weights = outputs_coarse_ref["weights"]
+
+    static_scade_samples = get_scade_samples(z_vals, static_weights, N_samples, inv_uniform, det)
+    dynamic_scade_samples = get_scade_samples(z_vals, dynamic_weights, N_samples, inv_uniform, det)
+    combined_scade_samples = get_scade_samples(z_vals, combined_weights, N_samples, inv_uniform, det)
+
+    outputs_coarse_ref['scade_samples'] = combined_scade_samples
+    outputs_coarse_st['scade_samples'] = static_scade_samples
+    outputs_coarse_ref_dy['scade_samples'] = dynamic_scade_samples
+    ########################
+
+    exp_sf_p1 = torch.sum(outputs_coarse_ref['weights'][..., None] * (ref_traj_pts_dict[2] - ref_traj_pts_dict[0]), dim=-2)
+    exp_sf_m1 = torch.sum(outputs_coarse_ref['weights'][..., None] * (ref_traj_pts_dict[-2] - ref_traj_pts_dict[0]), dim=-2)
+    outputs_coarse_ref['exp_sf'] = torch.max(exp_sf_p1, exp_sf_m1)
+
+    # ============================= for trajectory consistency, and temporal consistency
+    if is_train:
+        # compute scene flow
+        sf_seq = []
+        for offset in [-2, -1, 0, 1, 2, 3]: 
+            sf = ref_traj_pts_dict[offset] - ref_traj_pts_dict[offset - 1] 
+            sf_seq.append(sf)
+        sf_seq = torch.stack(sf_seq, 0)
+
+        # THIS PART IS FOR CYCLE CONSISTENCY
+        pts_anchor = pts_ref + (ref_traj_pts_dict[anchor_frame_idx - ref_frame_idx] - ref_traj_pts_dict[0])
+        anchor_time_embedding_ = anchor_time_embedding[None, None, :].repeat(N_rays, N_samples, 1).float()
+
+        xyzt_anchor = torch.cat([pts_anchor, anchor_time_embedding_], dim=-1).float().to(pts_ref.device)
+
+        raw_coeff_xyz_anchor = model.motion_mlp(xyzt_anchor)
+        raw_coeff_xyz_anchor[:, -num_last_samples:, :] *= 0.0
+
+        raw_coeff_x_anchor = raw_coeff_xyz_anchor[..., 0:num_basis]
+        raw_coeff_y_anchor = raw_coeff_xyz_anchor[..., num_basis:num_basis*2]
+        raw_coeff_z_anchor = raw_coeff_xyz_anchor[..., num_basis*2:num_basis*3]
+
+        traj_pts_anchor_0 = compute_traj_pts(raw_coeff_x_anchor, raw_coeff_y_anchor, raw_coeff_z_anchor, 
+                                             model.traj_basis[None, None, anchor_frame_idx, :])
+
+        pts_3d_seq_anchor = []
+        pts_traj_ref = []
+        pts_traj_anchor = []
+
+        # offset from nearby anchor image
+        for offset in anchor_time_offset: 
+            ref_offset = (anchor_frame_idx + offset - ref_frame_idx)
+
+            traj_pts_anchor = compute_traj_pts(raw_coeff_x_anchor, raw_coeff_y_anchor, raw_coeff_z_anchor, 
+                                               model.traj_basis[None, None, anchor_frame_idx + offset, :])
+
+            temp_pts = pts_anchor + (traj_pts_anchor - traj_pts_anchor_0)
+            pts_3d_seq_anchor.append(temp_pts)
+            
+            if ref_offset not in ref_traj_pts_dict:
+                continue
+
+            # print("ref_offset %d %d"%(ref_offset, ref_frame_idx + ref_offset), 'anchor_src %d %d'%(offset, anchor_frame_idx + offset))
+
+            pts_traj_anchor.append(temp_pts)
+            pts_traj_ref.append(pts_ref + ref_traj_pts_dict[ref_offset] - ref_traj_pts_dict[0])
+
+        pts_traj_ref = torch.stack(pts_traj_ref, 0)
+        pts_traj_anchor = torch.stack(pts_traj_anchor, 0)
+        pts_3d_seq_anchor = torch.stack(pts_3d_seq_anchor, 0)
+
+        # feature query from double-source view with scene motions, for randomly selected nearby view
+        rgb_feat_anchor, ray_diff_anchor, mask_anchor = projector.compute_with_motions(pts_ref, pts_3d_seq_anchor, 
+                                                                                       ray_batch['camera'], 
+                                                                                       ray_batch['anchor_src_rgbs'],
+                                                                                       ray_batch['anchor_src_cameras'],
+                                                                                       featmaps=featmaps[1])  # [N_rays, N_samples, N_views, x]
+        
+        anchor_time_diff = torch.from_numpy(np.array(anchor_time_offset)).to(rgb_feat_anchor.device) / float(num_frames)
+        anchor_time_diff = anchor_time_diff[None, None, :, None].expand(ray_diff_anchor.shape[0], ray_diff_anchor.shape[1], -1, -1)
+
+        pixel_mask_anchor = mask_anchor[..., 0].sum(dim=2) > 1   # [N_rays, N_samples], should at least have 2 observations
+        raw_coarse_anchor = model.net_coarse_dy(pts_anchor,
+                                                rgb_feat_anchor, 
+                                                input_ray_dir,
+                                                ray_diff_anchor, 
+                                                anchor_time_diff,
+                                                mask_anchor, 
+                                                anchor_time_embedding_)   # [N_rays, N_samples, 4]
+
+        outputs_coarse_anchor = raw2outputs(raw_coarse_anchor, raw_coarse_static,
+                                            z_vals, 
+                                            pixel_mask_anchor, pixel_mask_static)
+
+
+        outputs_coarse_anchor_dy = raw2outputs_vanilla(raw_coarse_anchor,
+                                                      z_vals, 
+                                                      pixel_mask_anchor)
+
+        occ_score_dy = outputs_coarse_ref_dy['weights'] - outputs_coarse_anchor_dy['weights']
+        occ_score_dy = occ_score_dy.detach()
+        occ_weights_dy = 1. - torch.abs(occ_score_dy)
+        occ_weight_dy_map = 1. - torch.abs(torch.sum(occ_score_dy , dim=1))
+
+        # compute disocculusion weights for full rendering
+        if OCC_WEIGHTS_MODE == 0: # mix-mode
+            time_diff = np.abs(ref_frame_idx - anchor_frame_idx)
+            # compute disocculusion weights for full rendering
+            if time_diff > 1: # composite-dy
+                occ_score = outputs_coarse_ref['weights_dy'] - outputs_coarse_anchor['weights_dy']
+            else: # full
+                occ_score = outputs_coarse_ref['weights'] - outputs_coarse_anchor['weights']
+
+        elif OCC_WEIGHTS_MODE == 1: # composite-dy
+            occ_score = outputs_coarse_ref['weights_dy'] - outputs_coarse_anchor['weights_dy']
+        elif OCC_WEIGHTS_MODE == 2: # full
+            occ_score = outputs_coarse_ref['weights'] - outputs_coarse_anchor['weights']
+        elif OCC_WEIGHTS_MODE == 3:
+            time_diff = np.abs(ref_frame_idx - anchor_frame_idx)
+            # compute disocculusion weights for full rendering
+            if time_diff > 2: # composite-dy
+                occ_score = outputs_coarse_ref['weights_dy'] - outputs_coarse_anchor['weights_dy']
+            else: # full
+                occ_score = outputs_coarse_ref['weights'] - outputs_coarse_anchor['weights']
+        else:
+            raise ValueError
+
+
+        occ_score = occ_score.detach()
+
+        occ_weights = 1. - torch.abs(occ_score)
+        occ_weight_map = 1. - torch.abs(torch.sum(occ_score , dim=1))
+
+        outputs_coarse_anchor['occ_weights'] = occ_weights
+        outputs_coarse_anchor['occ_weight_map'] = occ_weight_map
+
+        outputs_coarse_anchor['pts_traj_ref'] = pts_traj_ref
+        outputs_coarse_anchor['pts_traj_anchor'] = pts_traj_anchor
+        outputs_coarse_anchor['sf_seq'] = sf_seq
+
+
+        outputs_coarse_anchor_dy['occ_weights'] = occ_weights_dy
+        outputs_coarse_anchor_dy['occ_weight_map'] = occ_weight_dy_map
+
+        ret['outputs_coarse_anchor'] = outputs_coarse_anchor
+        ret['outputs_coarse_anchor_dy'] = outputs_coarse_anchor_dy
+
+    # ======================== end for consistency
+    ret['outputs_coarse_ref'] = outputs_coarse_ref
+    ret['outputs_coarse_ref_dy'] = outputs_coarse_ref_dy
+    ret['outputs_coarse_st'] = outputs_coarse_st
+    return ret

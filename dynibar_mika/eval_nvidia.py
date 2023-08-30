@@ -19,9 +19,126 @@ import skimage.metrics
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+from utils import *
 
-to8b = lambda x : (255*np.clip(x,0,1)).astype(np.uint8)
-to16b = lambda x : ((2**16 - 1) * np.clip(x,0,1)).astype(np.uint16)
+#### Flow Visualization ###
+def make_colorwheel():
+    """
+    Generates a color wheel for optical flow visualization as presented in:
+        Baker et al. "A Database and Evaluation Methodology for Optical Flow" (ICCV, 2007)
+        URL: http://vision.middlebury.edu/flow/flowEval-iccv07.pdf
+
+    Code follows the original C++ source code of Daniel Scharstein.
+    Code follows the the Matlab source code of Deqing Sun.
+
+    Returns:
+        np.ndarray: Color wheel
+    """
+
+    RY = 15
+    YG = 6
+    GC = 4
+    CB = 11
+    BM = 13
+    MR = 6
+
+    ncols = RY + YG + GC + CB + BM + MR
+    colorwheel = np.zeros((ncols, 3))
+    col = 0
+
+    # RY
+    colorwheel[0:RY, 0] = 255
+    colorwheel[0:RY, 1] = np.floor(255*np.arange(0,RY)/RY)
+    col = col+RY
+    # YG
+    colorwheel[col:col+YG, 0] = 255 - np.floor(255*np.arange(0,YG)/YG)
+    colorwheel[col:col+YG, 1] = 255
+    col = col+YG
+    # GC
+    colorwheel[col:col+GC, 1] = 255
+    colorwheel[col:col+GC, 2] = np.floor(255*np.arange(0,GC)/GC)
+    col = col+GC
+    # CB
+    colorwheel[col:col+CB, 1] = 255 - np.floor(255*np.arange(CB)/CB)
+    colorwheel[col:col+CB, 2] = 255
+    col = col+CB
+    # BM
+    colorwheel[col:col+BM, 2] = 255
+    colorwheel[col:col+BM, 0] = np.floor(255*np.arange(0,BM)/BM)
+    col = col+BM
+    # MR
+    colorwheel[col:col+MR, 2] = 255 - np.floor(255*np.arange(MR)/MR)
+    colorwheel[col:col+MR, 0] = 255
+    return colorwheel
+
+
+def flow_uv_to_colors(u, v, convert_to_bgr=False):
+    """
+    Applies the flow color wheel to (possibly clipped) flow components u and v.
+
+    According to the C++ source code of Daniel Scharstein
+    According to the Matlab source code of Deqing Sun
+
+    Args:
+        u (np.ndarray): Input horizontal flow of shape [H,W]
+        v (np.ndarray): Input vertical flow of shape [H,W]
+        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
+
+    Returns:
+        np.ndarray: Flow visualization image of shape [H,W,3]
+    """
+    flow_image = np.zeros((u.shape[0], u.shape[1], 3), np.uint8)
+    colorwheel = make_colorwheel()  # shape [55x3]
+    ncols = colorwheel.shape[0]
+    rad = np.sqrt(np.square(u) + np.square(v))
+    a = np.arctan2(-v, -u)/np.pi
+    fk = (a+1) / 2*(ncols-1)
+    k0 = np.floor(fk).astype(np.int32)
+    k1 = k0 + 1
+    k1[k1 == ncols] = 0
+    f = fk - k0
+    for i in range(colorwheel.shape[1]):
+        tmp = colorwheel[:,i]
+        col0 = tmp[k0] / 255.0
+        col1 = tmp[k1] / 255.0
+        col = (1-f)*col0 + f*col1
+        idx = (rad <= 1)
+        col[idx]  = 1 - rad[idx] * (1-col[idx])
+        col[~idx] = col[~idx] * 0.75   # out of range
+        # Note the 2-i => BGR instead of RGB
+        ch_idx = 2-i if convert_to_bgr else i
+        flow_image[:,:,ch_idx] = np.floor(255 * col)
+    return flow_image
+
+
+def flow_to_color(flow_uv, clip_flow=None, convert_to_bgr=False):
+    """
+    Expects a two dimensional flow image of shape.
+
+    Args:
+        flow_uv (np.ndarray): Flow UV image of shape [H,W,2]
+        clip_flow (float, optional): Clip maximum of flow values. Defaults to None.
+        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
+
+    Returns:
+        np.ndarray: Flow visualization image of shape [H,W,3]
+    """
+    assert flow_uv.ndim == 3, 'input flow must have three dimensions'
+    assert flow_uv.shape[2] == 2, 'input flow must have shape [H,W,2]'
+    if clip_flow is not None:
+        flow_uv = np.clip(flow_uv, 0, clip_flow)
+    u = flow_uv[:,:,0]
+    v = flow_uv[:,:,1]
+    rad = np.sqrt(np.square(u) + np.square(v))
+    rad_max = np.max(rad)
+    epsilon = 1e-5
+    u = u / (rad_max + epsilon)
+    v = v / (rad_max + epsilon)
+    return flow_uv_to_colors(u, v, convert_to_bgr)
+
+
+############################
+
 
 class DynamicVideoDataset(Dataset):
   """This class loads data from Nvidia benchmarks, including camera scene and image information from source views."""
@@ -38,12 +155,6 @@ class DynamicVideoDataset(Dataset):
     self.scene_path = os.path.join(
         self.folder_path, scene, 'dense'
     )
-
-    print("Render index")
-    print(render_idx)
-    # exit()
-
-
     _, poses, bds, _, i_test, rgb_files, _ = load_llff_data(
         self.scene_path,
         height=288,
@@ -97,15 +208,6 @@ class DynamicVideoDataset(Dataset):
         'cam%02d.jpg' % (idx + 1),
     )
 
-    print(self.render_idx)
-    print(idx)
-    print(gt_img_path)
-    print(self.train_poses.shape)
-    print("Render pose:")
-    print(render_pose)
-    print("Train pose idx")
-    print(self.train_poses[idx])
-    print()
     nearest_pose_ids = np.sort(
         [self.render_idx + offset for offset in [1, 2, 3, 0, -1, -2, -3]]
     )
@@ -116,11 +218,6 @@ class DynamicVideoDataset(Dataset):
     # Since benchamrk has fixed viewpoint in a round-robin manner
     static_pose_ids = np.array(list(range(0, train_poses.shape[0])))
     static_id_dict = collections.defaultdict(list)
-
-    # print(static_pose_ids)
-    # print(static_id_dict)
-    # exit()
-
     for static_pose_id in static_pose_ids:
       # do not include image with the same viewpoint
       if (
@@ -131,9 +228,6 @@ class DynamicVideoDataset(Dataset):
 
       static_id_dict[static_pose_id % num_imgs_per_cycle].append(static_pose_id)
 
-    # print(static_id_dict)
-    # print()
-
     static_pose_ids = []
     for key in static_id_dict:
       min_idx = np.argmin(
@@ -142,10 +236,6 @@ class DynamicVideoDataset(Dataset):
       static_pose_ids.append(static_id_dict[key][min_idx])
 
     static_pose_ids = np.sort(static_pose_ids)
-
-    # print(static_pose_ids)
-    # print(len(static_pose_ids))
-    # exit()
 
     src_rgbs = []
     src_cameras = []
@@ -311,10 +401,14 @@ if __name__ == '__main__':
 
   assert len(args.eval_scenes) == 1, 'only accept single scene'
   scene_name = args.eval_scenes[0]
-
   out_scene_dir = os.path.join(extra_out_dir, 'renderings')
+  out_flow_dir = os.path.join(extra_out_dir, 'pred_flow_flipped')
+  out_basis_dir = os.path.join(extra_out_dir, 'basis')
   print('saving results to {}'.format(out_scene_dir))
   os.makedirs(out_scene_dir, exist_ok=True)
+  os.makedirs(out_flow_dir, exist_ok=True)
+  os.makedirs(out_basis_dir, exist_ok=True)
+
 
   lpips_model = models.PerceptualLoss(
       model='net-lin', net='alex', use_gpu=True, version=0.1
@@ -332,7 +426,7 @@ if __name__ == '__main__':
   st_ssim_list = []
   st_lpips_list = []
 
-  for img_i in range(10, args.num_frames - 3): 
+  for img_i in range(3, args.num_frames - 3): 
     test_dataset = DynamicVideoDataset(img_i, args, scenes=args.eval_scenes)
     save_prefix = scene_name
     test_loader = DataLoader(
@@ -341,8 +435,8 @@ if __name__ == '__main__':
     total_num = len(test_loader)
     out_frames = []
 
-    print(len(test_loader))
-    # exit()
+    if img_i > 12:
+      exit()
 
     for i, data in enumerate(test_loader):
       print('img_i ', img_i, i)
@@ -353,17 +447,12 @@ if __name__ == '__main__':
       # idx = int(data['id'].item())
       start = time.time()
 
-      ref_time_embedding = data['ref_time'].cuda() ## id/num_frames
-      ref_frame_idx = int(data['id'].item()) ## ID of the frame goes from [0, len(frames)]
+      ref_time_embedding = data['ref_time'].cuda()
+      ref_frame_idx = int(data['id'].item())
       ref_time_offset = [
           int(near_idx - ref_frame_idx)
           for near_idx in data['nearest_pose_ids'].squeeze().tolist()
-      ] ### neighbors to take -- goes from -3 to 3 now
-
-      print(ref_time_embedding)
-      print(ref_frame_idx)
-      print(ref_time_offset)
-      print()
+      ]
 
       model.switch_to_eval()
       with torch.no_grad():
@@ -374,11 +463,6 @@ if __name__ == '__main__':
             ray_batch['src_rgbs'].squeeze(0).permute(0, 3, 1, 2)
         )
         ref_featmaps = cb_featmaps_1
-
-        print("Feature extractor:")
-        print(cb_featmaps_1.shape)
-        print(cb_featmaps_2.shape)
-        print()
 
         static_src_rgbs = (
             ray_batch['static_src_rgbs'].squeeze(0).permute(0, 3, 1, 2)
@@ -400,18 +484,6 @@ if __name__ == '__main__':
 
         _, static_featmaps_fine = model.feature_net_fine(static_src_rgbs_)
 
-        print("Rgb images sizes:")
-        print(ray_batch['src_rgbs'].shape)
-        print(ray_batch['static_src_rgbs'].shape)
-
-        print("Feature map sizes")
-        print(ref_featmaps.shape)
-        print(ref_featmaps_fine.shape)
-        print("=======")
-        print(static_featmaps.shape)
-        print(static_featmaps_fine.shape)
-
-
         ret = render_single_image_nvi(
             frame_idx=(ref_frame_idx, None),
             time_embedding=(ref_time_embedding, None),
@@ -431,11 +503,79 @@ if __name__ == '__main__':
             fine_featmaps=(ref_featmaps_fine, None, static_featmaps_fine),
             is_train=False,
         )
+
+        # print(ret['outputs_coarse_ref']['outputs_coarse_rendered_flow'].shape)
+        # exit()
+
+      # rendered_flow_all = ret['outputs_coarse_ref']['outputs_coarse_rendered_flow'].detach().cpu().numpy()
+      rendered_flow_all = ret['outputs_coarse_ref']['outputs_coarse_rendered_flow']
+      rendered_pts_all = ret['outputs_coarse_ref']['outputs_coarse_rendered_pts']
+
+      rendered_phis = ret['outputs_coarse_ref']['rendered_phis']
+
+      ### basis is the same -- same vector only time_idx dependent
+      trajectory_basis = ret['outputs_coarse_ref']['trajectory_basis'][0].detach().cpu().numpy()
+      np.savetxt(os.path.join(out_basis_dir, str(img_i) + "_" + str(i) + "_hbasis.txt"), trajectory_basis)
+
+      print(rendered_phis.shape)
+      # print(rendered_pts_all.shape)
+      # exit()
+      basis_projected, _ = projector.compute_projections(rendered_phis, data["camera"].repeat(rendered_phis.shape[0], 1))
+      print(basis_projected.shape)
+      # exit()
+
+      for b in range(basis_projected.shape[0]):
+        print(basis_projected[b])
+        print(basis_projected[b].shape)
         
-        exit()
+        # flow_color = flow_vis.flow_to_color(optical_flow[neighbor], convert_to_bgr=False)
+        flow_color = flow_to_color(basis_projected[b].detach().cpu().numpy(), clip_flow=None, convert_to_bgr=False)
+        cv2.imwrite(os.path.join(out_basis_dir, str(img_i) + "_" + str(i) + "_phi" + str(b) + ".jpg"), flow_color)
+      
+      # exit()
+
+      # print(trajectory_basis)
+      # print(trajectory_basis.shape)
+
+      # exit()
 
       fine_pred_rgb = ret['outputs_fine_ref']['rgb'].detach().cpu().numpy()
       fine_pred_depth = ret['outputs_fine_ref']['depth'].detach().cpu().numpy()
+
+      # print(rendered_flow_all[0])
+      print(rendered_flow_all[0].shape)
+      print(rendered_pts_all[0].shape)
+      # exit()
+
+      # print()
+      # print(fine_pred_rgb)
+      # print(data["camera"])
+      print(data["camera"].shape)
+      print(data["camera"].repeat(rendered_pts_all.shape[0], 1).shape)
+
+      pts_flow_projected, _ = projector.compute_projections(rendered_pts_all, data["camera"].repeat(rendered_pts_all.shape[0], 1))
+
+      ### middle frame is the reference
+      optical_flow = pts_flow_projected - pts_flow_projected[3]
+
+      for neighbor in range(optical_flow.shape[0]):
+        print(optical_flow[neighbor])
+        print(optical_flow[neighbor].shape)
+        
+        # flow_color = flow_vis.flow_to_color(optical_flow[neighbor], convert_to_bgr=False)
+        flow_color = flow_to_color(optical_flow[neighbor].detach().cpu().numpy(), clip_flow=None, convert_to_bgr=False)
+        print(flow_color.shape)
+
+        ### middle frame with idx 3 is the reference
+        neighbor_idx = neighbor -3
+
+        cv2.imwrite(os.path.join(out_flow_dir, str(img_i) + "_" + str(i) + "_flow" + str(neighbor_idx) + ".jpg"), flow_color)
+      
+      # exit()
+      # print(optical_flow[3])
+      # print(optical_flow[2])
+      # print(optical_flow.shape)
+      # exit()
 
       valid_mask = np.float32(
           np.sum(fine_pred_rgb, axis=-1, keepdims=True) > 1e-3
@@ -513,22 +653,9 @@ if __name__ == '__main__':
       st_ssim_list.append(static_ssim)
       st_lpips_list.append(static_lpips)
 
-      #### Output to image ####
-      # print(gt_img)
-      # print()
-      # print(fine_pred_rgb)
-      # print()
-      # print(static_mask)
-      # print()
-      # print(gt_img.shape)
-      # print(fine_pred_rgb.shape)
-      # print(static_mask.shape)
-      # print(dynamic_mask.shape)
-
       cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_0rgb" + ".jpg"), cv2.cvtColor(to8b(fine_pred_rgb), cv2.COLOR_RGB2BGR))
       cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_1gt" + ".jpg"), cv2.cvtColor(to8b(gt_img), cv2.COLOR_RGB2BGR))
-      cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_2mask" + ".jpg"), cv2.cvtColor(to8b(static_mask), cv2.COLOR_RGB2BGR))
-      #########################
+      cv2.imwrite(os.path.join(out_scene_dir, str(img_i) + "_" + str(i) + "_2mask" + ".jpg"), cv2.cvtColor(to8b(dynamic_mask), cv2.COLOR_RGB2BGR))
 
     print('MOVING PSNR ', np.mean(np.array(psnr_list)))
     print('MOVING SSIM ', np.mean(np.array(ssim_list)))

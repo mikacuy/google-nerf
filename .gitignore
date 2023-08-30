@@ -55,3 +55,4 @@ dynibar_mika/logs/*
 dynibar_mika/out/*
 Neural-Scene-Flow-Fields_mika/NSFF/
 dynamic-video-depth_mika/
+scade_dynamics/log*

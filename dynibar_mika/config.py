@@ -381,4 +381,23 @@ def config_parser():
       action='store_true',
       help='If True, uses joint distribution across pixels in the image for the scade loss',
   )
+
+  ### Specific to Zhengqi's nvidia script
+  parser.add_argument('--coarse_only', action='store_true', help='use coarse network only')
+  parser.add_argument('--w_sf_sm', type=float, default=0.05, help='w_sf_sm')
+  parser.add_argument('--w_sf_zero', type=float, default=0.05, help='w_sf_zero')
+  parser.add_argument("--sfm_reg", action='store_true',
+                    help='static rgb loss')
+  parser.add_argument("--fix_prob", type=float, default=0.5, help='rank for distributed training')
+  parser.add_argument("--skewness", type=float, default=1,
+                        help='skewness for entropy loss')
+  
+  ### For Multi Camera setup
+  parser.add_argument(
+      '--camera_indices',
+      nargs='+',
+      default=[2,5,13],
+      help='camera indices in the rig to use',
+  )  
+
   return parser

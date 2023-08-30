@@ -1,0 +1,67 @@
+### INPUT
+expname = balloon1_long_testmika
+rootdir = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika
+folder_path = /home/mikacuy/Desktop/coord-mvs/google-nerf/dynibar_mika/Nvidia_long
+no_reload = False
+render_stride = 1
+distributed = False
+no_load_opt = True
+no_load_scheduler = True
+n_iters = 350000
+
+## dataset
+train_dataset = Nvidia
+train_scenes = Balloon1
+eval_dataset = Nvidia
+eval_scenes = Balloon1
+
+### TRAINING
+N_rand = 4096
+lrate_feature = 1e-3
+lrate_mlp = 5e-4
+lrate_decay_factor = 0.5
+init_decay_epoch = 150
+
+### TESTING
+chunk_size = 4096
+
+### RENDERING
+N_importance = 64
+N_samples = 64
+inv_uniform = True
+white_bkgd = False
+coarse_only = True
+
+### CONSOLE AND TENSORBOARD
+i_img = 100
+i_print = 100
+i_weights = 10000
+
+anti_alias_pooling = 0
+input_dir = True
+input_xyz = False
+
+w_cycle = 0.1
+w_disp = 5e-2
+w_flow = 5e-3
+w_distortion = 1e-3
+w_sf_zero = 0.05
+w_sf_sm = 0.05
+
+erosion_radius = 1
+
+w_skew_entropy = 5e-4
+skewness = 1.0
+lr_multipler = 1.0
+
+occ_weights_mode = 2
+
+decay_rate = 10
+anneal_cycle = True
+
+sfm_reg = True
+fix_prob = 0.5
+
+### For scade
+w_scade = 0.1
+is_joint = True

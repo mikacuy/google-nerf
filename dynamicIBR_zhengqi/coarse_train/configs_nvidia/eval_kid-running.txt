@@ -1,0 +1,22 @@
+### INPUT
+expname = kid-running_6f_96_full-occ_blend-color_input-dir_decay-25K_w-cycle-0.1_constst-loss-0.0
+rootdir = /home/zhengqili/filestore/IBR/IBRNet_tc_oh_blend-color  # REPLACE THIS with YOUR PATH.
+ckpt_path = /home/zhengqili/filestore/IBR/IBRNet_tc_oh_blend-color/out/kid-running_6f_96_full-occ_blend-color_input-dir_decay-25K_w-cycle-0.1_constst-loss-0.0/model_latest.pth  
+distributed = False
+
+## dataset
+eval_dataset = dynamic-test
+eval_scenes = kid-running
+
+### TESTING
+chunk_size = 4096
+
+### RENDERING
+N_importance = 64
+N_samples = 96
+inv_uniform = True
+white_bkgd = False
+
+anti_alias_pooling = 0
+input_dir = True
+input_xyz = False
