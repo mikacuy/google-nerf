@@ -1092,10 +1092,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     old_learning_rate = init_learning_rate     
     ALL_DATABASE = None
 
+    it_recache = 1000
+
     for i in trange(start, N_iters):
 
       ### Define database to cache ###
-      if i % 1000 == 0 or ALL_DATABASE is None:
+      if i % it_recache == 0 or ALL_DATABASE is None:
         print("Recaching database.")
 
         skip_view = 20
@@ -1178,7 +1180,13 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       print(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
       # start_time = time.time()
-      loss.backward()
+      
+      if i % it_recache == -1 and i != start:
+        loss.backward()
+      
+      else:
+        loss.backward(retain_graph=True)
+
       # print("Single backward call took:")
       # print(time.time() - start_time)
       # exit()
