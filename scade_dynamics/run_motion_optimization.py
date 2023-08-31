@@ -1154,118 +1154,118 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           ALL_DATABASE.append(CURR_DATABASE)
         ############################################################################################
 
-        #### Sample and optimize nearest neighbor
-        num_y_to_sample = 256
+      #### Sample and optimize nearest neighbor
+      num_y_to_sample = 256
 
-        ### Select random indices 
-        # print(ALL_DATABASE[0].shape[0])
-        
-        indices = torch.randperm(ALL_DATABASE[0].shape[0])[:num_y_to_sample]
-        selected_entries = ALL_DATABASE[0][indices]      
-        # print(selected_entries.shape)
+      ### Select random indices 
+      # print(ALL_DATABASE[0].shape[0])
+      
+      indices = torch.randperm(ALL_DATABASE[0].shape[0])[:num_y_to_sample]
+      selected_entries = ALL_DATABASE[0][indices]      
+      # print(selected_entries.shape)
 
-        ### Get argmin
-        distances = torch.norm(selected_entries.unsqueeze(1) - ALL_DATABASE[1].unsqueeze(0), p=2, dim=-1)
-        distances_min = torch.min(distances, axis=-1)[0]
-        print(distances.shape)
-        print(distances_min.shape)
-        
-        # compute loss and optimize
-        optimizer_motion.zero_grad()
+      ### Get argmin
+      distances = torch.norm(selected_entries.unsqueeze(1) - ALL_DATABASE[1].unsqueeze(0), p=2, dim=-1)
+      distances_min = torch.min(distances, axis=-1)[0]
+      # print(distances.shape)
+      # print(distances_min.shape)
+      
+      # compute loss and optimize
+      optimizer_motion.zero_grad()
 
-        ## Energy loss on the three terms
-        loss = torch.mean(distances_min)
+      ## Energy loss on the three terms
+      loss = torch.mean(distances_min)
 
-        print(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
-        # start_time = time.time()
-        loss.backward()
-        # print("Single backward call took:")
-        # print(time.time() - start_time)
-        # exit()
+      print(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
+      # start_time = time.time()
+      loss.backward()
+      # print("Single backward call took:")
+      # print(time.time() - start_time)
+      # exit()
 
-        # ### Update learning rate
-        # learning_rate = get_learning_rate(init_learning_rate, i, args.decay_step, args.decay_rate, staircase=True)
-        # if old_learning_rate != learning_rate:
-        #     update_learning_rate(optimizer_motion, learning_rate)
-        #     old_learning_rate = learning_rate
+      # ### Update learning rate
+      # learning_rate = get_learning_rate(init_learning_rate, i, args.decay_step, args.decay_rate, staircase=True)
+      # if old_learning_rate != learning_rate:
+      #     update_learning_rate(optimizer_motion, learning_rate)
+      #     old_learning_rate = learning_rate
 
-        optimizer_motion.step()
+      optimizer_motion.step()
 
-        # write logs ---> need to fix this as it is now a list
-        # if i%args.i_weights==0:
-        #     path = os.path.join(args.ckpt_dir, args.expname, '{:06d}.tar'.format(i))
-        #     save_dict = {
-        #         'global_step': global_step,
-        #         'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
-        #         'optimizer_state_dict': optimizer.state_dict(),}
-        #     if render_kwargs_train['network_fine'] is not None:
-        #         save_dict['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+      # write logs ---> need to fix this as it is now a list
+      # if i%args.i_weights==0:
+      #     path = os.path.join(args.ckpt_dir, args.expname, '{:06d}.tar'.format(i))
+      #     save_dict = {
+      #         'global_step': global_step,
+      #         'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
+      #         'optimizer_state_dict': optimizer.state_dict(),}
+      #     if render_kwargs_train['network_fine'] is not None:
+      #         save_dict['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
 
-        #     if use_depth:
-        #         save_dict['depth_shifts'] = DEPTH_SHIFTS
-        #         save_dict['depth_scales'] = DEPTH_SCALES
+      #     if use_depth:
+      #         save_dict['depth_shifts'] = DEPTH_SHIFTS
+      #         save_dict['depth_scales'] = DEPTH_SCALES
 
-        #     torch.save(save_dict, path)
-        #     print('Saved checkpoints at', path)
-        
-        # if i%args.i_print==0:
-        #     tb.add_scalars('motion_loss', {'train': loss.item()}, i)
+      #     torch.save(save_dict, path)
+      #     print('Saved checkpoints at', path)
+      
+      # if i%args.i_print==0:
+      #     tb.add_scalars('motion_loss', {'train': loss.item()}, i)
 
-        #     tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
-            
-        # if i%args.i_img==0:
-        #     # visualize 2 train images
-        #     _, images_train = render_images_with_metrics(2, i_train, images, depths, valid_depths, \
-        #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, embedcam_fn=embedcam_fn)
-        #     tb.add_image('train_image',  torch.cat((
-        #         torchvision.utils.make_grid(images_train["rgbs"], nrow=1), \
-        #         torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
-        #         torchvision.utils.make_grid(images_train["depths"], nrow=1), \
-        #         torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
-        #     # compute validation metrics and visualize 8 validation images
-        #     mean_metrics_val, images_val = render_images_with_metrics(2, i_val, images, depths, valid_depths, \
-        #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-        #     tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
-        #     tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
-        #     tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
-        #     tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
-        #     if mean_metrics_val.has("depth_rmse"):
-        #         tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
-        #     if 'rgbs0' in images_val:
-        #         tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
-        #         tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
-        #     if 'rgbs0' in images_val:
-        #         tb.add_image('val_image',  torch.cat((
-        #             torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
-        #     else:
-        #         tb.add_image('val_image',  torch.cat((
-        #             torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-        #             torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+      #     tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
+          
+      # if i%args.i_img==0:
+      #     # visualize 2 train images
+      #     _, images_train = render_images_with_metrics(2, i_train, images, depths, valid_depths, \
+      #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, embedcam_fn=embedcam_fn)
+      #     tb.add_image('train_image',  torch.cat((
+      #         torchvision.utils.make_grid(images_train["rgbs"], nrow=1), \
+      #         torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
+      #         torchvision.utils.make_grid(images_train["depths"], nrow=1), \
+      #         torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
+      #     # compute validation metrics and visualize 8 validation images
+      #     mean_metrics_val, images_val = render_images_with_metrics(2, i_val, images, depths, valid_depths, \
+      #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
+      #     tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
+      #     tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
+      #     tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
+      #     tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
+      #     if mean_metrics_val.has("depth_rmse"):
+      #         tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
+      #     if 'rgbs0' in images_val:
+      #         tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
+      #         tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
+      #     if 'rgbs0' in images_val:
+      #         tb.add_image('val_image',  torch.cat((
+      #             torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+      #     else:
+      #         tb.add_image('val_image',  torch.cat((
+      #             torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+      #             torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
 
-        # # test at the last iteration
-        # if (i + 1) == N_iters:
-        #     torch.cuda.empty_cache()
-        #     images = torch.Tensor(test_images).to(device)
-        #     # depths = torch.Tensor(test_depths).to(device)
-        #     # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
-        #     depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
-        #     valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
-            
-        #     poses = torch.Tensor(test_poses).to(device)
-        #     intrinsics = torch.Tensor(test_intrinsics).to(device)
-        #     mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
-        #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-        #     write_images_with_metrics(images_test, mean_metrics_test, far, args)
-        #     tb.flush()
+      # # test at the last iteration
+      # if (i + 1) == N_iters:
+      #     torch.cuda.empty_cache()
+      #     images = torch.Tensor(test_images).to(device)
+      #     # depths = torch.Tensor(test_depths).to(device)
+      #     # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
+      #     depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+      #     valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
+          
+      #     poses = torch.Tensor(test_poses).to(device)
+      #     intrinsics = torch.Tensor(test_intrinsics).to(device)
+      #     mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
+      #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
+      #     write_images_with_metrics(images_test, mean_metrics_test, far, args)
+      #     tb.flush()
 
-        global_step += 1
+      global_step += 1
 
 def config_parser():
 
