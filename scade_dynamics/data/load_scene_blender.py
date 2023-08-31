@@ -228,7 +228,7 @@ def load_scene_blender_depth_features(basedir, feature_dir, half_res=True, train
             curr_feat_fname = os.path.join(feature_dir, frame['file_path'].split("/")[-1] + '.pth')
             all_features_fnames.append(curr_feat_fname)
 
-            print(count)
+            # print(count)
             count += 1
 
             max_depth = frame["max_depth"]
