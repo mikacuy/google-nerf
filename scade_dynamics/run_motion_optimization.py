@@ -1177,11 +1177,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         loss = torch.mean(distances_min)
 
         print(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
-        start_time = time.time()
+        # start_time = time.time()
         loss.backward()
-        print("Single backward call took:")
-        print(time.time() - start_time)
-        exit()
+        # print("Single backward call took:")
+        # print(time.time() - start_time)
+        # exit()
 
         # ### Update learning rate
         # learning_rate = get_learning_rate(init_learning_rate, i, args.decay_step, args.decay_rate, staircase=True)
