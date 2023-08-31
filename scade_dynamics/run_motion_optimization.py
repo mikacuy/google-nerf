@@ -1165,7 +1165,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         # print(selected_entries.shape)
 
         ### Get argmin
-        distances = torch.norm(selected_entries.unsqueeze(1) - ALL_DATABASE[0].unsqueeze(0), p=2, dim=-1)
+        distances = torch.norm(selected_entries.unsqueeze(1) - ALL_DATABASE[1].unsqueeze(0), p=2, dim=-1)
         distances_min = torch.min(distances, axis=-1)[0]
         print(distances.shape)
         print(distances_min.shape)
