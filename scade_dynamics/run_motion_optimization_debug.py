@@ -665,6 +665,213 @@ def create_nerf(args, scene_render_params):
 
     return render_kwargs_train, render_kwargs_test, start, optimizer, optimizer_motion
 
+######################
+def create_nerf2(args, scene_render_params):
+    """Instantiate NeRF's MLP model.
+    """
+    ### To keep track for the optimizer
+    grad_vars = []
+    grad_names = []
+
+    seman_grad_vars = []
+    seman_grad_names = []
+
+    motion_vars = []
+
+    #### Global ####
+    embed_fn, input_ch = get_embedder(args.multires, args.i_embed)
+    input_ch_views = 0
+    embeddirs_fn = None
+    if args.use_viewdirs:
+        embeddirs_fn, input_ch_views = get_embedder(args.multires_views, args.i_embed)
+    output_ch = 5 if args.N_importance > 0 else 4
+    skips = [4]
+    ################
+
+    ########################
+    ### First frame model
+    ########################
+    model1 = NeRF_semantics(D=args.netdepth, W=args.netwidth,
+                  input_ch=input_ch, output_ch=output_ch, skips=skips,
+                  input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+
+    model1 = nn.DataParallel(model1).to(device)
+
+    for name, param in model1.named_parameters():
+        if "semantic" in name:
+          seman_grad_vars.append(param)
+          seman_grad_names.append(name)
+        else:
+          grad_vars.append(param)
+          grad_names.append(name)
+
+    model_fine1 = None
+    if args.N_importance > 0:
+        model_fine1 = NeRF_semantics(D=args.netdepth_fine, W=args.netwidth_fine,
+                          input_ch=input_ch, output_ch=output_ch, skips=skips,
+                          input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+            
+        model_fine1 = nn.DataParallel(model_fine1).to(device)
+
+        for name, param in model_fine1.named_parameters():
+            if "semantic" in name:
+              seman_grad_vars.append(param)
+              seman_grad_names.append(name)
+            else:
+              grad_vars.append(param)
+              grad_names.append(name)
+
+    network_query_fn1 = lambda inputs, viewdirs, embedded_cam, network_fn : run_network(inputs, viewdirs, embedded_cam, network_fn,
+                                                                embed_fn=embed_fn,
+                                                                embeddirs_fn=embeddirs_fn,
+                                                                bb_center=args.bb_center[0],
+                                                                bb_scale=args.bb_scale[0],
+                                                                netchunk=args.netchunk_per_gpu*args.n_gpus)
+
+    ###### Load pretrained model #####
+    path1 = os.path.join(args.pretrained_dir, args.pretrained_fol1)
+    ckpts = [os.path.join(path1, f) for f in sorted(os.listdir(path1)) if '000.tar' in f]
+    print('Found ckpts', ckpts)
+    ckpt = None
+    if len(ckpts) > 0 and not args.no_reload:
+        ckpt_path = ckpts[-1]
+        print('Reloading from', ckpt_path)
+        ckpt = torch.load(ckpt_path)
+
+    if ckpt is not None:
+        # Load model
+        model1.load_state_dict(ckpt['network_fn_state_dict'])
+        if model_fine1 is not None:
+            model_fine1.load_state_dict(ckpt['network_fine_state_dict'])    
+
+    #### Motion Potential model ####
+    motion_model1 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+    motion_model1 = nn.DataParallel(motion_model1).to(device)
+
+    for name, param in motion_model1.named_parameters():
+        motion_vars.append(param)
+
+    motion_network_query_fn1 = lambda inputs, features, network_fn : run_motion_potential(inputs, features, network_fn,
+                                                                bb_center=args.bb_center[0],
+                                                                bb_scale=args.bb_scale[0],
+                                                                netchunk=args.netchunk_per_gpu*args.n_gpus)
+
+    ########################
+    ### Second frame model
+    ########################
+    model2 = NeRF_semantics(D=args.netdepth, W=args.netwidth,
+                  input_ch=input_ch, output_ch=output_ch, skips=skips,
+                  input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+
+    model2 = nn.DataParallel(model2).to(device)
+
+    for name, param in model2.named_parameters():
+        if "semantic" in name:
+          seman_grad_vars.append(param)
+          seman_grad_names.append(name)
+        else:
+          grad_vars.append(param)
+          grad_names.append(name)
+
+    model_fine2 = None
+    if args.N_importance > 0:
+        model_fine2 = NeRF_semantics(D=args.netdepth_fine, W=args.netwidth_fine,
+                          input_ch=input_ch, output_ch=output_ch, skips=skips,
+                          input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+            
+        model_fine2 = nn.DataParallel(model_fine2).to(device)
+
+        for name, param in model_fine2.named_parameters():
+            if "semantic" in name:
+              seman_grad_vars.append(param)
+              seman_grad_names.append(name)
+            else:
+              grad_vars.append(param)
+              grad_names.append(name)
+
+    network_query_fn2 = lambda inputs, viewdirs, embedded_cam, network_fn : run_network(inputs, viewdirs, embedded_cam, network_fn,
+                                                                embed_fn=embed_fn,
+                                                                embeddirs_fn=embeddirs_fn,
+                                                                bb_center=args.bb_center[1],
+                                                                bb_scale=args.bb_scale[1],
+                                                                netchunk=args.netchunk_per_gpu*args.n_gpus)
+
+    ###### Load pretrained model #####
+    path2 = os.path.join(args.pretrained_dir, args.pretrained_fol2)
+    ckpts = [os.path.join(path2, f) for f in sorted(os.listdir(path2)) if '000.tar' in f]
+    print('Found ckpts', ckpts)
+    ckpt = None
+    if len(ckpts) > 0 and not args.no_reload:
+        ckpt_path = ckpts[-1]
+        print('Reloading from', ckpt_path)
+        ckpt = torch.load(ckpt_path)
+
+    if ckpt is not None:
+        # Load model
+        model2.load_state_dict(ckpt['network_fn_state_dict'])
+        if model_fine2 is not None:
+            model_fine2.load_state_dict(ckpt['network_fine_state_dict'])
+            print("Model 2 loaded.")
+        print("Model 2 loaded.")
+        exit()    
+
+    #### Motion Potential model ####
+    motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+    motion_model2 = nn.DataParallel(motion_model2).to(device)
+
+    for name, param in motion_model2.named_parameters():
+        motion_vars.append(param)
+
+    motion_network_query_fn2 = lambda inputs, features, network_fn : run_motion_potential(inputs, features, network_fn,
+                                                                bb_center=args.bb_center[1],
+                                                                bb_scale=args.bb_scale[1],
+                                                                netchunk=args.netchunk_per_gpu*args.n_gpus)
+
+
+    ### Create optimizer
+    optimizer = torch.optim.Adam(params=grad_vars, lr=args.lrate, betas=(0.9, 0.999))
+    print("Using different learning rate for feature layers.")
+    optimizer.add_param_group({"params": seman_grad_vars, "lr":args.seman_lrate})
+
+    ### Different optimizer for motion module
+    optimizer_motion = torch.optim.Adam(params=motion_vars, lr=args.motion_lrate, betas=(0.9, 0.999))
+
+    start = 0
+    ##########################
+
+
+    ##########################
+    embedded_cam = torch.tensor((), device=device)
+    render_kwargs_train = {
+        'network_query_fn1' : network_query_fn1,
+        'network_query_fn2' : network_query_fn2,
+        'embedded_cam' : embedded_cam,
+        'perturb' : args.perturb,
+        'N_importance' : args.N_importance,
+        'network_fine1' : model_fine1,
+        'network_fine2' : model_fine2,
+        'N_samples' : args.N_samples,
+        'network_fn1' : model1,
+        'network_fn2' : model2,
+        'use_viewdirs' : args.use_viewdirs,
+        'raw_noise_std' : args.raw_noise_std,
+        'network_motion1' : motion_model1,
+        'network_motion2' : motion_model2,
+        'motion_network_query_fn1': motion_network_query_fn1,
+        'motion_network_query_fn2': motion_network_query_fn2
+    }
+    render_kwargs_train.update(scene_render_params)
+
+    render_kwargs_train['ndc'] = False
+    render_kwargs_train['lindisp'] = args.lindisp
+
+    render_kwargs_test = {k : render_kwargs_train[k] for k in render_kwargs_train}
+    render_kwargs_test['perturb'] = False
+    render_kwargs_test['raw_noise_std'] = 0.
+
+    return render_kwargs_train, render_kwargs_test, start, optimizer, optimizer_motion
+######################
+
 def compute_weights(raw, z_vals, rays_d, noise=0.):
     raw2alpha = lambda raw, dists, act_fn=F.relu: 1.-torch.exp(-act_fn(raw)*dists)
 
@@ -741,8 +948,10 @@ def perturb_z_vals(z_vals, pytest):
 
 def render_rays(ray_batch,
                 use_viewdirs,
-                network_fn,
-                network_query_fn,
+                network_fn1,
+                network_fn2,
+                network_query_fn1,
+                network_query_fn2,
                 N_samples,
                 precomputed_z_samples=None,
                 embedded_cam=None,
@@ -750,7 +959,8 @@ def render_rays(ray_batch,
                 lindisp=False,
                 perturb=0.,
                 N_importance=0,
-                network_fine=None,
+                network_fine1=None,
+                network_fine2=None,
                 raw_noise_std=0.,
                 verbose=False,
                 pytest=False,
@@ -759,8 +969,10 @@ def render_rays(ray_batch,
                 all_near=None,
                 all_far=None,
                 idx = 0,
-                network_motion = None,
-                motion_network_query_fn = None,
+                network_motion1 = None,
+                network_motion2 = None,
+                motion_network_query_fn1 = None,
+                motion_network_query_fn2 = None,
                 for_motion=False):
     """Volumetric rendering.
     Args:
@@ -824,7 +1036,11 @@ def render_rays(ray_batch,
 
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples, 3]
     
-    raw = network_query_fn[idx](pts, viewdirs, embedded_cam, network_fn[idx])
+    if idx == 0:
+      raw = network_query_fn1(pts, viewdirs, embedded_cam, network_fn1)
+    else:
+      raw = network_query_fn2(pts, viewdirs, embedded_cam, network_fn2)
+
     rgb_map, disp_map, acc_map, weights, depth_map, feature_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
     ### Try without coarse and fine network, but just one network and use additional samples from the distribution of the nerf
@@ -841,7 +1057,12 @@ def render_rays(ray_batch,
 
         ### Forward the rendering network with the additional samples
         pts_2 = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_2[...,:,None]
-        raw_2 = network_query_fn[idx](pts_2, viewdirs, embedded_cam, network_fn[idx])
+
+        if idx == 0:
+          raw_2 = network_query_fn1(pts_2, viewdirs, embedded_cam, network_fn1)
+        else:
+          raw_2 = network_query_fn2(pts_2, viewdirs, embedded_cam, network_fn2)        
+
         z_vals = torch.cat((z_vals, z_vals_2), -1)
         raw = torch.cat((raw, raw_2), 1)
         z_vals, indices = z_vals.sort()
@@ -888,10 +1109,13 @@ def render_rays(ray_batch,
         z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
         pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None] # [N_rays, N_samples + N_importance, 3]
 
-        run_fn = network_fn[idx] if network_fine[idx] is None else network_fine[idx]
 
-
-        raw = network_query_fn[idx](pts, viewdirs, embedded_cam, run_fn)
+        if idx == 0:
+          run_fn = network_fn1 if network_fine1 is None else network_fine1
+          raw = network_query_fn1(pts, viewdirs, embedded_cam, run_fn)
+        else:
+          run_fn = network_fn2 if network_fine2 is None else network_fine2
+          raw = network_query_fn2(pts, viewdirs, embedded_cam, run_fn)
 
         rgb_map, disp_map, acc_map, weights, depth_map, feature_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
 
@@ -905,24 +1129,31 @@ def render_rays(ray_batch,
 
         pred_depth_hyp = z_samples
 
-        ### Get features for these samples --> detach it from the compute graph
-        num_samples_for_database = 1
-        if not is_joint:
-            z_vals_importance, u = sample_pdf_return_u(z_vals_mid, weights[...,1:-1], num_samples_for_database, det=(perturb==0.), pytest=pytest, load_u=cached_u)
-        else:
-            z_vals_importance, u = sample_pdf_joint_return_u(z_vals_mid, weights[...,1:-1], num_samples_for_database, det=(perturb==0.), pytest=pytest, load_u=cached_u)
+        # ### Get features for these samples --> detach it from the compute graph
+        # num_samples_for_database = 1
+        # if not is_joint:
+        #     z_vals_importance, u = sample_pdf_return_u(z_vals_mid, weights[...,1:-1], num_samples_for_database, det=(perturb==0.), pytest=pytest, load_u=cached_u)
+        # else:
+        #     z_vals_importance, u = sample_pdf_joint_return_u(z_vals_mid, weights[...,1:-1], num_samples_for_database, det=(perturb==0.), pytest=pytest, load_u=cached_u)
 
-        z_vals_importance, _ = torch.sort(z_vals_importance.detach(), -1)
-        pnm_pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_importance[...,:,None] # [N_rays, N_samples + N_importance, 3]
-        raw_importance = network_query_fn[idx](pnm_pts, viewdirs, embedded_cam, run_fn)
+        # z_vals_importance, _ = torch.sort(z_vals_importance.detach(), -1)
+        # pnm_pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_importance[...,:,None] # [N_rays, N_samples + N_importance, 3]
 
-        ### Get color and features for caching of motion database
-        pnm_rgb_term = torch.sigmoid(raw_importance[...,:3])
-        pnm_feature_term = raw_importance[...,4:]
+        # if idx == 0:
+        #   raw_importance = network_query_fn1(pnm_pts, viewdirs, embedded_cam, run_fn)
+        # else:
+        #   raw_importance = network_query_fn2(pnm_pts, viewdirs, embedded_cam, run_fn)
+
+        # ### Get color and features for caching of motion database
+        # pnm_rgb_term = torch.sigmoid(raw_importance[...,:3])
+        # pnm_feature_term = raw_importance[...,4:]
 
     if not for_motion:
+      # ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights, 'pred_hyp' : pred_depth_hyp,\
+      # 'u':u, 'feature_map': feature_map, 'pnm_rgb_term': pnm_rgb_term, 'pnm_feature_term': pnm_feature_term, 'pnm_points': pnm_pts}
       ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights, 'pred_hyp' : pred_depth_hyp,\
-      'u':u, 'feature_map': feature_map, 'pnm_rgb_term': pnm_rgb_term, 'pnm_feature_term': pnm_feature_term, 'pnm_points': pnm_pts}
+      'u':u, 'feature_map': feature_map}
+
       if retraw:
           ret['raw'] = raw
       if N_importance > 0:
@@ -1057,26 +1288,26 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], images.shape[3]), dtype=bool).to(device)
 
     # create nerf model
-    render_kwargs_train, render_kwargs_test, start, optimizer, optimizer_motion = create_nerf(args, scene_sample_params)
+    render_kwargs_train, render_kwargs_test, start, optimizer, optimizer_motion = create_nerf2(args, scene_sample_params)
 
     print("Loaded models.")
 
-    if use_depth:
-        ##### Initialize depth scale and shift
-        DEPTH_SCALES = torch.autograd.Variable(torch.ones((images.shape[0], images.shape[1], 1), dtype=torch.float, device=images.device)*args.scale_init, requires_grad=True)
-        DEPTH_SHIFTS = torch.autograd.Variable(torch.ones((images.shape[0], images.shape[1], 1), dtype=torch.float, device=images.device)*args.shift_init, requires_grad=True)
+    # if use_depth:
+    #     ##### Initialize depth scale and shift
+    #     DEPTH_SCALES = torch.autograd.Variable(torch.ones((images.shape[0], images.shape[1], 1), dtype=torch.float, device=images.device)*args.scale_init, requires_grad=True)
+    #     DEPTH_SHIFTS = torch.autograd.Variable(torch.ones((images.shape[0], images.shape[1], 1), dtype=torch.float, device=images.device)*args.shift_init, requires_grad=True)
 
-        print(DEPTH_SCALES)
-        print()
-        print(DEPTH_SHIFTS)
-        print()
-        print(DEPTH_SCALES.shape)
-        print(DEPTH_SHIFTS.shape)
+    #     print(DEPTH_SCALES)
+    #     print()
+    #     print(DEPTH_SHIFTS)
+    #     print()
+    #     print(DEPTH_SCALES.shape)
+    #     print(DEPTH_SHIFTS.shape)
 
-        optimizer_ss = torch.optim.Adam(params=(DEPTH_SCALES, DEPTH_SHIFTS,), lr=args.scaleshift_lr)
+    #     optimizer_ss = torch.optim.Adam(params=(DEPTH_SCALES, DEPTH_SHIFTS,), lr=args.scaleshift_lr)
         
-        print("Initialized scale and shift.")
-        ################################
+    #     print("Initialized scale and shift.")
+    #     ################################
 
     # create camera embedding function
     embedcam_fn = None
@@ -1113,7 +1344,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         for idx in range(1, len(i_train), skip_view):
           img_i = i_train[idx]
 
-          pnm_rgb_term, pnm_feature_term, pnm_points, extras = get_database(H_database, W_database, intrinsics[j][img_i], chunk=(args.chunk // 4), c2w=poses[j][img_i], idx = j, **render_kwargs_train)
+          # pnm_rgb_term, pnm_feature_term, pnm_points, extras = get_database(H_database, W_database, intrinsics[j][img_i], chunk=(args.chunk // 4), c2w=poses[j][img_i], idx = j, **render_kwargs_train)
+          rgb, _, _, extras = render(H, W, intrinsics[j][img_i], chunk=(args.chunk // 8), c2w=poses[j][img_i][:3,:4], with_5_9=False, idx = j, **render_kwargs_train)
 
           #### Downsample to get a smaller size
           curr_valid_depth = valid_depths[j][img_i]
@@ -1122,14 +1354,14 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           curr_valid_depth = F.interpolate(curr_valid_depth, size=(H_database, W_database), mode='nearest').squeeze().bool()
 
           is_object_ray = curr_valid_depth 
-          pnm_rgb_term = pnm_rgb_term[is_object_ray].reshape(-1, 3)
+          # pnm_rgb_term = pnm_rgb_term[is_object_ray].reshape(-1, 3)
 
-          print(pnm_rgb_term)
+          # print(pnm_rgb_term)
           print(curr_valid_depth.shape)
           print()
-          print(extras['rgb_map'])
-          print(extras['rgb_map'].shape)
-          cv2.imwrite("test_rgb.jpg", cv2.cvtColor(to8b(extras['rgb_map'].detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+          print(torch.max(rgb))
+          print(rgb.shape)
+          cv2.imwrite("test_rgb.jpg", cv2.cvtColor(to8b(rgb.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
           cv2.imwrite("test_rgb_orig.jpg", cv2.cvtColor(to8b(images[j][img_i].detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
           exit()
 

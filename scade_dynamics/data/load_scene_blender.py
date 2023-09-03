@@ -177,7 +177,7 @@ def read_feature(fname, feat_dim, H, W):
 
     return curr_feat
 
-def load_scene_blender_depth_features(basedir, feature_dir, half_res=True, train_skip=1, test_skip=5, feat_dim=768):
+def load_scene_blender_depth_features(basedir, feature_dir, downsample=2, train_skip=1, test_skip=5, feat_dim=768):
 
     all_imgs = []
     all_depths = []
@@ -204,10 +204,10 @@ def load_scene_blender_depth_features(basedir, feature_dir, half_res=True, train
 
     for frame in meta['frames'][::skip]:
         if len(frame['file_path']) != 0 :
-            if half_res :
-                downsample = 2
-            else:
-                downsample = 1
+            # if half_res :
+            #     downsample = 2
+            # else:
+            #     downsample = 1
 
             img = read_files(os.path.join(basedir, frame['file_path'].split("/")[-1] +".png"), downsample_scale=downsample)
 
