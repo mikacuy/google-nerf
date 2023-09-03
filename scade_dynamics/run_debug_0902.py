@@ -25,7 +25,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF_semantics, get_embedder, get_rays, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF_semantics, MotionPotential, get_embedder, get_rays, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, compute_space_carving_loss, \
     sample_pdf_return_u, sample_pdf_joint_return_u
 from data import create_random_subsets, load_llff_data_multicam_withdepth, convert_depth_completion_scaling_to_m, \
@@ -40,8 +40,7 @@ from sklearn.decomposition import PCA
 import PIL.Image
 from PIL import Image
 
-from mpl_toolkits.mplot3d import axes3d
-import matplotlib.pyplot as plt
+from utils_viz import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
@@ -74,6 +73,16 @@ def run_network(inputs, viewdirs, embedded_cam, fn, embed_fn, embeddirs_fn, bb_c
     outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
     return outputs
 
+def run_motion_potential(inputs, features, fn, bb_center, bb_scale, netchunk=1024*64):
+    """Prepares inputs and applies network 'fn'.
+    """
+    inputs_flat = torch.reshape(inputs, [-1, inputs.shape[-1]])
+    inputs_flat = (inputs_flat - bb_center) * bb_scale
+    embedded = torch.cat([inputs_flat, features], -1)
+
+    outputs_flat = batchify(fn, netchunk)(embedded)
+    outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
+    return outputs
 
 def batchify_rays(rays_flat, chunk=1024*32, use_viewdirs=False, **kwargs):
     """Render rays in smaller minibatches to avoid OOM.
@@ -433,10 +442,6 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
     for n, img_idx in enumerate(img_i):
-
-        if n >2:
-          break
-
         print("Render image {}/{}".format(n + 1, count), end="")
         target = images[img_idx]
         target_depth = depths[img_idx]
@@ -709,14 +714,28 @@ def create_nerf2(args, scene_render_params):
     output_ch = 5 if args.N_importance > 0 else 4
     skips = [4]
 
-    ################
+    #####################
+    ####### Shared ######
+    #####################
     network_query_fn = lambda inputs, viewdirs, embedded_cam, network_fn : run_network(inputs, viewdirs, embedded_cam, network_fn,
                                                                 embed_fn=embed_fn,
                                                                 embeddirs_fn=embeddirs_fn,
                                                                 bb_center=args.bb_center,
                                                                 bb_scale=args.bb_scale,
                                                                 netchunk=args.netchunk_per_gpu*args.n_gpus)
-    ################
+
+    motion_network_query_fn = lambda inputs, features, network_fn : run_motion_potential(inputs, features, network_fn,
+                                                                bb_center=args.bb_center,
+                                                                bb_scale=args.bb_scale,
+                                                                netchunk=args.netchunk_per_gpu*args.n_gpus)
+    grad_vars = []
+    grad_names = []
+
+    seman_grad_vars = []
+    seman_grad_names = []
+
+    motion_vars = []
+    ####################
 
     ####### First NeRF model ######
     model1 = NeRF_semantics(D=args.netdepth, W=args.netwidth,
@@ -724,13 +743,6 @@ def create_nerf2(args, scene_render_params):
                      input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
 
     model1 = nn.DataParallel(model1).to(device)
-    grad_vars = list(model1.parameters())
-
-    grad_vars = []
-    grad_names = []
-
-    seman_grad_vars = []
-    seman_grad_names = []
 
     for name, param in model1.named_parameters():
         if "semantic" in name:
@@ -771,7 +783,14 @@ def create_nerf2(args, scene_render_params):
         # Load model
         model1.load_state_dict(ckpt['network_fn_state_dict'])
         if model_fine1 is not None:
-            model_fine1.load_state_dict(ckpt['network_fine_state_dict'])   
+            model_fine1.load_state_dict(ckpt['network_fine_state_dict'])
+
+    ### Motion model
+    motion_model1 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+    motion_model1 = nn.DataParallel(motion_model1).to(device)
+
+    for name, param in motion_model1.named_parameters():
+        motion_vars.append(param)
     ###################################
 
     ####### Second NeRF model ######
@@ -820,7 +839,14 @@ def create_nerf2(args, scene_render_params):
         # Load model
         model2.load_state_dict(ckpt['network_fn_state_dict'])
         if model_fine2 is not None:
-            model_fine2.load_state_dict(ckpt['network_fine_state_dict'])   
+            model_fine2.load_state_dict(ckpt['network_fine_state_dict'])
+
+    ### Motion model
+    motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+    motion_model2 = nn.DataParallel(motion_model2).to(device)
+
+    for name, param in motion_model2.named_parameters():
+        motion_vars.append(param)
     ################################
 
     # Create optimizer
@@ -829,19 +855,27 @@ def create_nerf2(args, scene_render_params):
     print("Using different learning rate for feature layers.")
     optimizer.add_param_group({"params": seman_grad_vars, "lr":args.seman_lrate})
 
+    optimizer_motion = torch.optim.Adam(params=motion_vars, lr=args.motion_lrate, betas=(0.9, 0.999))
+
     start = 0
     ##########################
 
-    # # Load checkpoints
-    # ckpt = load_checkpoint(args)
-    # if ckpt is not None:
-    #     start = ckpt['global_step']
-    #     # optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+    ### Load checkpoints
+    ckpt = load_checkpoint(args)
+    if ckpt is not None:
+        start = ckpt['global_step']
 
-    #     # Load model
-    #     model.load_state_dict(ckpt['network_fn_state_dict'])
-    #     if model_fine is not None:
-    #         model_fine.load_state_dict(ckpt['network_fine_state_dict'])
+        # Load model
+        model1.load_state_dict(ckpt['network_fn1_state_dict'])
+        if model_fine1 is not None:
+            model_fine1.load_state_dict(ckpt['network_fine1_state_dict'])
+        model2.load_state_dict(ckpt['network_fn2_state_dict'])
+        if model_fine2 is not None:
+            model_fine2.load_state_dict(ckpt['network_fine2_state_dict'])
+
+        motion_model1.load_state_dict(ckpt['network_motion1_state_dict'])
+        motion_model2.load_state_dict(ckpt['network_motion2_state_dict'])
+
 
     ##########################
     embedded_cam = torch.tensor((), device=device)
@@ -855,6 +889,8 @@ def create_nerf2(args, scene_render_params):
         'N_samples' : args.N_samples,
         'network_fn1' : model1,
         'network_fn2' : model2,
+        'network_motion1' : motion_model1,
+        'network_motion2' : motion_model2,
         'use_viewdirs' : args.use_viewdirs,
         'raw_noise_std' : args.raw_noise_std,
     }
@@ -960,11 +996,14 @@ def render_rays(ray_batch,
                 network_fine1=None,
                 network_fine2=None,
                 raw_noise_std=0.,
-                idx = 0,
                 verbose=False,
                 pytest=False,
                 is_joint=False,
                 cached_u= None,
+                idx = 0,
+                network_motion1 = None,
+                network_motion2 = None,
+                motion_network_query_fn1 = None,                
                 for_motion=False):
     """Volumetric rendering.
     Args:
@@ -1351,8 +1390,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         pnm_rgb_term1, pnm_feature_term1, pnm_points1, pnm_rgb_map1 = extras1_unary["pnm_rgb_term"], extras1_unary["pnm_feature_term"], extras1_unary["pnm_points"], extras1_unary["rgb_map_pnm"]
         pnm_rgb_term2, pnm_feature_term2, pnm_points2, pnm_rgb_map2 = extras2_unary["pnm_rgb_term"], extras2_unary["pnm_feature_term"], extras2_unary["pnm_points"], extras2_unary["rgb_map_pnm"]
 
-        # pnm_rgb_term = pnm_rgb_term[is_object_ray].reshape(-1, 3)
-
         pnm_rgb_term1 = torch.mean(pnm_rgb_term1, axis=-2)
         pnm_rgb_term2 = torch.mean(pnm_rgb_term2, axis=-2)
         pnm_feature_term1 = torch.mean(pnm_feature_term1, axis=-2)
@@ -1399,64 +1436,61 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           pred_features_pil.save('test0902_feature2.png')
 
           ### 3D points
-          fig = plt.figure()
-          ax = fig.add_subplot(projection='3d')
+          # plt.clf()
+          # fig = plt.figure()
+          # ax = fig.add_subplot(projection='3d')
           pnm_points1 = pnm_points1[is_object_ray].reshape(-1, 3)
           pts1 = pnm_points1.detach().cpu().numpy().reshape(-1, 3)
+          colors1 = pnm_rgb_term1[is_object_ray].detach().cpu().numpy()
+          save_pointcloud_samples(pts1, colors1, "testviz_rgb1.png")
+
+          # ax.scatter(pts1[:, 0], pts1[:, 1], pts1[:, 2], marker=".", s=0.4, c=c)
+          # ax.scatter(pts1[:, 0], pts1[:, 1], pts1[:, 2], marker=".", s=0.4, c="gray")
+          # ax.set_xlim(-2,2)
+          # ax.set_ylim(-2,2)
+          # ax.set_zlim(-2,1)
+          # ax.set_xlabel('X Label')
+          # ax.set_ylabel('Y Label')
+          # ax.set_zlabel('Z Label')
+          # plt.savefig("test0902_pts1.png")
+
+          # plt.clf()
+          # fig = plt.figure()
+          # ax = fig.add_subplot(projection='3d')
           pnm_points2 = pnm_points2[is_object_ray].reshape(-1, 3)
           pts2 = pnm_points2.detach().cpu().numpy().reshape(-1, 3)
+          colors2 = pnm_rgb_term2[is_object_ray].detach().cpu().numpy()
+          save_pointcloud_samples(pts2, colors2, "testviz_rgb2.png")
 
-          ax.scatter(pts1[:, 0], -pts1[:, 1], pts1[:, 2], marker=".", s=0.1)
-          ax.scatter(pts2[:, 0], -pts2[:, 1], pts2[:, 2], marker="x", s=0.1)
+          # ax.scatter(pts2[:, 0], pts2[:, 1], pts2[:, 2], marker="x", s=0.4, c=c)
+          # ax.set_xlim(-2,2)
+          # ax.set_ylim(-2,2)
+          # ax.set_zlim(-2,2)
+          # ax.set_xlabel('X Label')
+          # ax.set_ylabel('Y Label')
+          # ax.set_zlabel('Z Label')
+          # plt.savefig("test0902_pts2.png")
 
-          ax.set_xlim(-2,2)
-          ax.set_ylim(-2,2)
-          ax.set_zlim(-2,2)
-          ax.set_xlabel('X Label')
-          ax.set_ylabel('Y Label')
-          ax.set_zlabel('Z Label')
+          ####
+          vect = np.zeros(pts1.shape)
+          vect[..., 0] = 0.
+          vect[..., 1] = 0.0
+          vect[..., 2] = 0.4
+          # endpoint_1 = pts1
+          # endpoint_2 = pts1 - vect
+          # line_to_draw = np.array([endpoint_1, endpoint_2])
+          # print(line_to_draw.shape)
 
-          plt.savefig("test0902_pts.png")          
+          # ### Gradient on the line
+          # for pt_idx in range(line_to_draw.shape[1]):
+          #   ax.plot(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= c[pt_idx], linewidth=0.2)
+
+          # plt.savefig("test0902_pts_withlines.png")
+
+          save_motion_vectors(pts1, colors1, vect, "testviz_withlines1.png")
+          save_motion_vectors(pts2, colors2, vect, "testviz_withlines2.png")
 
           exit()
-
-    # if args.cimle_white_balancing and args.load_pretrained:
-    if args.load_pretrained:
-        path = args.pretrained_dir
-        ckpts = [os.path.join(path, f) for f in sorted(os.listdir(path)) if '000.tar' in f]
-        print('Found ckpts', ckpts)
-        ckpt_path = ckpts[-1]
-        print('Reloading pretrained model from', ckpt_path)
-
-        ckpt = torch.load(ckpt_path)
-
-        coarse_model_dict = render_kwargs_train["network_fn"].state_dict()
-        coarse_keys = {k: v for k, v in ckpt['network_fn_state_dict'].items() if k in coarse_model_dict} 
-
-        fine_model_dict = render_kwargs_train["network_fine"].state_dict()
-        fine_keys = {k: v for k, v in ckpt['network_fine_state_dict'].items() if k in fine_model_dict} 
-
-        print(len(coarse_keys.keys()))
-        print(len(fine_keys.keys()))
-
-        print("Num keys loaded:")
-        coarse_model_dict.update(coarse_keys)
-        fine_model_dict.update(fine_keys)
-
-        if use_depth:
-            ## Load scale and shift
-            DEPTH_SHIFTS = torch.load(ckpt_path)["depth_shifts"]
-            DEPTH_SCALES = torch.load(ckpt_path)["depth_scales"] 
-
-            print("Scales:")
-            print(DEPTH_SCALES)
-            print()
-            print("Shifts:")
-            print(DEPTH_SHIFTS)
-
-            print("Loaded depth shift/scale from pretrained model.")
-            ########################################
-        ########################################        
 
     for i in trange(start, N_iters):
 
@@ -1570,101 +1604,26 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             path = os.path.join(args.ckpt_dir, args.expname, '{:06d}.tar'.format(i))
             save_dict = {
                 'global_step': global_step,
-                'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),}
-            if render_kwargs_train['network_fine'] is not None:
-                save_dict['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
+                'optimizer_state_dict': optimizer_motion.state_dict()}
 
-            if args.input_ch_cam > 0:
-                save_dict['embedded_cam'] = embedcam_fn
+            save_dict["network_fn1_state_dict"] = render_kwargs_train['network_fn1'].state_dict()
+            if render_kwargs_train['network_fine1'] is not None:
+              save_dict["network_fine1_state_dict"] = render_kwargs_train['network_fine1'].state_dict()
+            save_dict["network_motion1_state_dict"] = render_kwargs_train['network_motion1'].state_dict()
 
-            if use_depth:
-                save_dict['depth_shifts'] = DEPTH_SHIFTS
-                save_dict['depth_scales'] = DEPTH_SCALES
+            save_dict["network_fn2_state_dict"] = render_kwargs_train['network_fn2'].state_dict()
+            if render_kwargs_train['network_fine2'] is not None:
+              save_dict["network_fine2_state_dict"] = render_kwargs_train['network_fine2'].state_dict()
+            save_dict["network_motion2_state_dict"] = render_kwargs_train['network_motion2'].state_dict()
 
             torch.save(save_dict, path)
-            print('Saved checkpoints at', path)
+            # print('Saved checkpoints at', path)
+            # exit()
         
         if i%args.i_print==0:
-            tb.add_scalars('mse', {'train': img_loss.item()}, i)
+            tb.add_scalars('motion_loss', {'train': loss.item()}, i)
 
-            if args.space_carving_weight > 0.:
-                tb.add_scalars('space_carving_loss', {'train': space_carving_loss.item()}, i)
-
-            tb.add_scalars('psnr', {'train': psnr.item()}, i)
-            if 'rgb0' in extras:
-                tb.add_scalars('mse0', {'train': img_loss0.item()}, i)
-                tb.add_scalars('psnr0', {'train': psnr0.item()}, i)
-
-            if use_depth:
-                scale_mean = torch.mean(DEPTH_SCALES[i_train])
-                shift_mean = torch.mean(DEPTH_SHIFTS[i_train])
-                tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
-                tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
-            
-            if args.feature_weight > 0. :
-                tb.add_scalars('feature_loss', {'train': feature_loss.item()}, i)
-            
-            if 'feature_map_0' in extras:
-                tb.add_scalars('feature_loss_0', {'train': feature_loss_0.item()}, i)
-
-
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()} Feature loss: {feature_loss.item()}")
-            
-        if i%args.i_img==0:
-            # visualize 2 train images
-            _, images_train = render_images_with_metrics(2, i_train, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, embedcam_fn=embedcam_fn, features=features)
-            tb.add_image('train_image',  torch.cat((
-                torchvision.utils.make_grid(images_train["rgbs"], nrow=1), \
-                torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
-                torchvision.utils.make_grid(images_train["depths"], nrow=1), \
-                torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
-            # compute validation metrics and visualize 8 validation images
-            mean_metrics_val, images_val = render_images_with_metrics(2, i_val, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, features=features)
-            tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
-            tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
-            tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
-            tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
-            tb.add_scalar('feature_loss', mean_metrics_val.get("feature_loss"), i)
-            if mean_metrics_val.has("depth_rmse"):
-                tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
-            if 'rgbs0' in images_val:
-                tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
-                tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
-                tb.add_scalar('feature_loss_0', mean_metrics_val.get("feature_loss_0"), i)
-
-            if 'rgbs0' in images_val:
-                tb.add_image('val_image',  torch.cat((
-                    torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
-            else:
-                tb.add_image('val_image',  torch.cat((
-                    torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
-
-        # test at the last iteration
-        if (i + 1) == N_iters:
-            torch.cuda.empty_cache()
-            images = torch.Tensor(test_images).to(device)
-            # depths = torch.Tensor(test_depths).to(device)
-            # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
-            depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
-            valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
-
-            poses = torch.Tensor(test_poses).to(device)
-            intrinsics = torch.Tensor(test_intrinsics).to(device)
-            mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-            write_images_with_metrics(images_test, mean_metrics_test, far, args)
-            tb.flush()
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
 
         global_step += 1
 
@@ -1829,6 +1788,10 @@ def config_parser():
 
     parser.add_argument("--downsample", type=int, default=8,
                         help='downsample images')
+
+    ##### For motion module #####
+    parser.add_argument("--motion_lrate", type=float, default=5e-4, 
+                        help='motion module learning rate')
 
     return parser
 
