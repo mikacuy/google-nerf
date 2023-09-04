@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 import matplotlib.pylab as pl
 
 from plyfile import PlyData, PlyElement
+import os, sys
 
-def save_pointcloud_samples(pcs, colors, fname):
+def save_pointcloud_samples(pcs, colors, fname, save_views=False):
   plt.clf()
   fig = plt.figure()
   ax = fig.add_subplot(projection='3d')
@@ -20,6 +21,16 @@ def save_pointcloud_samples(pcs, colors, fname):
   ax.set_ylabel('Y Label')
   ax.set_zlabel('Z Label')
   plt.savefig(fname)
+
+  if save_views:
+    fname = fname[:-4]
+    vid_dir = os.path.join(fname + "_video")
+    os.makedirs(vid_dir, exist_ok=True)
+
+    for ii in range(0,360,30):
+        ax.view_init(elev=45., azim=ii)
+        plt.savefig(os.path.join(vid_dir, str(ii) + ".png"))
+
 
 def save_motion_vectors(pcs, colors, vecs, fname):
   plt.clf()
@@ -43,7 +54,7 @@ def save_motion_vectors(pcs, colors, vecs, fname):
 
   plt.savefig(fname)
 
-def save_pc_correspondences(pc1, pc2, colors1, colors2, fname):
+def save_pc_correspondences(pc1, pc2, colors1, colors2, fname, save_views=False):
   ### To visualize point clouds side by side
   translation = np.array([0.0, -4.0, 0.0])
 
@@ -53,7 +64,7 @@ def save_pc_correspondences(pc1, pc2, colors1, colors2, fname):
 
   ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker=".", s=0.4, c=colors1)
   ax.set_xlim(-2,2)
-  ax.set_ylim(-4,2)
+  ax.set_ylim(-6,2)
   ax.set_zlim(-2,1)
   ax.set_xlabel('X Label')
   ax.set_ylabel('Y Label')
@@ -66,10 +77,26 @@ def save_pc_correspondences(pc1, pc2, colors1, colors2, fname):
   endpoint_2 = pc2
   line_to_draw = np.array([endpoint_1, endpoint_2])
 
+  skip = 10
+  
   for pt_idx in range(line_to_draw.shape[1]):
-    ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= "blue", linewidth=0.05)
+    if pt_idx % skip != 0 :
+      continue
+
+    # ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= "blue", linewidth=0.05)
+    ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= colors1[pt_idx], linewidth=0.2)
   
   plt.savefig(fname)
+
+  if save_views:
+    fname = fname[:-4]
+    vid_dir = os.path.join(fname + "_video")
+    os.makedirs(vid_dir, exist_ok=True)
+
+    for ii in range(0,360,30):
+        ax.view_init(elev=45., azim=ii)
+        plt.savefig(os.path.join(vid_dir, str(ii) + ".png"))
+
 
 
 def save_point_cloud(pcd, rgb, filename, binary=True):

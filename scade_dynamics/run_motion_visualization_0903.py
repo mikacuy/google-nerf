@@ -4,7 +4,7 @@ mikacuy@stanford.edu
 For Scannet data
 Modified from DDP codebase
 '''
-import os
+import os, sys
 import shutil
 import subprocess
 import math
@@ -1272,7 +1272,7 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
     return batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat
 
 
-def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis, is_init_scales=False, \
+def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis, is_init_scales=False, \
               scales_init=None, shifts_init=None, use_depth=False, features_fnames=None, features=None):
     np.random.seed(0)
     torch.manual_seed(0)
@@ -1330,23 +1330,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     # create nerf model
     render_kwargs_train, render_kwargs_test, start, nerf_grad_vars, optimizer, nerf_grad_names, optimizer_motion = create_nerf2(args, scene_sample_params)
     print("Loaded models.")
-
-    # if use_depth:
-    #     ##### Initialize depth scale and shift
-    #     DEPTH_SCALES = torch.autograd.Variable(torch.ones((images.shape[0], images.shape[1], 1), dtype=torch.float, device=images.device)*args.scale_init, requires_grad=True)
-    #     DEPTH_SHIFTS = torch.autograd.Variable(torch.ones((images.shape[0], images.shape[1], 1), dtype=torch.float, device=images.device)*args.shift_init, requires_grad=True)
-
-    #     print(DEPTH_SCALES)
-    #     print()
-    #     print(DEPTH_SHIFTS)
-    #     print()
-    #     print(DEPTH_SCALES.shape)
-    #     print(DEPTH_SHIFTS.shape)
-
-    #     optimizer_ss = torch.optim.Adam(params=(DEPTH_SCALES, DEPTH_SHIFTS,), lr=args.scaleshift_lr)
-        
-    #     print("Initialized scale and shift.")
-    #     ################################
+    
+    ### To save outputs
+    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_motion_potential")
+    os.makedirs(result_dir, exist_ok=True)
 
     # create camera embedding function
     embedcam_fn = None
@@ -1545,11 +1532,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         ### 1. Whole vector
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
         query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1], -1)
-        print(query_vecs.shape)
-        print(DATABASE2.shape)
+        # print(query_vecs.shape)
+        # print(DATABASE2.shape)
         nn_idx = knn_points(query_vecs.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
         nn_idx = nn_idx[0]
-        print(nn_idx.shape)
+        # print(nn_idx.shape)
 
         # ## 2. Potential only 
         # query_vecs = potentials1 - pnm_points1
@@ -1572,11 +1559,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         colors1 = pnm_rgb_term1.detach().cpu().numpy()
 
         selected_database_entry = torch.gather(PTS_COLOR_ONLY2, 0, nn_idx.repeat(1,6)).squeeze()
-        print(selected_database_entry.shape)
+        # print(selected_database_entry.shape)
         pc2 = selected_database_entry[:, :3].detach().cpu().numpy()
         colors2 = selected_database_entry[:, 3:].detach().cpu().numpy()
-        print(pc2.shape)
-        print(colors2.shape)
+        # print(pc2.shape)
+        # print(colors2.shape)
 
         # save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_nncorres_potentialonly.png")
         # save_pointcloud_samples(pc2, colors2, "testvizscript_pc2_potentialonly.png")
@@ -1584,10 +1571,52 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         # save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_nncorres_wholevec.png")
         # save_pointcloud_samples(pc2, colors2, "testvizscript_pc2_wholevec.png")
 
-        save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_nncorres_wholevec.png")
-        save_pointcloud_samples(pc2, colors2, "testvizscript_pc2_wholevec.png")
+        fname = os.path.join(result_dir, str(img_i))
 
-        save_pointcloud_samples(pc1, colors1, "testvizscript_pc1.png")
+        # save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_nncorres_wholevec.png")
+        # save_pointcloud_samples(pc2, colors2, "testvizscript_pc2_wholevec.png")
+        # save_point_cloud(pc2, to8b(colors2), 'testviz4_pc2nn.ply')
+
+        save_pc_correspondences(pc1, pc2, colors1, colors2, fname + "_nncorres_wholevec.png", save_views=True)
+        ### Make video ###
+        fname_ = fname + "_nncorres_wholevec"
+        vid_dir = os.path.join(fname_ + "_video")
+        imgs = os.listdir(vid_dir)
+        imgs = natsorted(imgs)
+
+        video_file = fname + "_nncorres_wholevec_vid.mp4"
+        imageio.mimsave(video_file,
+                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
+                        fps=5, macro_block_size=1)
+
+        save_pointcloud_samples(pc2, colors2, fname + "_pc2nn.png", save_views=True)
+        ### Make video ###
+        fname_ = fname + "_pc2nn"
+        vid_dir = os.path.join(fname_ + "_video")
+        imgs = os.listdir(vid_dir)
+        imgs = natsorted(imgs)
+
+        video_file = fname + "_pc2nn_vid.mp4"
+        imageio.mimsave(video_file,
+                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
+                        fps=5, macro_block_size=1)
+
+        save_point_cloud(pc2, to8b(colors2), fname + "_pc2nn.ply")
+
+        save_pointcloud_samples(pc1, colors1, fname + "_pc1.png", save_views=True)
+        ### Make video ###
+        fname_ = fname + "_pc1"
+        vid_dir = os.path.join(fname_ + "_video")
+        imgs = os.listdir(vid_dir)
+        imgs = natsorted(imgs)
+
+        video_file = fname + "_pc1_vid.mp4"
+        imageio.mimsave(video_file,
+                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
+                        fps=5, macro_block_size=1)
+
+
+        save_point_cloud(pc1, to8b(colors1), fname + "_pc1.ply")
 
         ### Plot motion
         selected_database_entry_potential = torch.gather(POTENTIAL_ONLY2, 0, nn_idx.repeat(1,3)).squeeze()
@@ -1603,10 +1632,35 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         scene_flow = potentials1 - potential2
         pc2 = pc1 - scene_flow.detach().cpu().numpy()
         colors2 = colors1
-        save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_flow.png")
-        save_pointcloud_samples(pc2, colors2, "testvizscript_pcflowed.png")
+        save_pc_correspondences(pc1, pc2, colors1, colors2, fname + "_flow.png", save_views=True)
+        ### Make video ###
+        fname_ = fname + "_flow"
+        vid_dir = os.path.join(fname_ + "_video")
+        imgs = os.listdir(vid_dir)
+        imgs = natsorted(imgs)
 
-        exit()
+        video_file = fname + "_flow_vid.mp4"
+        imageio.mimsave(video_file,
+                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
+                        fps=5, macro_block_size=1)
+
+        save_pointcloud_samples(pc2, colors2, fname + "_pcflowed.png", save_views=True)
+        ### Make video ###
+        fname_ = fname + "_pcflowed"
+        vid_dir = os.path.join(fname_ + "_video")
+        imgs = os.listdir(vid_dir)
+        imgs = natsorted(imgs)
+
+        video_file = fname + "_pcflowed_vid.mp4"
+        imageio.mimsave(video_file,
+                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
+                        fps=5, macro_block_size=1)
+
+        save_point_cloud(pc2, to8b(colors2), fname + "_pcflowed.ply")
+
+        print("Done with image idx: " + str(img_i) + ".")
+
+        # exit()
 
 
 
@@ -1957,48 +2011,45 @@ def run_nerf():
 
     lpips_alex = LPIPS()
 
-    if args.task == "train":
-        # train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, None, None, all_depth_hypothesis, use_depth=args.use_depth, features_fnames=all_features_fnames, features=all_features)
-        train_nerf(all_images, all_depths, all_valid_depths, all_poses, all_intrinsics, i_split, args, scene_sample_params, lpips_alex, None, None, all_depth_hypothesis, use_depth=args.use_depth, features_fnames=all_features_fnames, features=all_features)
-        exit()
+    viz_nerf(all_images, all_depths, all_valid_depths, all_poses, all_intrinsics, i_split, args, scene_sample_params, lpips_alex, None, None, all_depth_hypothesis, use_depth=args.use_depth, features_fnames=all_features_fnames, features=all_features)
  
-    # create nerf model for testing
-    _, render_kwargs_test, _, nerf_grad_vars, _, nerf_grad_names = create_nerf(args, scene_sample_params)
-    for param in nerf_grad_vars:
-        param.requires_grad = False
+    # # create nerf model for testing
+    # _, render_kwargs_test, _, nerf_grad_vars, _, nerf_grad_names = create_nerf(args, scene_sample_params)
+    # for param in nerf_grad_vars:
+    #     param.requires_grad = False
 
-    # render test set and compute statistics
-    if "test" in args.task: 
-        with_test_time_optimization = False
-        if args.task == "test_opt":
-            with_test_time_optimization = True
+    # # render test set and compute statistics
+    # if "test" in args.task: 
+    #     with_test_time_optimization = False
+    #     if args.task == "test_opt":
+    #         with_test_time_optimization = True
 
-        images = torch.Tensor(images).to(device)
-        poses = torch.Tensor(poses).to(device)
-        intrinsics = torch.Tensor(intrinsics).to(device)
-        i_test = i_test
+    #     images = torch.Tensor(images).to(device)
+    #     poses = torch.Tensor(poses).to(device)
+    #     intrinsics = torch.Tensor(intrinsics).to(device)
+    #     i_test = i_test
 
-        if args.dataset == "blender":
-          depths = torch.Tensor(depths).to(device)
-          valid_depths = torch.Tensor(valid_depths).bool().to(device)          
-        else:
-          depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
-          valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
+    #     if args.dataset == "blender":
+    #       depths = torch.Tensor(depths).to(device)
+    #       valid_depths = torch.Tensor(valid_depths).bool().to(device)          
+    #     else:
+    #       depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+    #       valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
 
-        print("Train split")
-        print(i_train)
-        print("Test split")
-        print(i_test)
+    #     print("Train split")
+    #     print(i_train)
+    #     print("Test split")
+    #     print(i_test)
 
-        mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
-            render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
-        # mean_metrics_test, images_test = render_images_with_metrics(2, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
-        #   render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
-        write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
-    elif args.task == "video":
-        vposes = torch.Tensor(video_poses).to(device)
-        vintrinsics = torch.Tensor(video_intrinsics).to(device)
-        render_video(vposes, H, W, vintrinsics, str(0), args, render_kwargs_test, features=all_features)
+    #     mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+    #         render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
+    #     # mean_metrics_test, images_test = render_images_with_metrics(2, i_test, images, depths, valid_depths, poses, H, W, intrinsics, lpips_alex, args, \
+    #     #   render_kwargs_test, with_test_time_optimization=with_test_time_optimization, features=all_features, mode="test")
+    #     write_images_with_metrics(images_test, mean_metrics_test, far, args, with_test_time_optimization=with_test_time_optimization)
+    # elif args.task == "video":
+    #     vposes = torch.Tensor(video_poses).to(device)
+    #     vintrinsics = torch.Tensor(video_intrinsics).to(device)
+    #     render_video(vposes, H, W, vintrinsics, str(0), args, render_kwargs_test, features=all_features)
 
 if __name__=='__main__':
     torch.set_default_tensor_type('torch.cuda.FloatTensor')

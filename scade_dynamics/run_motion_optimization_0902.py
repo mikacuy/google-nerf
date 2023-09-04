@@ -1359,7 +1359,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     old_learning_rate = init_learning_rate     
     ALL_DATABASE = None
 
-    skip_view = 20
+    skip_view = args.skip_views
     H_database = H
     W_database = W
 
@@ -1695,12 +1695,14 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       DATABASE2 = torch.cat(DATABASE2, 0)
       # print(DATABASE1.shape)
       # print(DATABASE2.shape)
-      
+      # exit()
+
       #######################################
       ####### Sampling from Database ########
       #######################################
       # NUM_Y_TO_SAMPLE = 1024
-      NUM_Y_TO_SAMPLE = 512
+      # NUM_Y_TO_SAMPLE = 512
+      NUM_Y_TO_SAMPLE = args.num_y_to_sample
 
       ### Select random indices 
       indices = torch.randperm(DATABASE1.shape[0])[:NUM_Y_TO_SAMPLE]  
@@ -1925,6 +1927,10 @@ def config_parser():
     ##### For motion module #####
     parser.add_argument("--motion_lrate", type=float, default=5e-4, 
                         help='motion module learning rate')
+    parser.add_argument("--skip_views", type=int, default=20,
+                        help='skip_views')
+    parser.add_argument("--num_y_to_sample", type=int, default=512,
+                        help='num_y_to_sample')
 
     return parser
 
