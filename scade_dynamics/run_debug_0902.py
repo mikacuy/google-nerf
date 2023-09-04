@@ -1443,6 +1443,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           pts1 = pnm_points1.detach().cpu().numpy().reshape(-1, 3)
           colors1 = pnm_rgb_term1[is_object_ray].detach().cpu().numpy()
           save_pointcloud_samples(pts1, colors1, "testviz_rgb1.png")
+          save_point_cloud(pts1, colors1, 'testviz_rgb1.ply')
 
           # ax.scatter(pts1[:, 0], pts1[:, 1], pts1[:, 2], marker=".", s=0.4, c=c)
           # ax.scatter(pts1[:, 0], pts1[:, 1], pts1[:, 2], marker=".", s=0.4, c="gray")
@@ -1461,6 +1462,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           pts2 = pnm_points2.detach().cpu().numpy().reshape(-1, 3)
           colors2 = pnm_rgb_term2[is_object_ray].detach().cpu().numpy()
           save_pointcloud_samples(pts2, colors2, "testviz_rgb2.png")
+          save_point_cloud(pts2, colors2, 'testviz_rgb2.ply')
 
           # ax.scatter(pts2[:, 0], pts2[:, 1], pts2[:, 2], marker="x", s=0.4, c=c)
           # ax.set_xlim(-2,2)
