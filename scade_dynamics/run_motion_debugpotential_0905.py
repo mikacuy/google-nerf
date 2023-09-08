@@ -45,8 +45,8 @@ from utils_viz import *
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
 
-# IS_MOTION_DEBUG = True
-IS_MOTION_DEBUG = False
+IS_MOTION_DEBUG = True
+# IS_MOTION_DEBUG = False
 
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
@@ -1450,10 +1450,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           # print(pnm_rgb_map2.shape)
           # exit()
 
-          cv2.imwrite("testviz4_pnm1.jpg", cv2.cvtColor(to8b(pnm_rgb_term1.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
-          cv2.imwrite("testviz4_pnm2.jpg", cv2.cvtColor(to8b(pnm_rgb_term2.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
-          cv2.imwrite("testviz4_pnmrgb1.jpg", cv2.cvtColor(to8b(pnm_rgb_map1.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
-          cv2.imwrite("testviz4_pnmrgb2.jpg", cv2.cvtColor(to8b(pnm_rgb_map2.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+          cv2.imwrite("testviz5_pnm1.jpg", cv2.cvtColor(to8b(pnm_rgb_term1.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+          cv2.imwrite("testviz5_pnm2.jpg", cv2.cvtColor(to8b(pnm_rgb_term2.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+          cv2.imwrite("testviz5_pnmrgb1.jpg", cv2.cvtColor(to8b(pnm_rgb_map1.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+          cv2.imwrite("testviz5_pnmrgb2.jpg", cv2.cvtColor(to8b(pnm_rgb_map2.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
 
           ### Feature
           pred_pca_descriptors = pca.transform(pnm_feature_term1.detach().cpu().numpy().reshape((-1, args.feat_dim)))
@@ -1461,52 +1461,52 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           pred_features = pred_pca_descriptors[:, :, -3:]
           pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
           pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
-          pred_features_pil.save('testviz4_feature1.png')
+          pred_features_pil.save('testviz5_feature1.png')
 
           pred_pca_descriptors = pca.transform(pnm_feature_term2.detach().cpu().numpy().reshape((-1, args.feat_dim)))
           pred_pca_descriptors = pred_pca_descriptors.reshape((H, W, -1)) 
           pred_features = pred_pca_descriptors[:, :, -3:]
           pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
           pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
-          pred_features_pil.save('testviz4_feature2.png')
+          pred_features_pil.save('testviz5_feature2.png')
 
           ### 3D points
           pnm_points1_ = pnm_points1[is_object_ray1].reshape(-1, 3)
           pts1 = pnm_points1_.detach().cpu().numpy().reshape(-1, 3)
           colors1 = pnm_rgb_term1[is_object_ray1].detach().cpu().numpy()
-          save_pointcloud_samples(pts1, colors1, "testviz4_rgb1.png")
+          save_pointcloud_samples(pts1, colors1, "testviz5_rgb1.png")
 
           # print(colors1.shape)
           # c = cv2.cvtColor(to8b(colors1), cv2.COLOR_RGB2BGR)
           # print(c.shape)
           # print(to8b(colors1).shape)
           # exit()
-          save_point_cloud(pts1, to8b(colors1), 'testviz4_rgb1.ply')
+          save_point_cloud(pts1, to8b(colors1), 'testviz5_rgb1.ply')
           print(torch.max(pnm_rgb_term1[is_object_ray1]))
 
           pnm_points2_ = pnm_points2[is_object_ray2].reshape(-1, 3)
           pts2 = pnm_points2_.detach().cpu().numpy().reshape(-1, 3)
           colors2 = pnm_rgb_term2[is_object_ray2].detach().cpu().numpy()
-          save_pointcloud_samples(pts2, colors2, "testviz4_rgb2.png")
+          save_pointcloud_samples(pts2, colors2, "testviz5_rgb2.png")
 
           # c = cv2.cvtColor(to8b(colors2), cv2.COLOR_RGB2BGR)
 
-          save_point_cloud(pts2, to8b(colors2), 'testviz4_rgb2.ply')
+          save_point_cloud(pts2, to8b(colors2), 'testviz5_rgb2.ply')
           print(torch.max(pnm_rgb_term2[is_object_ray2]))
 
-          ####
-          vect1 = np.zeros(pts1.shape)
-          vect1[..., 0] = 0.
-          vect1[..., 1] = 0.25
-          vect1[..., 2] = 0.0
+          # ####
+          # vect1 = np.zeros(pts1.shape)
+          # vect1[..., 0] = 0.
+          # vect1[..., 1] = 0.25
+          # vect1[..., 2] = 0.0
 
-          vect2 = np.zeros(pts2.shape)
-          vect2[..., 0] = 0.
-          vect2[..., 1] = 0.25
-          vect2[..., 2] = 0.0
+          # vect2 = np.zeros(pts2.shape)
+          # vect2[..., 0] = 0.
+          # vect2[..., 1] = 0.25
+          # vect2[..., 2] = 0.0
 
-          save_motion_vectors(pts1, colors1, vect1, "testviz4_withlines1.png")
-          save_motion_vectors(pts2, colors2, vect2, "testviz4_withlines2.png")
+          # save_motion_vectors(pts1, colors1, vect1, "testviz4_withlines1.png")
+          # save_motion_vectors(pts2, colors2, vect2, "testviz4_withlines2.png")
         
         #### Construct database elements ####
         ## Database 1
@@ -1516,7 +1516,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         motion_query_func = render_kwargs_train["motion_network_query_fn"]
         motion_model1 = render_kwargs_train["network_motion1"]
-        potentials1 = motion_query_func(pnm_points1, pnm_feature_term1, motion_model1)
+
+        potentials1 = motion_query_func(pnm_points1, pnm_feature_term1*0.5, motion_model1)
 
         pnm_rgb_term2 = pnm_rgb_term2[is_object_ray2].reshape(-1, 3)
         pnm_feature_term2 = pnm_feature_term2[is_object_ray2].reshape(-1, args.feat_dim)
@@ -1524,7 +1525,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         motion_query_func = render_kwargs_train["motion_network_query_fn"]
         motion_model2 = render_kwargs_train["network_motion2"]
-        potentials2 = motion_query_func(pnm_points2, pnm_feature_term2, motion_model2)
+        
+        potentials2 = motion_query_func(pnm_points2, pnm_feature_term2*0.5, motion_model2)
+        
+        # ### DEBUG --- Overwrite to set potentials to a constant
+        # potentials1 = torch.ones(potentials1.shape).to(potentials1.device) * 1.5
+        # potentials2 = torch.ones(potentials2.shape).to(potentials2.device)
 
         if IS_MOTION_DEBUG:
           print(potentials1)
@@ -1532,14 +1538,38 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           print(potentials2)
           print(potentials2.shape)
 
+          ### Test smoothness of potential field
+          pts1_dummy = torch.zeros(pnm_points1.shape).to(pnm_points1.device)
+          feature1_dummy = torch.ones(pnm_feature_term1.shape).to(pnm_feature_term1.device)
+          potentials1_ptsdummy = motion_query_func(pts1_dummy, pnm_feature_term1, motion_model1)
+          potentials1_featuredummy = motion_query_func(pnm_points1, feature1_dummy, motion_model1)
+
+          pts2_dummy = torch.zeros(pnm_points2.shape).to(pnm_points2.device)
+          feature2_dummy = torch.ones(pnm_feature_term2.shape).to(pnm_feature_term2.device)
+          potentials2_ptsdummy = motion_query_func(pts2_dummy, pnm_feature_term2, motion_model2)
+          potentials2_featuredummy = motion_query_func(pnm_points2, feature2_dummy, motion_model2)
+
           ### Visualize potential initialization
           pts1 = pnm_points1.detach().cpu().numpy().reshape(-1, 3)
           colors1 = pnm_rgb_term1.detach().cpu().numpy()
-          save_motion_vectors(pts1, colors1, potentials1.detach().cpu().numpy(), "testviz4_init_potentials1.png")
+          save_motion_vectors(pts1, colors1, potentials1.detach().cpu().numpy(), "testviz6_init_potentials1_s05.png")
+          save_motion_vectors(pts1, colors1, potentials1.detach().cpu().numpy(), "testviz6_init_potentials1_endpt_s05.png", is_vec=False)
+
+          # save_motion_vectors(pts1, colors1, potentials1_ptsdummy.detach().cpu().numpy(), "testviz5_init_potentials1_ptsdummy.png")
+          # save_motion_vectors(pts1, colors1, potentials1_ptsdummy.detach().cpu().numpy(), "testviz5_init_potentials1_endpt_ptsdummy.png", is_vec=False)
+          # save_motion_vectors(pts1, colors1, potentials1_featuredummy.detach().cpu().numpy(), "testviz5_init_potentials1_featuredummy.png")
+          # save_motion_vectors(pts1, colors1, potentials1_featuredummy.detach().cpu().numpy(), "testviz5_init_potentials1_endpt_featuredummy.png", is_vec=False)
 
           pts2 = pnm_points2.detach().cpu().numpy().reshape(-1, 3)
           colors2 = pnm_rgb_term2.detach().cpu().numpy()
-          save_motion_vectors(pts2, colors2, potentials2.detach().cpu().numpy(), "testviz4_init_potentials2.png")
+          save_motion_vectors(pts2, colors2, potentials2.detach().cpu().numpy(), "testviz6_init_potentials2_s05.png")
+          save_motion_vectors(pts2, colors2, potentials2.detach().cpu().numpy(), "testviz6_init_potentials2_endpt_s05.png", is_vec=False)
+
+          # save_motion_vectors(pts2, colors2, potentials2_ptsdummy.detach().cpu().numpy(), "testviz5_init_potentials2_ptsdummy.png")
+          # save_motion_vectors(pts2, colors2, potentials2_ptsdummy.detach().cpu().numpy(), "testviz5_init_potentials2_endpt_ptsdummy.png", is_vec=False)
+          # save_motion_vectors(pts2, colors2, potentials2_featuredummy.detach().cpu().numpy(), "testviz5_init_potentials2_featuredummy.png")
+          # save_motion_vectors(pts2, colors2, potentials2_featuredummy.detach().cpu().numpy(), "testviz5_init_potentials2_endpt_featuredummy.png", is_vec=False)
+
           exit()
 
 
@@ -1599,6 +1629,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     output_dict = {"frame1": SCALE_FACTORS[0], "frame2": SCALE_FACTORS[1]}
     fname = os.path.join(args.ckpt_dir, args.expname, "database_scales.npy")
     np.save(fname, output_dict)
+    exit()
 
     # #### Debug load scales
     # input_dict = np.load(fname, allow_pickle=True)
@@ -1710,18 +1741,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       ### Get argmin
       distances = torch.norm(selected_entries.unsqueeze(1) - DATABASE2.unsqueeze(0), p=2, dim=-1) ### (256x200k) dynamic --> (200k, 200k) dynamic
-      distances_min, min_indices = torch.min(distances, axis=-1)
-
-      with torch.no_grad():
-      ### To log individual energy losses
-        selected_database_entries = torch.gather(DATABASE2, 0, min_indices.unsqueeze(-1).repeat(1, 3 + args.feat_dim + 3)).squeeze()
-        curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1 = torch.split(selected_entries, [3, args.feat_dim, 3], dim=-1)
-        curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2 = torch.split(selected_database_entries, [3, args.feat_dim, 3], dim=-1)
-
-        rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
-        feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
-        pd_agreement_energy = torch.mean(torch.norm(curr_potentials_term1 - curr_potentials_term2, p=2, dim=-1))
-
+      distances_min = torch.min(distances, axis=-1)[0]
+      # print(distances.shape)
+      # print(distances_min.shape)
+      
       # Compute loss and optimize
       optimizer_motion.zero_grad()
 
@@ -1754,11 +1777,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       
       if i%args.i_print==0:
           tb.add_scalars('motion_loss', {'train': loss.item()}, i)
-          tb.add_scalars('pd_agreement_term', {'train': pd_agreement_energy.item()}, i)
-          tb.add_scalars('rgb_term', {'train': rgb_energy.item()}, i)
-          tb.add_scalars('feature_term', {'train': feature_energy.item()}, i)
           # tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
-          print(f"[TRAIN] Iter: {i} Loss: {loss.item()} | PD_agreement_term: {pd_agreement_energy.item()}| RGB_term: {rgb_energy.item()} | Feature_term: {feature_energy.item()}")
+          print(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
 
       global_step += 1
 

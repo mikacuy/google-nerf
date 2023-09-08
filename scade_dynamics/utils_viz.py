@@ -32,7 +32,7 @@ def save_pointcloud_samples(pcs, colors, fname, save_views=False):
         plt.savefig(os.path.join(vid_dir, str(ii) + ".png"))
 
 
-def save_motion_vectors(pcs, colors, vecs, fname):
+def save_motion_vectors(pcs, colors, vecs, fname, is_vec=True):
   plt.clf()
   fig = plt.figure()
   ax = fig.add_subplot(projection='3d')
@@ -46,11 +46,19 @@ def save_motion_vectors(pcs, colors, vecs, fname):
   ax.set_zlabel('Z Label')
 
   endpoint_1 = pcs
-  endpoint_2 = pcs - vecs
+
+  if is_vec:
+    endpoint_2 = pcs - vecs
+  else:
+    endpoint_2 = - vecs
   line_to_draw = np.array([endpoint_1, endpoint_2])
 
+  skip = 100
+  
   for pt_idx in range(line_to_draw.shape[1]):
-    ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= "blue", linewidth=0.2)
+    if pt_idx % skip != 0 :
+      continue
+    ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= colors[pt_idx], linewidth=0.8)
 
   plt.savefig(fname)
 
@@ -77,14 +85,14 @@ def save_pc_correspondences(pc1, pc2, colors1, colors2, fname, save_views=False)
   endpoint_2 = pc2
   line_to_draw = np.array([endpoint_1, endpoint_2])
 
-  skip = 10
+  skip = 200
   
   for pt_idx in range(line_to_draw.shape[1]):
     if pt_idx % skip != 0 :
       continue
 
     # ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= "blue", linewidth=0.05)
-    ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= colors1[pt_idx], linewidth=0.2)
+    ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= colors1[pt_idx], linewidth=0.8)
   
   plt.savefig(fname)
 

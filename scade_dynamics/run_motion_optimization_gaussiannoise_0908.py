@@ -1542,7 +1542,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           save_motion_vectors(pts2, colors2, potentials2.detach().cpu().numpy(), "testviz4_init_potentials2.png")
           exit()
 
-
         curr_entries1 = torch.cat([pnm_rgb_term1, pnm_feature_term1, potentials1 - pnm_points1], -1)
         curr_entries2 = torch.cat([pnm_rgb_term2, pnm_feature_term2, potentials2 - pnm_points2], -1)
 
@@ -1680,12 +1679,16 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         motion_model2 = render_kwargs_train["network_motion2"]
         potentials2 = motion_query_func(pnm_points2, pnm_feature_term2, motion_model2)
 
+        ### Add noise in database construction for randomness in neighborhood
+        eps1_noise = torch.normal(0, args.pnm_std, size=(pnm_rgb_term1.shape[0], 1))
+        eps2_noise = torch.normal(0, args.pnm_std, size=(pnm_rgb_term2.shape[0], 1))
+
         #### Construct database elements ####
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1], -1)
+        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1, eps1_noise], -1)
 
         weight_rgb2, weight_features2, weight_potentials2 = SCALE_FACTORS[1]
-        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2, pnm_feature_term2 * weight_features2, (potentials2 - pnm_points2) * weight_potentials2], -1)
+        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2, pnm_feature_term2 * weight_features2, (potentials2 - pnm_points2) * weight_potentials2, eps2_noise], -1)
 
         DATABASE1.append(curr_entries1)
         DATABASE2.append(curr_entries2)
@@ -1700,23 +1703,28 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       #######################################
       ####### Sampling from Database ########
       #######################################
-      # NUM_Y_TO_SAMPLE = 1024
-      # NUM_Y_TO_SAMPLE = 512
       NUM_Y_TO_SAMPLE = args.num_y_to_sample
 
-      ### Select random indices 
+      ### Select random indices --> right now we only take indices from database 1
       indices = torch.randperm(DATABASE1.shape[0])[:NUM_Y_TO_SAMPLE]  
       selected_entries = DATABASE1[indices]   
 
-      ### Get argmin
+      ### Make noise 0 for the query vectors
+      selected_entries[..., -1] = 0.0
+
+      ### Get argmin based on perturbed neighbors
       distances = torch.norm(selected_entries.unsqueeze(1) - DATABASE2.unsqueeze(0), p=2, dim=-1) ### (256x200k) dynamic --> (200k, 200k) dynamic
-      distances_min, min_indices = torch.min(distances, axis=-1)
+      _, min_indices = torch.min(distances, axis=-1)
+
+      ### Calculate loss without the noise term
+      selected_database_entries = torch.gather(DATABASE2, 0, min_indices.unsqueeze(-1).repeat(1, 3 + args.feat_dim + 3 + 1)).squeeze()
+      distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
+
 
       with torch.no_grad():
       ### To log individual energy losses
-        selected_database_entries = torch.gather(DATABASE2, 0, min_indices.unsqueeze(-1).repeat(1, 3 + args.feat_dim + 3)).squeeze()
-        curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1 = torch.split(selected_entries, [3, args.feat_dim, 3], dim=-1)
-        curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2 = torch.split(selected_database_entries, [3, args.feat_dim, 3], dim=-1)
+        curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1, _ = torch.split(selected_entries, [3, args.feat_dim, 3, 1], dim=-1)
+        curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2, _ = torch.split(selected_database_entries, [3, args.feat_dim, 3, 1], dim=-1)
 
         rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
         feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
@@ -1942,6 +1950,9 @@ def config_parser():
                         help='skip_views')
     parser.add_argument("--num_y_to_sample", type=int, default=512,
                         help='num_y_to_sample')
+
+    parser.add_argument("--pnm_std", type=float, default=1.0, 
+                        help='standard deviation for the noise term in distance computation')
 
     return parser
 
