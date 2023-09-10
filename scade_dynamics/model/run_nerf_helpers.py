@@ -342,6 +342,34 @@ class MotionPotential(nn.Module):
 
         return potential    
 
+class MotionPotential_nopos(nn.Module):
+    def __init__(self, input_ch=3, input_ch_feature=384, output_ch=3):
+        """ 
+        """
+        super(MotionPotential_nopos, self).__init__()
+        self.input_ch = input_ch
+        self.input_ch_feature = input_ch_feature
+        
+        self.motion_mlp = nn.ModuleList(
+            [DenseLayer(input_ch_feature, 512, activation="relu")] + \
+            [DenseLayer(512, 128, activation="relu")] 
+            )
+        
+        self.output_linear = DenseLayer(128, output_ch, activation="linear")
+
+    def forward(self, x):
+        input_pts, input_features = torch.split(x, [self.input_ch, self.input_ch_feature], dim=-1)
+
+        ### Only use features
+        h = input_features
+        for i, l in enumerate(self.motion_mlp):
+            h = self.motion_mlp[i](h)
+            h = F.relu(h)
+            
+        potential = self.output_linear(h)
+
+        return potential  
+
 def select_coordinates(coords, N_rand):
     coords = torch.reshape(coords, [-1,2])  # (H * W, 2)
     select_inds = np.random.choice(coords.shape[0], size=[N_rand], replace=False)  # (N_rand,)

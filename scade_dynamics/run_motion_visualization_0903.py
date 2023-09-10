@@ -1604,6 +1604,16 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
         save_point_cloud(pc2, to8b(colors2), fname + "_pc2nn.ply")
 
         save_pointcloud_samples(pc1, colors1, fname + "_pc1.png", save_views=True)
+
+        potentials1_ = potentials1.detach().cpu().numpy()
+        potential_color = (potentials1_ - np.min(potentials1_, axis=0))/(np.max(potentials1_, axis=0) - np.min(potentials1_, axis=0))
+        save_pointcloud_samples(pc1, potential_color, fname + "_potential.png", save_views=True)
+
+        potentials2_ = potentials2.detach().cpu().numpy()
+        potential_color = (potentials2_ - np.min(potentials2_, axis=0))/(np.max(potentials2_, axis=0) - np.min(potentials2_, axis=0))
+        pc_frame2 = pnm_points2.detach().cpu().numpy()
+        save_pointcloud_samples(pc_frame2, potential_color, fname + "_frame2_potential.png", save_views=True)
+
         ### Make video ###
         fname_ = fname + "_pc1"
         vid_dir = os.path.join(fname_ + "_video")

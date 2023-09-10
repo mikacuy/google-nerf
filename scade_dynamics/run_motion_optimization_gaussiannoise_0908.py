@@ -1613,7 +1613,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     # print(weight_features1)
     # print(weight_potentials1)
     # exit()
-
     #############################
     
 
