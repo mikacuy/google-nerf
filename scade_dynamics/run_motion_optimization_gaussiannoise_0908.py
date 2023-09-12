@@ -1615,6 +1615,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     # exit()
     #############################
     
+    visu_dir = os.path.join(args.ckpt_dir, args.expname, "training_visu")
+    os.makedirs(visu_dir, exist_ok=True)
 
     ####################################
     ##### Training Motion Potential ####
@@ -1624,6 +1626,16 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       DATABASE1 = []
       DATABASE2 = []
+
+      if args.visu:
+        POTENTIAL_ONLY1 = []
+        POTENTIAL_ONLY2 = []
+
+        PTS_COLOR_ONLY1 = []
+        PTS_COLOR_ONLY2 = []
+
+        NOISE_VECTOR1 = []
+        NOISE_VECTOR2 = []
 
       #######################################
       ###### Constructing the Database ######
@@ -1679,8 +1691,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         potentials2 = motion_query_func(pnm_points2, pnm_feature_term2, motion_model2)
 
         ### Add noise in database construction for randomness in neighborhood
-        eps1_noise = torch.normal(0, args.pnm_std, size=(pnm_rgb_term1.shape[0], 1))
-        eps2_noise = torch.normal(0, args.pnm_std, size=(pnm_rgb_term2.shape[0], 1))
+        eps1_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term1.shape[0], 1))
+        eps2_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term2.shape[0], 1))
 
         #### Construct database elements ####
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
@@ -1691,13 +1703,28 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         DATABASE1.append(curr_entries1)
         DATABASE2.append(curr_entries2)
+
+        if args.visu:
+          with torch.no_grad():
+            POTENTIAL_ONLY1.append((potentials1 - pnm_points1))
+            POTENTIAL_ONLY2.append((potentials2 - pnm_points2))
+            PTS_COLOR_ONLY1.append(torch.cat([pnm_points1, pnm_rgb_term1], dim=-1))
+            PTS_COLOR_ONLY2.append(torch.cat([pnm_points2, pnm_rgb_term2], dim=-1))
+            NOISE_VECTOR1.append(eps1_noise)
+            NOISE_VECTOR2.append(eps2_noise)
+
         #####################################
 
       DATABASE1 = torch.cat(DATABASE1, 0)
       DATABASE2 = torch.cat(DATABASE2, 0)
-      # print(DATABASE1.shape)
-      # print(DATABASE2.shape)
-      # exit()
+
+      if args.visu:
+        POTENTIAL_ONLY1 = torch.cat(POTENTIAL_ONLY1, 0)
+        POTENTIAL_ONLY2 = torch.cat(POTENTIAL_ONLY2, 0)
+        PTS_COLOR_ONLY1 = torch.cat(PTS_COLOR_ONLY1, 0)
+        PTS_COLOR_ONLY2 = torch.cat(PTS_COLOR_ONLY2, 0)
+        NOISE_VECTOR1 = torch.cat(NOISE_VECTOR1, 0)
+        NOISE_VECTOR2 = torch.cat(NOISE_VECTOR2, 0)
 
       #######################################
       ####### Sampling from Database ########
@@ -1737,6 +1764,34 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       loss.backward()
       optimizer_motion.step()
+
+      # Visu during training
+      if i % 100 == 2 and args.visu:
+        fname = os.path.join(visu_dir, str(i))
+
+        pc2 = PTS_COLOR_ONLY2[:, :3].detach().cpu().numpy()
+        noise_color_scale = torch.abs(NOISE_VECTOR2).detach().cpu().numpy()
+
+        ### normalize noise
+        # noise_color_scale =  (noise_color_scale - np.min(noise_color_scale, axis=0))/(np.percentile(noise_color_scale, 90) - np.min(noise_color_scale, axis=0))
+        noise_color_scale =  (noise_color_scale)/(np.percentile(noise_color_scale, 90))
+        noise_color_scale = np.clip(noise_color_scale, 0.0, 1.0)
+
+        save_pointcloud_noise(pc2, noise_color_scale, fname + "_noisesamples.png", size=0.4)
+
+        ### plot nearest neighbor of the samples
+        pc1 = PTS_COLOR_ONLY1[:, :3].detach().cpu().numpy()
+        colors1 = PTS_COLOR_ONLY1[:, 3:].detach().cpu().numpy()
+
+        selected_queries = torch.gather(PTS_COLOR_ONLY1, 0, indices.unsqueeze(-1).repeat(1,6)).squeeze()
+        samples = selected_queries[:, :3].detach().cpu().numpy()
+        samples_colors = selected_queries[:, 3:].detach().cpu().numpy()
+        
+        selected_neighbors = torch.gather(PTS_COLOR_ONLY2, 0, min_indices.unsqueeze(-1).repeat(1, 6)).squeeze()
+        selected_neighbors = selected_neighbors[:, :3].detach().cpu().numpy()
+        selected_neighbors_noise = noise_color_scale[min_indices.detach().cpu().numpy()]
+        
+        save_pc_correspondences_samples_iteration(pc1, pc2, colors1, noise_color_scale, samples, samples_colors, selected_neighbors, selected_neighbors_noise, fname + "_nn.png")
 
       # write logs
       if i%args.i_weights==0:
@@ -1952,6 +2007,11 @@ def config_parser():
 
     parser.add_argument("--pnm_std", type=float, default=1.0, 
                         help='standard deviation for the noise term in distance computation')
+    parser.add_argument("--pnm_mean", type=float, default=0.0, 
+                        help='mean for the noise term in distance computation')
+
+    ### Enable visu in training
+    parser.add_argument('--visu', default= False, type=bool)
 
     return parser
 

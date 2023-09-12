@@ -25,7 +25,7 @@ import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
 
-from model import NeRF_semantics, MotionPotential, MotionPotential_nopos, get_embedder, get_rays, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
+from model import NeRF_semantics, MotionPotential, get_embedder, get_rays, sample_pdf, sample_pdf_joint, img2mse, mse2psnr, to8b, \
     compute_depth_loss, select_coordinates, to16b, compute_space_carving_loss, \
     sample_pdf_return_u, sample_pdf_joint_return_u
 from data import create_random_subsets, load_llff_data_multicam_withdepth, convert_depth_completion_scaling_to_m, \
@@ -789,10 +789,7 @@ def create_nerf2(args, scene_render_params):
             model_fine1.load_state_dict(ckpt['network_fine_state_dict'])
 
     ### Motion model
-    if not args.potential_nopos:
-      motion_model1 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
-    else:
-      motion_model1 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+    motion_model1 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
     motion_model1 = nn.DataParallel(motion_model1).to(device)
 
     for name, param in motion_model1.named_parameters():
@@ -848,10 +845,7 @@ def create_nerf2(args, scene_render_params):
             model_fine2.load_state_dict(ckpt['network_fine_state_dict'])
 
     ### Motion model
-    if not args.potential_nopos:
-      motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
-    else:
-      motion_model2 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+    motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
     motion_model2 = nn.DataParallel(motion_model2).to(device)
 
     for name, param in motion_model2.named_parameters():
@@ -1338,7 +1332,7 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
     print("Loaded models.")
     
     ### To save outputs
-    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_motion_potential")
+    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_motion_potential_wnoise")
     os.makedirs(result_dir, exist_ok=True)
 
     # create camera embedding function
@@ -1373,18 +1367,124 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       comp_max = gt_pca_descriptors.max(axis=(0, 1, 2))[-3:]
       ##########################################
 
+    FEAT_SCALE = 1.0
+
+    #############################
+    ##### Computing for STD #####
+    #############################
+
+    print("Computing STD for scaling of dimensions.")
+    SCALE_FACTORS = []
+
+    with torch.no_grad():
+      DATABASE1 = []
+      DATABASE2 = []
+
+      for idx in range(0, len(i_train), skip_view):
+        img_i = i_train[idx]      
+
+        #### Downsample to get a smaller size
+        curr_valid_depth1 = valid_depths[0][img_i]
+        curr_valid_depth1 = curr_valid_depth1.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0).float()
+        curr_valid_depth1 = F.interpolate(curr_valid_depth1, size=(H_database, W_database), mode='nearest').squeeze().bool()
+        is_object_ray1 = curr_valid_depth1 
+
+        curr_valid_depth2 = valid_depths[1][img_i]
+        curr_valid_depth2 = curr_valid_depth2.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0).float()
+        curr_valid_depth2 = F.interpolate(curr_valid_depth2, size=(H_database, W_database), mode='nearest').squeeze().bool()
+        is_object_ray2 = curr_valid_depth2 
+
+        ### Sampled for unary potentials
+        _, _, _, extras1_unary = render(H_database, W_database, intrinsics[0][img_i], chunk=(args.chunk // 8), c2w=poses[0][img_i][:3,:4], with_5_9=False, idx=0, for_motion=True, **render_kwargs_train)
+        _, _, _, extras2_unary = render(H_database, W_database, intrinsics[1][img_i], chunk=(args.chunk // 8), c2w=poses[1][img_i][:3,:4], with_5_9=False, idx=1, for_motion=True, **render_kwargs_train)        
+
+        pnm_rgb_term1, pnm_feature_term1, pnm_points1, pnm_rgb_map1 = extras1_unary["pnm_rgb_term"], extras1_unary["pnm_feature_term"], extras1_unary["pnm_points"], extras1_unary["rgb_map_pnm"]
+        pnm_rgb_term2, pnm_feature_term2, pnm_points2, pnm_rgb_map2 = extras2_unary["pnm_rgb_term"], extras2_unary["pnm_feature_term"], extras2_unary["pnm_points"], extras2_unary["rgb_map_pnm"]
+
+        ### This is taking the average
+        pnm_rgb_term1 = torch.mean(pnm_rgb_term1, axis=-2)
+        pnm_rgb_term2 = torch.mean(pnm_rgb_term2, axis=-2)
+        pnm_feature_term1 = torch.mean(pnm_feature_term1, axis=-2)
+        pnm_feature_term2 = torch.mean(pnm_feature_term2, axis=-2)
+        pnm_points1 = torch.mean(pnm_points1, axis=-2)
+        pnm_points2 = torch.mean(pnm_points2, axis=-2)
+        
+        #### Construct database elements ####
+        ## Database 1
+        pnm_rgb_term1 = pnm_rgb_term1[is_object_ray1].reshape(-1, 3)
+        pnm_feature_term1 = pnm_feature_term1[is_object_ray1].reshape(-1, args.feat_dim)
+        pnm_points1 = pnm_points1[is_object_ray1].reshape(-1, 3)
+
+        motion_query_func = render_kwargs_train["motion_network_query_fn"]
+        motion_model1 = render_kwargs_train["network_motion1"]
+
+        potentials1 = motion_query_func(pnm_points1, pnm_feature_term1*FEAT_SCALE, motion_model1)
+
+        pnm_rgb_term2 = pnm_rgb_term2[is_object_ray2].reshape(-1, 3)
+        pnm_feature_term2 = pnm_feature_term2[is_object_ray2].reshape(-1, args.feat_dim)
+        pnm_points2 = pnm_points2[is_object_ray2].reshape(-1, 3)
+
+        motion_query_func = render_kwargs_train["motion_network_query_fn"]
+        motion_model2 = render_kwargs_train["network_motion2"]
+        
+        potentials2 = motion_query_func(pnm_points2, pnm_feature_term2*FEAT_SCALE, motion_model2)
+        
+        # ### DEBUG --- Overwrite to set potentials to a constant
+        # potentials1 = torch.ones(potentials1.shape).to(potentials1.device) * 1.5
+        # potentials2 = torch.ones(potentials2.shape).to(potentials2.device)
+
+        curr_entries1 = torch.cat([pnm_rgb_term1, pnm_feature_term1, potentials1 - pnm_points1], -1)
+        curr_entries2 = torch.cat([pnm_rgb_term2, pnm_feature_term2, potentials2 - pnm_points2], -1)
+
+        DATABASE1.append(curr_entries1)
+        DATABASE2.append(curr_entries2)
+        #####################################
+
+      DATABASE1 = torch.cat(DATABASE1, 0)
+      curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1 = torch.split(DATABASE1, [3, args.feat_dim,3], dim=-1)
+      std_rgb1 = torch.std(curr_pnm_rgb_term1, dim=0)
+      std_feature1 = torch.std(curr_pnm_feature_term1, dim=0)
+      std_potentials1 = torch.std(curr_potentials_term1, dim=0)
+      std_rgb1 = torch.sum(std_rgb1)
+      std_feature1 = torch.sum(std_feature1)
+      std_potentials1 = torch.sum(std_potentials1)
+
+      weight_rgb1 = (1./std_rgb1).float()
+      weight_features1 = (1./std_feature1).float()
+      weight_potentials1 = (1./std_potentials1).float()
+      SCALE_FACTORS.append(np.array([weight_rgb1.detach().cpu().numpy(), weight_features1.detach().cpu().numpy(), weight_potentials1.detach().cpu().numpy()]))
+
+      DATABASE2 = torch.cat(DATABASE2, 0)
+      curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2 = torch.split(DATABASE2, [3, args.feat_dim,3], dim=-1)
+      std_rgb2 = torch.std(curr_pnm_rgb_term2, dim=0)
+      std_feature2 = torch.std(curr_pnm_feature_term2, dim=0)
+      std_potentials2 = torch.std(curr_potentials_term2, dim=0)
+      std_rgb2 = torch.sum(std_rgb2)
+      std_feature2 = torch.sum(std_feature2)
+      std_potentials2 = torch.sum(std_potentials2)
+
+      weight_rgb2 = (1./std_rgb2).float()
+      weight_features2 = (1./std_feature2).float()
+      weight_potentials2 = (1./std_potentials2).float()
+      SCALE_FACTORS.append(np.array([weight_rgb2.detach().cpu().numpy(), weight_features2.detach().cpu().numpy(), weight_potentials2.detach().cpu().numpy()]))
+
+      print("Computed scales for energies:")
+      print(SCALE_FACTORS)
+
     #############################
     ##### Loading of Scales #####
     #############################
-
-    print("Loading of scales...")
-    SCALE_FACTORS = []
     fname = os.path.join(args.ckpt_dir, args.expname, "database_scales.npy")
-    input_dict = np.load(fname, allow_pickle=True)
-    scales1 = input_dict.item().get('frame1')
-    scales2 = input_dict.item().get('frame2')
-    SCALE_FACTORS = [scales1, scales2]
-    print("Loaded scales")
+    if os.path.exists(fname):
+      print("Loading of scales...")
+      SCALE_FACTORS = []
+      input_dict = np.load(fname, allow_pickle=True)
+      scales1 = input_dict.item().get('frame1')
+      scales2 = input_dict.item().get('frame2')
+      SCALE_FACTORS = [scales1, scales2]
+      print("Loaded scales")
+    else:
+      print("Scale file not found.")
 
     ####################################
     ############ Visualizing ###########
@@ -1440,7 +1540,7 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
         motion_query_func = render_kwargs_train["motion_network_query_fn"]
         motion_model1 = render_kwargs_train["network_motion1"]
-        potentials1 = motion_query_func(pnm_points1, pnm_feature_term1, motion_model1)
+        potentials1 = motion_query_func(pnm_points1, pnm_feature_term1*FEAT_SCALE, motion_model1)
 
         ## Database 2
         pnm_rgb_term2 = pnm_rgb_term2[is_object_ray2].reshape(-1, 3)
@@ -1449,7 +1549,12 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
         motion_query_func = render_kwargs_train["motion_network_query_fn"]
         motion_model2 = render_kwargs_train["network_motion2"]
-        potentials2 = motion_query_func(pnm_points2, pnm_feature_term2, motion_model2)
+
+        potentials2 = motion_query_func(pnm_points2, pnm_feature_term2*FEAT_SCALE, motion_model2)
+        
+        # ### DEBUG --- Overwrite to set potentials to a constant
+        # potentials1 = torch.ones(potentials1.shape).to(potentials1.device) * 1.5
+        # potentials2 = torch.ones(potentials2.shape).to(potentials2.device)
 
         #### Construct database elements ####
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
@@ -1482,203 +1587,98 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       print(PTS_COLOR_ONLY2.shape)
       print()
 
-      #######################################
-      ####### Get Nearest Neighbor ##########
-      #######################################
+      ### Selected query to use
+      img_i = i_train[idx]
+      curr_valid_depth1 = valid_depths[0][img_i]
+      curr_valid_depth1 = curr_valid_depth1.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0).float()
+      curr_valid_depth1 = F.interpolate(curr_valid_depth1, size=(H_database, W_database), mode='nearest').squeeze().bool()
+      is_object_ray1 = curr_valid_depth1 
 
-      ### For each image, compute for flow and nearest neighbor
-      for idx in range(0, len(i_train), skip_view):
-        img_i = i_train[idx] 
+      _, _, _, extras1_unary = render(H_database, W_database, intrinsics[0][img_i], chunk=(args.chunk // 8), c2w=poses[0][img_i][:3,:4], with_5_9=False, idx=0, for_motion=True, **render_kwargs_train)
+      pnm_rgb_term1, pnm_feature_term1, pnm_points1, pnm_rgb_map1 = extras1_unary["pnm_rgb_term"], extras1_unary["pnm_feature_term"], extras1_unary["pnm_points"], extras1_unary["rgb_map_pnm"]
 
-        #### Downsample to get a smaller size
-        curr_valid_depth1 = valid_depths[0][img_i]
-        curr_valid_depth1 = curr_valid_depth1.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0).float()
-        curr_valid_depth1 = F.interpolate(curr_valid_depth1, size=(H_database, W_database), mode='nearest').squeeze().bool()
-        is_object_ray1 = curr_valid_depth1 
+      pnm_rgb_term1 = torch.mean(pnm_rgb_term1, axis=-2)
+      pnm_feature_term1 = torch.mean(pnm_feature_term1, axis=-2)
+      pnm_points1 = torch.mean(pnm_points1, axis=-2)
 
-        curr_valid_depth2 = valid_depths[1][img_i]
-        curr_valid_depth2 = curr_valid_depth2.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0).float()
-        curr_valid_depth2 = F.interpolate(curr_valid_depth2, size=(H_database, W_database), mode='nearest').squeeze().bool()
-        is_object_ray2 = curr_valid_depth2 
+      pnm_rgb_term1 = pnm_rgb_term1[is_object_ray1].reshape(-1, 3)
+      pnm_feature_term1 = pnm_feature_term1[is_object_ray1].reshape(-1, args.feat_dim)
+      pnm_points1 = pnm_points1[is_object_ray1].reshape(-1, 3)
+      motion_query_func = render_kwargs_train["motion_network_query_fn"]
+      motion_model1 = render_kwargs_train["network_motion1"]
+      potentials1 = motion_query_func(pnm_points1, pnm_feature_term1*FEAT_SCALE, motion_model1)
+      #########################
 
-        _, _, _, extras1_unary = render(H_database, W_database, intrinsics[0][img_i], chunk=(args.chunk // 8), c2w=poses[0][img_i][:3,:4], with_5_9=False, idx=0, for_motion=True, **render_kwargs_train)
-        _, _, _, extras2_unary = render(H_database, W_database, intrinsics[1][img_i], chunk=(args.chunk // 8), c2w=poses[1][img_i][:3,:4], with_5_9=False, idx=1, for_motion=True, **render_kwargs_train)        
 
-        pnm_rgb_term1, pnm_feature_term1, pnm_points1, pnm_rgb_map1 = extras1_unary["pnm_rgb_term"], extras1_unary["pnm_feature_term"], extras1_unary["pnm_points"], extras1_unary["rgb_map_pnm"]
-        pnm_rgb_term2, pnm_feature_term2, pnm_points2, pnm_rgb_map2 = extras2_unary["pnm_rgb_term"], extras2_unary["pnm_feature_term"], extras2_unary["pnm_points"], extras2_unary["rgb_map_pnm"]
+      NUM_SAMPLES = 20
 
-        pnm_rgb_term1 = torch.mean(pnm_rgb_term1, axis=-2)
-        pnm_rgb_term2 = torch.mean(pnm_rgb_term2, axis=-2)
-        pnm_feature_term1 = torch.mean(pnm_feature_term1, axis=-2)
-        pnm_feature_term2 = torch.mean(pnm_feature_term2, axis=-2)
-        pnm_points1 = torch.mean(pnm_points1, axis=-2)
-        pnm_points2 = torch.mean(pnm_points2, axis=-2)
+      ## Plate point
+      # idx_to_take = 1000
 
-        cv2.imwrite("testvizscript_pnm1.jpg", cv2.cvtColor(to8b(pnm_rgb_term1.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
-        cv2.imwrite("testvizscript_pnm2.jpg", cv2.cvtColor(to8b(pnm_rgb_term2.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+      ### Hotdog point
+      ## On the bread
+      # idx_to_take = 436
+      idx_to_take = 654
+
+      retrieved_pts = []
+      retrieved_color = []
+
+      ### For vis
+      pc2 = PTS_COLOR_ONLY2[:, :3].detach().cpu().numpy()
+      pc1 = pnm_points1.detach().cpu().numpy()
+      colors1 = pnm_rgb_term1.detach().cpu().numpy()
         
-        ### Motion vectors ###
-        pnm_rgb_term1 = pnm_rgb_term1[is_object_ray1].reshape(-1, 3)
-        pnm_feature_term1 = pnm_feature_term1[is_object_ray1].reshape(-1, args.feat_dim)
-        pnm_points1 = pnm_points1[is_object_ray1].reshape(-1, 3)
-        motion_query_func = render_kwargs_train["motion_network_query_fn"]
-        motion_model1 = render_kwargs_train["network_motion1"]
-        potentials1 = motion_query_func(pnm_points1, pnm_feature_term1, motion_model1)
+      ## Finding a query on the hotdog
+      # idx_sorted = np.argsort(pc1[...,-1])
+      # print(idx_sorted[-100:])
+      # exit()
+      
+      weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
 
-        pnm_rgb_term2 = pnm_rgb_term2[is_object_ray2].reshape(-1, 3)
-        pnm_feature_term2 = pnm_feature_term2[is_object_ray2].reshape(-1, args.feat_dim)
-        pnm_points2 = pnm_points2[is_object_ray2].reshape(-1, 3)
-        motion_query_func = render_kwargs_train["motion_network_query_fn"]
-        motion_model2 = render_kwargs_train["network_motion2"]
-        potentials2 = motion_query_func(pnm_points2, pnm_feature_term2, motion_model2)
-        ###################
-
-        # #### Get nearest neighbors
+      for s in range(NUM_SAMPLES):
+        ### Sample noise
+        eps2_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(DATABASE2.shape[0], 1))
 
         ### 1. Whole vector
-        weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1], -1)
-        # print(query_vecs.shape)
-        # print(DATABASE2.shape)
-        nn_idx = knn_points(query_vecs.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
-        nn_idx = nn_idx[0]
-        # print(nn_idx.shape)
+        query_vecs = torch.cat([pnm_rgb_term1[idx_to_take].unsqueeze(0) * weight_rgb1,\
+            pnm_feature_term1[idx_to_take].unsqueeze(0) * weight_features1, \
+            (potentials1[idx_to_take].unsqueeze(0) - pnm_points1[idx_to_take].unsqueeze(0)) * weight_potentials1, \
+            torch.zeros((1, 1), device=pnm_points1.device)], -1)
+        
+        noised_database = torch.cat([DATABASE2, eps2_noise], -1)
 
-        # ## 2. Potential only 
-        # query_vecs = potentials1 - pnm_points1
-        # print(query_vecs.shape)
-        # print(POTENTIAL_ONLY2.shape)
-        # nn_idx = knn_points(query_vecs.unsqueeze(0), POTENTIAL_ONLY2.unsqueeze(0), K=1).idx
-        # nn_idx = nn_idx[0]
-        # print(nn_idx.shape)
+        ### Noised nearest neighbor
+        nn_idx_noised = knn_points(query_vecs.unsqueeze(0), noised_database.unsqueeze(0), K=50).idx
+        nn_idx_noised = nn_idx_noised[0]      
 
-        ### 3. Color and feature vector only
-        # query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1], -1)
-        # print(query_vecs.shape)
-        # database_to_retrieve = DATABASE2[..., :-3]
-        # print(database_to_retrieve.shape)
-        # nn_idx = knn_points(query_vecs.unsqueeze(0), database_to_retrieve.unsqueeze(0), K=1).idx
-        # nn_idx = nn_idx[0]
-        # print(nn_idx.shape)
+        ### Visualize KNN
 
-        pc1 = pnm_points1.detach().cpu().numpy()
-        colors1 = pnm_rgb_term1.detach().cpu().numpy()
+        selected_database_entry = torch.gather(PTS_COLOR_ONLY2, 0, nn_idx_noised.squeeze().unsqueeze(-1).repeat(1,6)).squeeze()
+        knn_pts = selected_database_entry[:, :3].detach().cpu().numpy()
+        knn_pts_color = selected_database_entry[:, 3:].detach().cpu().numpy()
 
-        selected_database_entry = torch.gather(PTS_COLOR_ONLY2, 0, nn_idx.repeat(1,6)).squeeze()
-        # print(selected_database_entry.shape)
-        pc2 = selected_database_entry[:, :3].detach().cpu().numpy()
-        colors2 = selected_database_entry[:, 3:].detach().cpu().numpy()
-        # print(pc2.shape)
-        # print(colors2.shape)
+        save_pc_knn_samples(pc1, colors1, idx_to_take, pc2, knn_pts, knn_pts_color, fname + "_" + str(s) + "_knn.png")
 
-        # save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_nncorres_potentialonly.png")
-        # save_pointcloud_samples(pc2, colors2, "testvizscript_pc2_potentialonly.png")
+        ### Argmin
+        nn_idx_noised = knn_points(query_vecs.unsqueeze(0), noised_database.unsqueeze(0), K=1).idx
+        nn_idx_noised = nn_idx_noised[0]
+        selected_database_entry = torch.gather(PTS_COLOR_ONLY2, 0, nn_idx_noised.squeeze().unsqueeze(-1).repeat(1,6)).squeeze()
+        knn_pts = selected_database_entry[:3].detach().cpu().numpy()
+        knn_pts_color = selected_database_entry[3:].detach().cpu().numpy()
+        
+        retrieved_pts.append(knn_pts.squeeze())
+        retrieved_color.append(knn_pts_color.squeeze())
 
-        # save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_nncorres_wholevec.png")
-        # save_pointcloud_samples(pc2, colors2, "testvizscript_pc2_wholevec.png")
+      retrieved_pts = np.array(retrieved_pts)
+      retrieved_color = np.array(retrieved_color)
 
-        fname = os.path.join(result_dir, str(img_i))
+      print(retrieved_pts.shape)
+      print(retrieved_color.shape)
+      
+      save_pc_knn_samples(pc1, colors1, idx_to_take, pc2, retrieved_pts, retrieved_color, fname + "_pnmsamples.png")
 
-        # save_pc_correspondences(pc1, pc2, colors1, colors2, "testvizscript_nncorres_wholevec.png")
-        # save_pointcloud_samples(pc2, colors2, "testvizscript_pc2_wholevec.png")
-        # save_point_cloud(pc2, to8b(colors2), 'testviz4_pc2nn.ply')
-
-        save_pc_correspondences(pc1, pc2, colors1, colors2, fname + "_nncorres_wholevec.png", save_views=True)
-        ### Make video ###
-        fname_ = fname + "_nncorres_wholevec"
-        vid_dir = os.path.join(fname_ + "_video")
-        imgs = os.listdir(vid_dir)
-        imgs = natsorted(imgs)
-
-        video_file = fname + "_nncorres_wholevec_vid.mp4"
-        imageio.mimsave(video_file,
-                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
-                        fps=5, macro_block_size=1)
-
-        save_pointcloud_samples(pc2, colors2, fname + "_pc2nn.png", save_views=True)
-        ### Make video ###
-        fname_ = fname + "_pc2nn"
-        vid_dir = os.path.join(fname_ + "_video")
-        imgs = os.listdir(vid_dir)
-        imgs = natsorted(imgs)
-
-        video_file = fname + "_pc2nn_vid.mp4"
-        imageio.mimsave(video_file,
-                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
-                        fps=5, macro_block_size=1)
-
-        save_point_cloud(pc2, to8b(colors2), fname + "_pc2nn.ply")
-
-        save_pointcloud_samples(pc1, colors1, fname + "_pc1.png", save_views=True)
-
-        potentials1_ = potentials1.detach().cpu().numpy()
-        potential_color = (potentials1_ - np.min(potentials1_, axis=0))/(np.max(potentials1_, axis=0) - np.min(potentials1_, axis=0))
-        save_pointcloud_samples(pc1, potential_color, fname + "_potential.png", save_views=True)
-
-        potentials2_ = potentials2.detach().cpu().numpy()
-        potential_color = (potentials2_ - np.min(potentials2_, axis=0))/(np.max(potentials2_, axis=0) - np.min(potentials2_, axis=0))
-        pc_frame2 = pnm_points2.detach().cpu().numpy()
-        save_pointcloud_samples(pc_frame2, potential_color, fname + "_frame2_potential.png", save_views=True)
-
-        ### Make video ###
-        fname_ = fname + "_pc1"
-        vid_dir = os.path.join(fname_ + "_video")
-        imgs = os.listdir(vid_dir)
-        imgs = natsorted(imgs)
-
-        video_file = fname + "_pc1_vid.mp4"
-        imageio.mimsave(video_file,
-                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
-                        fps=5, macro_block_size=1)
-
-
-        save_point_cloud(pc1, to8b(colors1), fname + "_pc1.ply")
-
-        ### Plot motion
-        selected_database_entry_potential = torch.gather(POTENTIAL_ONLY2, 0, nn_idx.repeat(1,3)).squeeze()
-        selected_database_entry_pts = torch.gather(PTS_COLOR_ONLY2, 0, nn_idx.repeat(1,6)).squeeze()
-        potential2 = selected_database_entry_potential + selected_database_entry_pts[:, :3]
-
-        '''
-        energy: (phi(x) - x) - (phi(y)-y)
-        phi(x) - phi(y) = x - y 
-        scene_flow = phi(x) - phi(y)
-        y = x - scene_flow
-        '''
-        scene_flow = potentials1 - potential2
-        pc2 = pc1 - scene_flow.detach().cpu().numpy()
-        colors2 = colors1
-        save_pc_correspondences(pc1, pc2, colors1, colors2, fname + "_flow.png", save_views=True)
-        ### Make video ###
-        fname_ = fname + "_flow"
-        vid_dir = os.path.join(fname_ + "_video")
-        imgs = os.listdir(vid_dir)
-        imgs = natsorted(imgs)
-
-        video_file = fname + "_flow_vid.mp4"
-        imageio.mimsave(video_file,
-                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
-                        fps=5, macro_block_size=1)
-
-        save_pointcloud_samples(pc2, colors2, fname + "_pcflowed.png", save_views=True)
-        ### Make video ###
-        fname_ = fname + "_pcflowed"
-        vid_dir = os.path.join(fname_ + "_video")
-        imgs = os.listdir(vid_dir)
-        imgs = natsorted(imgs)
-
-        video_file = fname + "_pcflowed_vid.mp4"
-        imageio.mimsave(video_file,
-                        [imageio.imread(os.path.join(vid_dir, img)) for img in imgs],
-                        fps=5, macro_block_size=1)
-
-        save_point_cloud(pc2, to8b(colors2), fname + "_pcflowed.ply")
-
-        print("Done with image idx: " + str(img_i) + ".")
-
-        # exit()
-
-
+      print("Done.")
+      exit()
 
 def config_parser():
 
@@ -1856,8 +1856,10 @@ def config_parser():
     parser.add_argument("--motion_lrate", type=float, default=5e-4, 
                         help='motion module learning rate')
 
-    ### For potential module with no position input
-    parser.add_argument('--potential_nopos', default= False, type=bool)
+    parser.add_argument("--pnm_std", type=float, default=1.0, 
+                        help='standard deviation for the noise term in distance computation')
+    parser.add_argument("--pnm_mean", type=float, default=0.0, 
+                        help='mean for the noise term in distance computation')
 
     return parser
 

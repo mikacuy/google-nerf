@@ -8,6 +8,94 @@ import matplotlib.pylab as pl
 from plyfile import PlyData, PlyElement
 import os, sys
 
+import matplotlib as mpl
+import matplotlib.cm as cm
+
+def save_pointcloud_noise(pcs, noise, fname, size=0.8):
+  plt.clf()
+  fig = plt.figure()
+  ax = fig.add_subplot(projection='3d')
+
+  norm = mpl.colors.Normalize(vmin=0, vmax=1.0)
+  cmap = cm.viridis
+  m = cm.ScalarMappable(norm=norm, cmap=cmap)
+
+  ax.scatter(pcs[:, 0], pcs[:, 1], pcs[:, 2], marker=".", s=size, c=m.to_rgba(noise))
+  ax.set_xlim(-2,2)
+  ax.set_ylim(-2,2)
+  ax.set_zlim(-2,1)
+  ax.set_xlabel('X Label')
+  ax.set_ylabel('Y Label')
+  ax.set_zlabel('Z Label')
+  plt.savefig(fname)
+
+def save_pc_correspondences_samples_iteration(pc1, pc2, colors1, noise, samples, samples_colors, selected_neighbors, selected_neighbors_noise, fname):
+  ### To visualize point clouds side by side
+  translation = np.array([0.0, -4.0, 0.0])
+
+  plt.clf()
+  fig = plt.figure()
+  ax = fig.add_subplot(projection='3d')
+
+  ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker=".", s=0.005, c="gray")
+  ax.scatter(samples[:, 0], samples[:, 1], samples[:, 2], marker=".", s=3.0, c=samples_colors)
+
+  
+  ax.set_xlim(-2,2)
+  ax.set_ylim(-6,2)
+  ax.set_zlim(-2,1)
+  ax.set_xlabel('X Label')
+  ax.set_ylabel('Y Label')
+  ax.set_zlabel('Z Label')
+
+  norm = mpl.colors.Normalize(vmin=0, vmax=1.0)
+  cmap = cm.viridis
+  m = cm.ScalarMappable(norm=norm, cmap=cmap)
+
+  pc2 = pc2 + translation
+  ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker=".", s=0.01, c=m.to_rgba(noise))
+
+  endpoint_1 = samples
+  endpoint_2 = selected_neighbors + translation
+  line_to_draw = np.array([endpoint_1, endpoint_2])
+
+  ax.scatter(endpoint_2[:, 0], endpoint_2[:, 1], endpoint_2[:, 2], marker="x", s=1.0, c=m.to_rgba(selected_neighbors_noise))
+
+  skip = 15
+  for pt_idx in range(line_to_draw.shape[1]):
+    if pt_idx % skip != 0 :
+      continue  
+    # ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= "blue", linewidth=0.05)
+    ax.plot3D(line_to_draw[:, pt_idx, 0], line_to_draw[:, pt_idx, 1], line_to_draw[:, pt_idx, 2], color= samples_colors[pt_idx], linewidth=0.8)
+  
+  plt.savefig(fname) 
+
+def save_pc_knn_samples(pc1, colors1, idx_chosen, pc2, knn_pts, knn_pts_color, fname):
+  ### To visualize point clouds side by side
+  translation = np.array([0.0, -4.0, 0.0])
+
+  plt.clf()
+  fig = plt.figure()
+  ax = fig.add_subplot(projection='3d')
+
+  ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker=".", s=0.01, c="gray")
+  ax.scatter(pc1[idx_chosen, 0], pc1[idx_chosen, 1], pc1[idx_chosen, 2], marker=".", s=10.0, c=colors1[idx_chosen])
+
+  ax.set_xlim(-2,2)
+  ax.set_ylim(-6,2)
+  ax.set_zlim(-2,1)
+  ax.set_xlabel('X Label')
+  ax.set_ylabel('Y Label')
+  ax.set_zlabel('Z Label')
+
+  pc2 = pc2 + translation
+  knn_pts = knn_pts + translation
+  ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker=".", s=0.005, c="gray")
+  ax.scatter(knn_pts[:, 0], knn_pts[:, 1], knn_pts[:, 2], marker=".", s=8.0, c=knn_pts_color)
+  
+  plt.savefig(fname) 
+
+
 def save_pointcloud_samples(pcs, colors, fname, save_views=False):
   plt.clf()
   fig = plt.figure()
