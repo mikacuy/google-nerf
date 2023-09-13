@@ -843,10 +843,7 @@ def create_nerf2(args, scene_render_params):
             model_fine2.load_state_dict(ckpt['network_fine_state_dict'])
 
     ### Motion model
-    print(args.no_bias_potential2)
     motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3, no_bias = args.no_bias_potential2)
-    print(motion_model2.named_parameters())
-    exit()
     motion_model2 = nn.DataParallel(motion_model2).to(device)
 
     for name, param in motion_model2.named_parameters():
