@@ -849,7 +849,7 @@ def create_nerf2(args, scene_render_params):
 
     ### Motion model
     if not args.potential_nopos:
-      motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+      motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3, no_bias = args.no_bias_potential2)
     else:
       motion_model2 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
     motion_model2 = nn.DataParallel(motion_model2).to(device)
@@ -1453,10 +1453,10 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
         #### Construct database elements ####
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1], -1)
+        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1], -1)
 
         weight_rgb2, weight_features2, weight_potentials2 = SCALE_FACTORS[1]
-        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2, pnm_feature_term2 * weight_features2, (potentials2 - pnm_points2) * weight_potentials2], -1)
+        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2 * args.color_dist_weight, pnm_feature_term2 * weight_features2 * args.feat_dist_weight, (potentials2 - pnm_points2) * weight_potentials2], -1)
 
         DATABASE1.append(curr_entries1)
         DATABASE2.append(curr_entries2)
@@ -1537,7 +1537,7 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
         ### 1. Whole vector
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1], -1)
+        query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1], -1)
         # print(query_vecs.shape)
         # print(DATABASE2.shape)
         nn_idx = knn_points(query_vecs.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
@@ -1858,6 +1858,13 @@ def config_parser():
 
     ### For potential module with no position input
     parser.add_argument('--potential_nopos', default= False, type=bool)
+
+    parser.add_argument("--color_dist_weight", type=float, default=1.0, 
+                        help='weight for the color term')
+    parser.add_argument("--feat_dist_weight", type=float, default=1.0, 
+                        help='weight for the feature term')
+
+    parser.add_argument('--no_bias_potential2', default= False, type=bool)
 
     return parser
 
