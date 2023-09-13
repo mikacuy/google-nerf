@@ -1696,10 +1696,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         #### Construct database elements ####
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1, eps1_noise], -1)
+        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1, eps1_noise], -1)
 
         weight_rgb2, weight_features2, weight_potentials2 = SCALE_FACTORS[1]
-        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2, pnm_feature_term2 * weight_features2, (potentials2 - pnm_points2) * weight_potentials2, eps2_noise], -1)
+        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2 * args.color_dist_weight, pnm_feature_term2 * weight_features2 * args.feat_dist_weight, (potentials2 - pnm_points2) * weight_potentials2, eps2_noise], -1)
 
         DATABASE1.append(curr_entries1)
         DATABASE2.append(curr_entries2)
@@ -2009,6 +2009,11 @@ def config_parser():
                         help='standard deviation for the noise term in distance computation')
     parser.add_argument("--pnm_mean", type=float, default=0.0, 
                         help='mean for the noise term in distance computation')
+
+    parser.add_argument("--color_dist_weight", type=float, default=1.0, 
+                        help='weight for the color term')
+    parser.add_argument("--feat_dist_weight", type=float, default=1.0, 
+                        help='weight for the feature term')
 
     ### Enable visu in training
     parser.add_argument('--visu', default= False, type=bool)
