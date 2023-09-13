@@ -316,7 +316,7 @@ class NeRF_semantics(nn.Module):
         return outputs    
 
 class MotionPotential(nn.Module):
-    def __init__(self, input_ch=3, input_ch_feature=384, output_ch=3, skips=[4]):
+    def __init__(self, input_ch=3, input_ch_feature=384, output_ch=3, skips=[4], no_bias=False):
         """ 
         """
         super(MotionPotential, self).__init__()
@@ -328,7 +328,10 @@ class MotionPotential(nn.Module):
             [DenseLayer(512, 128, activation="relu")] 
             )
         
-        self.output_linear = DenseLayer(128, output_ch, activation="linear")
+        if not no_bias:
+          self.output_linear = DenseLayer(128, output_ch, activation="linear")
+        else:
+          self.output_linear = DenseLayer(128, output_ch, activation="linear", bias=False)
 
     def forward(self, x):
         input_pts, input_features = torch.split(x, [self.input_ch, self.input_ch_feature], dim=-1)
