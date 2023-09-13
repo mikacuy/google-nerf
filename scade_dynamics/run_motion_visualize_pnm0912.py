@@ -1332,7 +1332,7 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
     print("Loaded models.")
     
     ### To save outputs
-    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_motion_potential_wnoise")
+    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_pnm_mu" + str(args.pnm_mean) + "_std" + str(args.pnm_std))
     os.makedirs(result_dir, exist_ok=True)
 
     # create camera embedding function
@@ -1558,10 +1558,10 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
         #### Construct database elements ####
         weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1, (potentials1 - pnm_points1) * weight_potentials1], -1)
+        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1], -1)
 
         weight_rgb2, weight_features2, weight_potentials2 = SCALE_FACTORS[1]
-        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2, pnm_feature_term2 * weight_features2, (potentials2 - pnm_points2) * weight_potentials2], -1)
+        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2 * args.color_dist_weight, pnm_feature_term2 * weight_features2 * args.feat_dist_weight, (potentials2 - pnm_points2) * weight_potentials2], -1)
 
         DATABASE1.append(curr_entries1)
         DATABASE2.append(curr_entries2)
@@ -1610,15 +1610,20 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       #########################
 
 
-      NUM_SAMPLES = 20
+      NUM_SAMPLES = 100
 
       ## Plate point
       # idx_to_take = 1000
 
+      ### edge of the plate
+      idx_to_take = 1535
+
       ### Hotdog point
       ## On the bread
       # idx_to_take = 436
-      idx_to_take = 654
+
+      ##use this -- bread of the hotdog
+      # idx_to_take = 654
 
       retrieved_pts = []
       retrieved_color = []
@@ -1628,20 +1633,22 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       pc1 = pnm_points1.detach().cpu().numpy()
       colors1 = pnm_rgb_term1.detach().cpu().numpy()
         
-      ## Finding a query on the hotdog
-      # idx_sorted = np.argsort(pc1[...,-1])
+      # # Finding a query on the hotdog
+      # idx_sorted = np.argsort(pc1[...,0])
       # print(idx_sorted[-100:])
       # exit()
       
       weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
+
+      fname = os.path.join(result_dir, str(img_i))
 
       for s in range(NUM_SAMPLES):
         ### Sample noise
         eps2_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(DATABASE2.shape[0], 1))
 
         ### 1. Whole vector
-        query_vecs = torch.cat([pnm_rgb_term1[idx_to_take].unsqueeze(0) * weight_rgb1,\
-            pnm_feature_term1[idx_to_take].unsqueeze(0) * weight_features1, \
+        query_vecs = torch.cat([pnm_rgb_term1[idx_to_take].unsqueeze(0) * weight_rgb1 * args.color_dist_weight,\
+            pnm_feature_term1[idx_to_take].unsqueeze(0) * weight_features1 * args.feat_dist_weight, \
             (potentials1[idx_to_take].unsqueeze(0) - pnm_points1[idx_to_take].unsqueeze(0)) * weight_potentials1, \
             torch.zeros((1, 1), device=pnm_points1.device)], -1)
         
@@ -1860,6 +1867,11 @@ def config_parser():
                         help='standard deviation for the noise term in distance computation')
     parser.add_argument("--pnm_mean", type=float, default=0.0, 
                         help='mean for the noise term in distance computation')
+
+    parser.add_argument("--color_dist_weight", type=float, default=1.0, 
+                        help='weight for the color term')
+    parser.add_argument("--feat_dist_weight", type=float, default=1.0, 
+                        help='weight for the feature term')
 
     return parser
 
