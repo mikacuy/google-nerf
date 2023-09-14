@@ -1276,7 +1276,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
 
-    tb = SummaryWriter(log_dir=os.path.join("runs", args.ckpt_dir + "_" + args.expname))
+    tb = SummaryWriter(log_dir=os.path.join("runs_0914", args.ckpt_dir + "_" + args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[2:4]
     i_train, i_test = i_split
@@ -1706,8 +1706,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         if args.visu:
           with torch.no_grad():
-            POTENTIAL_ONLY1.append((potentials1 - pnm_points1))
-            POTENTIAL_ONLY2.append((potentials2 - pnm_points2))
+            POTENTIAL_ONLY1.append((potentials1))
+            POTENTIAL_ONLY2.append((potentials2))
             PTS_COLOR_ONLY1.append(torch.cat([pnm_points1, pnm_rgb_term1], dim=-1))
             PTS_COLOR_ONLY2.append(torch.cat([pnm_points2, pnm_rgb_term2], dim=-1))
             NOISE_VECTOR1.append(eps1_noise)
@@ -1766,15 +1766,15 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       optimizer_motion.step()
 
       # Visu during training
-      if i % 100 == 2 and args.visu:
+      if i % 100 == 1 and args.visu:
         fname = os.path.join(visu_dir, str(i))
 
         pc2 = PTS_COLOR_ONLY2[:, :3].detach().cpu().numpy()
         noise_color_scale = torch.abs(NOISE_VECTOR2).detach().cpu().numpy()
 
         ### normalize noise
-        # noise_color_scale =  (noise_color_scale - np.min(noise_color_scale, axis=0))/(np.percentile(noise_color_scale, 90) - np.min(noise_color_scale, axis=0))
-        noise_color_scale =  (noise_color_scale)/(np.percentile(noise_color_scale, 90))
+        noise_color_scale =  (noise_color_scale - np.min(noise_color_scale, axis=0))/(np.percentile(noise_color_scale, 90) - np.min(noise_color_scale, axis=0))
+        # noise_color_scale =  (noise_color_scale)/(np.percentile(noise_color_scale, 90))
         noise_color_scale = np.clip(noise_color_scale, 0.0, 1.0)
 
         save_pointcloud_noise(pc2, noise_color_scale, fname + "_noisesamples.png", size=0.4)
@@ -1792,6 +1792,16 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         selected_neighbors_noise = noise_color_scale[min_indices.detach().cpu().numpy()]
         
         save_pc_correspondences_samples_iteration(pc1, pc2, colors1, noise_color_scale, samples, samples_colors, selected_neighbors, selected_neighbors_noise, fname + "_nn.png")
+
+        ### potential visualization
+        potentials1_ = POTENTIAL_ONLY1.detach().cpu().numpy()
+        potential_color = (potentials1_ - np.min(potentials1_, axis=0))/(np.max(potentials1_, axis=0) - np.min(potentials1_, axis=0))
+        save_pointcloud_samples(pc1, potential_color, fname + "_potential1.png", pc_size=0.05, skip=1)
+
+        ### potential visualization
+        potentials2_ = POTENTIAL_ONLY2.detach().cpu().numpy()
+        potential_color = (potentials2_ - np.min(potentials2_, axis=0))/(np.max(potentials2_, axis=0) - np.min(potentials2_, axis=0))
+        save_pointcloud_samples(pc2, potential_color, fname + "_potential2.png", pc_size=0.05, skip=1)
 
       # write logs
       if i%args.i_weights==0:

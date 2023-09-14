@@ -1616,14 +1616,14 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       # idx_to_take = 1000
 
       ### edge of the plate
-      idx_to_take = 1535
+      # idx_to_take = 1535
 
       ### Hotdog point
       ## On the bread
       # idx_to_take = 436
 
       ##use this -- bread of the hotdog
-      # idx_to_take = 654
+      idx_to_take = 654
 
       retrieved_pts = []
       retrieved_color = []

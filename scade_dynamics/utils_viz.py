@@ -96,12 +96,12 @@ def save_pc_knn_samples(pc1, colors1, idx_chosen, pc2, knn_pts, knn_pts_color, f
   plt.savefig(fname) 
 
 
-def save_pointcloud_samples(pcs, colors, fname, save_views=False):
+def save_pointcloud_samples(pcs, colors, fname, save_views=False, pc_size=0.8, skip=1):
   plt.clf()
   fig = plt.figure()
   ax = fig.add_subplot(projection='3d')
 
-  ax.scatter(pcs[:, 0], pcs[:, 1], pcs[:, 2], marker=".", s=0.8, c=colors)
+  ax.scatter(pcs[::skip, 0], pcs[::skip, 1], pcs[::skip, 2], marker=".", s=pc_size, c=colors[::skip])
   ax.set_xlim(-2,2)
   ax.set_ylim(-2,2)
   ax.set_zlim(-2,1)
