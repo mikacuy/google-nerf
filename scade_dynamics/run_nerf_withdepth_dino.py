@@ -1007,7 +1007,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     torch.manual_seed(0)
     torch.cuda.manual_seed(0)
 
-    tb = SummaryWriter(log_dir=os.path.join("runs", args.expname))
+    tb = SummaryWriter(log_dir=os.path.join("runs_0915", args.expname))
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
     i_train, i_test = i_split
