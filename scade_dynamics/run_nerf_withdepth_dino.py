@@ -1473,7 +1473,7 @@ def config_parser():
     parser.add_argument("--white_bkgd", default= False, type=bool, 
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
 
-    parser.add_argument("--downsample", type=int, default=8,
+    parser.add_argument("--downsample", type=int, default=4,
                         help='downsample images')
 
     return parser

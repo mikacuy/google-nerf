@@ -1431,7 +1431,11 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
         pnm_feature_term2 = torch.mean(pnm_feature_term2, axis=-2)
         pnm_points1 = torch.mean(pnm_points1, axis=-2)
         pnm_points2 = torch.mean(pnm_points2, axis=-2)
-        
+
+        cv2.imwrite(os.path.join(result_dir, "image" + str(img_i) + "_rgb1.jpg"), cv2.cvtColor(to8b(pnm_rgb_term1.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(result_dir, "image" + str(img_i) + "_rgb2.jpg"), cv2.cvtColor(to8b(pnm_rgb_term2.detach().cpu().numpy()), cv2.COLOR_RGB2BGR))
+
+
         #### Motion Potentials ####
         ## Database 1
         pnm_rgb_term1 = pnm_rgb_term1[is_object_ray1].reshape(-1, 3)
@@ -1485,6 +1489,55 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       #######################################
       ####### Get Nearest Neighbor ##########
       #######################################
+
+      ###### For the whole database
+
+      pc1 = PTS_COLOR_ONLY1[:, :3].detach().cpu().numpy()
+      color1 = PTS_COLOR_ONLY1[:, 3:].detach().cpu().numpy()
+
+      pc2 = PTS_COLOR_ONLY2[:, :3].detach().cpu().numpy()
+      color2 = PTS_COLOR_ONLY2[:, 3:].detach().cpu().numpy()
+
+      ## DB1 to DB2
+      db1_to_db2_nn_idx = knn_points(DATABASE1.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
+      db1_to_db2_nn_idx = db1_to_db2_nn_idx[0]
+
+      db2_to_db1_nn_idx = knn_points(DATABASE2.unsqueeze(0), DATABASE1.unsqueeze(0), K=1).idx
+      db2_to_db1_nn_idx = db2_to_db1_nn_idx[0]
+
+      selected_database_entry = torch.gather(PTS_COLOR_ONLY2, 0, db1_to_db2_nn_idx.repeat(1,6)).squeeze()
+      pc2_nn = selected_database_entry[:, :3]
+      colors2_nn = selected_database_entry[:, 3:].detach().cpu().numpy()
+
+      selected_database_entry = torch.gather(PTS_COLOR_ONLY1, 0, db2_to_db1_nn_idx.repeat(1,6)).squeeze()
+      pc1_nn = selected_database_entry[:, :3]
+      colors1_nn = selected_database_entry[:, 3:].detach().cpu().numpy()
+
+
+      ### Plot motion
+      selected_database_entry_potential = torch.gather(POTENTIAL_ONLY2, 0, db1_to_db2_nn_idx.repeat(1,3)).squeeze()
+      potential2_nn = selected_database_entry_potential + pc2_nn
+
+      selected_database_entry_potential = torch.gather(POTENTIAL_ONLY1, 0, db2_to_db1_nn_idx.repeat(1,3)).squeeze()
+      potential1_nn = selected_database_entry_potential + pc1_nn      
+
+      '''
+      energy: (phi(x) - x) - (phi(y)-y)
+      phi(x) - phi(y) = x - y 
+      scene_flow = phi(x) - phi(y)
+      y = x - scene_flow
+      '''
+      scene_flow = POTENTIAL_ONLY1 - potential2_nn
+      pc1_flowed = pc1 - scene_flow.detach().cpu().numpy()
+
+      save_point_cloud(pc1_flowed, to8b(color1), os.path.join(result_dir, "database_pcflowed_1to2.ply"))
+
+      scene_flow = POTENTIAL_ONLY2 - potential1_nn
+      pc2_flowed = pc2 - scene_flow.detach().cpu().numpy()
+
+      save_point_cloud(pc2_flowed, to8b(color2), os.path.join(result_dir, "database_pcflowed_2to1.ply"))
+
+      exit()
 
       ### For each image, compute for flow and nearest neighbor
       for idx in range(0, len(i_train), skip_view):

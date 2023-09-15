@@ -212,7 +212,7 @@ def load_scene_blender_depth_features(basedir, feature_dir, downsample=2, train_
             img = read_files(os.path.join(basedir, frame['file_path'].split("/")[-1] +".png"), downsample_scale=downsample)
 
             curr_feat = torch.load(os.path.join(feature_dir, frame['file_path'].split("/")[-1] + '.pth')).cpu()
-            # print(curr_feat.shape)
+            
 
             if feat_dim == 768:
               curr_feat = curr_feat.reshape((199, 199, feat_dim))
@@ -221,7 +221,6 @@ def load_scene_blender_depth_features(basedir, feature_dir, downsample=2, train_
               curr_feat = curr_feat.reshape((99, 99, feat_dim))
               curr_feat = curr_feat.permute(2, 0, 1).unsqueeze(0).float()
               curr_feat = F.interpolate(curr_feat, size=(img.shape[0], img.shape[1]), mode='bilinear').squeeze().permute(1,2,0)
-            # print(curr_feat.shape)
 
             all_features.append(curr_feat)
 
@@ -233,7 +232,11 @@ def load_scene_blender_depth_features(basedir, feature_dir, downsample=2, train_
 
             max_depth = frame["max_depth"]
             depth_scaling_factor = (255. / max_depth)
-            depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'].split("/")[-1]+"0030.png"), depth_scaling_factor, near, far, downsample_scale=downsample)
+
+            try:
+              depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'].split("/")[-1]+"0030.png"), depth_scaling_factor, near, far, downsample_scale=downsample)
+            except:
+              depth = load_ground_truth_depth(os.path.join(basedir, frame['depth_file_path'].split("/")[-1]+"0000.png"), depth_scaling_factor, near, far, downsample_scale=downsample)
 
             if depth.ndim == 2:
                 depth = np.expand_dims(depth, -1)
