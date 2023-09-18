@@ -1805,9 +1805,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       ## Energy loss on the three terms
       loss = torch.mean(distances_min)
 
-      loss.backward()
-      optimizer_motion.step()
-
       # Visu during training
       if i % 100 == 2 and args.visu:
         fname = os.path.join(visu_dir, str(i).zfill(6))
@@ -1836,21 +1833,6 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         selected_neighbors_noise = noise_color_scale[min_indices.detach().cpu().numpy()]
         
         save_pc_correspondences_samples_iteration(pc1, pc2, colors1, noise_color_scale, samples, samples_colors, selected_neighbors, selected_neighbors_noise, fname + "_nn.png")
-
-        ###########################
-        ## Flow for the whole PC ##
-        ###########################
-        db1_to_db2_nn_idx = knn_points(DATABASE1[..., :-3].unsqueeze(0), DATABASE2[..., :-3].unsqueeze(0), K=1).idx
-        db1_to_db2_nn_idx = db1_to_db2_nn_idx[0]
-
-        db2_to_db1_nn_idx = knn_points(DATABASE2[..., :-3].unsqueeze(0), DATABASE1[..., :-3].unsqueeze(0), K=1).idx
-        db2_to_db1_nn_idx = db2_to_db1_nn_idx[0]
-
-        selected_database_entry_potential = torch.gather(POTENTIAL_ONLY1, 0, db1_to_db2_nn_idx.repeat(1,3)).squeeze()
-        potential2_nn = selected_database_entry_potential
-
-        selected_database_entry_potential = torch.gather(POTENTIAL_ONLY2, 0, db2_to_db1_nn_idx.repeat(1,3)).squeeze()
-        potential1_nn = selected_database_entry_potential   
 
         ### potential visualization
         potentials1_ = POTENTIAL_ONLY1.detach().cpu().numpy()
@@ -1884,15 +1866,39 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
         save_pointcloud_samples(pc2, potential_color, fname + "_potential2.png", pc_size=0.05, skip=1)
 
+
+        ###########################
+        ## Flow for the whole PC ##
+        ###########################
+        db1_to_db2_nn_idx = knn_points(DATABASE1.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
+        db1_to_db2_nn_idx = db1_to_db2_nn_idx[0]
+
+        db2_to_db1_nn_idx = knn_points(DATABASE2.unsqueeze(0), DATABASE1.unsqueeze(0), K=1).idx
+        db2_to_db1_nn_idx = db2_to_db1_nn_idx[0]
+
+        selected_database_entry_potential1 = torch.gather(POTENTIAL_ONLY2, 0, db1_to_db2_nn_idx.repeat(1,3)).squeeze()
+        potential2_nn = selected_database_entry_potential1
+
+        selected_database_entry_potential2 = torch.gather(POTENTIAL_ONLY1, 0, db2_to_db1_nn_idx.repeat(1,3)).squeeze()
+        potential1_nn = selected_database_entry_potential2   
+
+        pc1 = PTS_COLOR_ONLY1[:, :3].detach().cpu().numpy()
+        color1 = PTS_COLOR_ONLY1[:, 3:].detach().cpu().numpy()
+
+        pc2 = PTS_COLOR_ONLY2[:, :3].detach().cpu().numpy()
+        color2 = PTS_COLOR_ONLY2[:, 3:].detach().cpu().numpy()
+
         #### Visualize flow per iteration
         scene_flow = POTENTIAL_ONLY1 - potential2_nn
         pc1_flowed = pc1 - scene_flow.detach().cpu().numpy()
-        save_pointcloud_samples(pc1_flowed, colors1, fname + "_database_pcflowed_1to2.png", pc_size=0.05, skip=1)
+        save_pointcloud_samples(pc1_flowed, color1, fname + "_database_pcflowed_1to2.png", pc_size=0.05, skip=1)
 
         scene_flow = POTENTIAL_ONLY2 - potential1_nn
         pc2_flowed = pc2 - scene_flow.detach().cpu().numpy()
-        save_pointcloud_samples(pc2_flowed, colors2, fname + "_database_pcflowed_2to1.png", pc_size=0.05, skip=1)
+        save_pointcloud_samples(pc2_flowed, color2, fname + "_database_pcflowed_2to1.png", pc_size=0.05, skip=1)
 
+      loss.backward()
+      optimizer_motion.step()
 
       # write logs
       if i%args.i_weights==0:
