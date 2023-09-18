@@ -789,10 +789,16 @@ def create_nerf2(args, scene_render_params):
             model_fine1.load_state_dict(ckpt['network_fine_state_dict'])
 
     ### Motion model
-    if not args.potential_nopos:
-      motion_model1 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+    if not args.is_dino_pca:
+      if not args.potential_nopos:
+        motion_model1 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+      else:
+        motion_model1 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
     else:
-      motion_model1 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+      if not args.potential_nopos:
+        motion_model1 = MotionPotential(input_ch=3, input_ch_feature=args.pcadim, output_ch=3)
+      else:
+        motion_model1 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.pcadim, output_ch=3)
     motion_model1 = nn.DataParallel(motion_model1).to(device)
 
     for name, param in motion_model1.named_parameters():
@@ -848,10 +854,17 @@ def create_nerf2(args, scene_render_params):
             model_fine2.load_state_dict(ckpt['network_fine_state_dict'])
 
     ### Motion model
-    if not args.potential_nopos:
-      motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3, no_bias = args.no_bias_potential2)
+    if not args.is_dino_pca:
+      if not args.potential_nopos:
+        motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3, no_bias = args.no_bias_potential2)
+      else:
+        motion_model2 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+      motion_model2 = nn.DataParallel(motion_model2).to(device)
     else:
-      motion_model2 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+      if not args.potential_nopos:
+        motion_model2 = MotionPotential(input_ch=3, input_ch_feature=args.pcadim, output_ch=3, no_bias = args.no_bias_potential2)
+      else:
+        motion_model2 = MotionPotential_nopos(input_ch=3, input_ch_feature=args.pcadim, output_ch=3)
     motion_model2 = nn.DataParallel(motion_model2).to(device)
 
     for name, param in motion_model2.named_parameters():
@@ -1338,7 +1351,11 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
     print("Loaded models.")
     
     ### To save outputs
-    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_motion_potential")
+    if not args.color_feature_only:
+      result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_motion_potential")
+    else:
+      result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_motion_colorfeat_only")
+
     os.makedirs(result_dir, exist_ok=True)
 
     # create camera embedding function
@@ -1395,6 +1412,9 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
     POTENTIAL_ONLY1 = []
     POTENTIAL_ONLY2 = []
 
+    PHI1 = []
+    PHI2 = []
+
     PTS_COLOR_ONLY1 = []
     PTS_COLOR_ONLY2 = []
 
@@ -1403,8 +1423,9 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       ###### Constructing the Database ######
       #######################################
 
-      for idx in range(0, len(i_train), skip_view):
-        img_i = i_train[idx]      
+      # for idx in range(0, len(i_train), skip_view):
+      for idx in args.camera_indices:
+        img_i = i_train[idx]
 
         #### Downsample to get a smaller size
         curr_valid_depth1 = valid_depths[0][img_i]
@@ -1469,6 +1490,9 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
         PTS_COLOR_ONLY1.append(torch.cat([pnm_points1, pnm_rgb_term1], dim=-1))
         PTS_COLOR_ONLY2.append(torch.cat([pnm_points2, pnm_rgb_term2], dim=-1))
 
+        PHI1.append((potentials1))
+        PHI2.append((potentials2))
+
         #####################################
 
       DATABASE1 = torch.cat(DATABASE1, 0)
@@ -1478,12 +1502,17 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       PTS_COLOR_ONLY1 = torch.cat(PTS_COLOR_ONLY1, 0)
       PTS_COLOR_ONLY2 = torch.cat(PTS_COLOR_ONLY2, 0)
 
+      PHI1 = torch.cat(PHI1, 0)
+      PHI2 = torch.cat(PHI2, 0)
+
       print(DATABASE1.shape)
       print(DATABASE2.shape)
       print(POTENTIAL_ONLY1.shape)
       print(POTENTIAL_ONLY2.shape)
       print(PTS_COLOR_ONLY1.shape)
       print(PTS_COLOR_ONLY2.shape)
+      print(PHI1.shape)
+      print(PHI2.shape)
       print()
 
       #######################################
@@ -1498,12 +1527,22 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       pc2 = PTS_COLOR_ONLY2[:, :3].detach().cpu().numpy()
       color2 = PTS_COLOR_ONLY2[:, 3:].detach().cpu().numpy()
 
-      ## DB1 to DB2
-      db1_to_db2_nn_idx = knn_points(DATABASE1.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
-      db1_to_db2_nn_idx = db1_to_db2_nn_idx[0]
+      if not args.color_feature_only:
+        ## DB1 to DB2
+        db1_to_db2_nn_idx = knn_points(DATABASE1.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
+        db1_to_db2_nn_idx = db1_to_db2_nn_idx[0]
 
-      db2_to_db1_nn_idx = knn_points(DATABASE2.unsqueeze(0), DATABASE1.unsqueeze(0), K=1).idx
-      db2_to_db1_nn_idx = db2_to_db1_nn_idx[0]
+        db2_to_db1_nn_idx = knn_points(DATABASE2.unsqueeze(0), DATABASE1.unsqueeze(0), K=1).idx
+        db2_to_db1_nn_idx = db2_to_db1_nn_idx[0]
+
+      else:
+        ## DB1 to DB2
+        db1_to_db2_nn_idx = knn_points(DATABASE1[..., :-3].unsqueeze(0), DATABASE2[..., :-3].unsqueeze(0), K=1).idx
+        db1_to_db2_nn_idx = db1_to_db2_nn_idx[0]
+
+        db2_to_db1_nn_idx = knn_points(DATABASE2[..., :-3].unsqueeze(0), DATABASE1[..., :-3].unsqueeze(0), K=1).idx
+        db2_to_db1_nn_idx = db2_to_db1_nn_idx[0]
+
 
       selected_database_entry = torch.gather(PTS_COLOR_ONLY2, 0, db1_to_db2_nn_idx.repeat(1,6)).squeeze()
       pc2_nn = selected_database_entry[:, :3]
@@ -1515,11 +1554,11 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
 
       ### Plot motion
-      selected_database_entry_potential = torch.gather(POTENTIAL_ONLY2, 0, db1_to_db2_nn_idx.repeat(1,3)).squeeze()
-      potential2_nn = selected_database_entry_potential + pc2_nn
+      selected_database_entry_potential = torch.gather(PHI2, 0, db1_to_db2_nn_idx.repeat(1,3)).squeeze()
+      potential2_nn = selected_database_entry_potential
 
-      selected_database_entry_potential = torch.gather(POTENTIAL_ONLY1, 0, db2_to_db1_nn_idx.repeat(1,3)).squeeze()
-      potential1_nn = selected_database_entry_potential + pc1_nn      
+      selected_database_entry_potential = torch.gather(PHI1, 0, db2_to_db1_nn_idx.repeat(1,3)).squeeze()
+      potential1_nn = selected_database_entry_potential   
 
       '''
       energy: (phi(x) - x) - (phi(y)-y)
@@ -1527,20 +1566,21 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       scene_flow = phi(x) - phi(y)
       y = x - scene_flow
       '''
-      scene_flow = POTENTIAL_ONLY1 - potential2_nn
+      scene_flow = PHI1 - potential2_nn
       pc1_flowed = pc1 - scene_flow.detach().cpu().numpy()
 
+      save_point_cloud(pc1, to8b(color1), os.path.join(result_dir, "database_pc1.ply"))
       save_point_cloud(pc1_flowed, to8b(color1), os.path.join(result_dir, "database_pcflowed_1to2.ply"))
 
-      scene_flow = POTENTIAL_ONLY2 - potential1_nn
+      scene_flow = PHI2 - potential1_nn
       pc2_flowed = pc2 - scene_flow.detach().cpu().numpy()
 
+      save_point_cloud(pc2, to8b(color2), os.path.join(result_dir, "database_pc2.ply"))
       save_point_cloud(pc2_flowed, to8b(color2), os.path.join(result_dir, "database_pcflowed_2to1.ply"))
 
-      exit()
-
       ### For each image, compute for flow and nearest neighbor
-      for idx in range(0, len(i_train), skip_view):
+      # for idx in range(0, len(i_train), skip_view):
+      for idx in args.camera_indices:
         img_i = i_train[idx] 
 
         #### Downsample to get a smaller size
@@ -1588,14 +1628,15 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
         # #### Get nearest neighbors
 
-        ### 1. Whole vector
-        weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1], -1)
-        # print(query_vecs.shape)
-        # print(DATABASE2.shape)
-        nn_idx = knn_points(query_vecs.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
-        nn_idx = nn_idx[0]
-        # print(nn_idx.shape)
+        if not args.color_feature_only:
+          ### 1. Whole vector
+          weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
+          query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1], -1)
+          # print(query_vecs.shape)
+          # print(DATABASE2.shape)
+          nn_idx = knn_points(query_vecs.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
+          nn_idx = nn_idx[0]
+          # print(nn_idx.shape)
 
         # ## 2. Potential only 
         # query_vecs = potentials1 - pnm_points1
@@ -1605,14 +1646,15 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
         # nn_idx = nn_idx[0]
         # print(nn_idx.shape)
 
-        ### 3. Color and feature vector only
-        # query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1, pnm_feature_term1 * weight_features1], -1)
-        # print(query_vecs.shape)
-        # database_to_retrieve = DATABASE2[..., :-3]
-        # print(database_to_retrieve.shape)
-        # nn_idx = knn_points(query_vecs.unsqueeze(0), database_to_retrieve.unsqueeze(0), K=1).idx
-        # nn_idx = nn_idx[0]
-        # print(nn_idx.shape)
+        else:
+          ## 3. Color and feature vector only
+          query_vecs = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight], -1)
+          # print(query_vecs.shape)
+          database_to_retrieve = DATABASE2[..., :-3]
+          # print(database_to_retrieve.shape)
+          nn_idx = knn_points(query_vecs.unsqueeze(0), database_to_retrieve.unsqueeze(0), K=1).idx
+          nn_idx = nn_idx[0]
+          # print(nn_idx.shape)
 
         pc1 = pnm_points1.detach().cpu().numpy()
         colors1 = pnm_rgb_term1.detach().cpu().numpy()
@@ -1871,7 +1913,7 @@ def config_parser():
     ### For loading a pair of nerf models ####
     parser.add_argument('--load_pretrained', default= False, type=bool)
 
-    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_blender_withdepth_dino/",
+    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_0915_blender_withdepth_dino_100/",
                         help='folder directory name for where the pretrained model that we want to load is')
     parser.add_argument("--pretrained_fol1", type=str, default="hotdog",
                         help='first nerf folder')
@@ -1891,7 +1933,7 @@ def config_parser():
                         # help='Frame index to train the nerf model.')   
     parser.add_argument(
         '--camera_indices',
-        default=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], type=list_of_ints,
+        default=[0,5,28,37], type=list_of_ints,
         help='camera indices in the rig to use',
     )     
     parser.add_argument("--frame_idx", type=list_of_ints, default=[0], 
@@ -1918,6 +1960,16 @@ def config_parser():
                         help='weight for the feature term')
 
     parser.add_argument('--no_bias_potential2', default= False, type=bool)
+
+    parser.add_argument('--color_feature_only', default= False, type=bool)
+
+    parser.add_argument("--xyz_potential_scale", type=float, default=1.0, 
+                        help='weight for xyz term in potential network')
+    parser.add_argument("--dino_potential_scale", type=float, default=1.0, 
+                        help='weight for dino term in potential network')
+    parser.add_argument('--is_dino_pca', default= False, type=bool)
+    parser.add_argument("--pcadim", type=int, default=3,
+                        help='pca_dim')
 
     return parser
 

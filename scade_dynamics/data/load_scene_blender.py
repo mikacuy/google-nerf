@@ -177,7 +177,7 @@ def read_feature(fname, feat_dim, H, W):
 
     return curr_feat
 
-def load_scene_blender_depth_features(basedir, feature_dir, downsample=2, train_skip=1, test_skip=5, feat_dim=768):
+def load_scene_blender_depth_features(basedir, feature_dir, downsample=2, train_skip=1, test_skip=5, feat_dim=768, use_all_train=False):
 
     all_imgs = []
     all_depths = []
@@ -270,7 +270,11 @@ def load_scene_blender_depth_features(basedir, feature_dir, downsample=2, train_
 
     ### Split train and test
     i_test = np.arange(0, all_poses.shape[0], test_skip)
-    i_train = np.setdiff1d(np.arange(all_poses.shape[0]), i_test)
+
+    if not use_all_train:
+      i_train = np.setdiff1d(np.arange(all_poses.shape[0]), i_test)
+    else:
+      i_train = np.arange(all_poses.shape[0])
     i_split = [i_train, i_test]
 
     ### For video -- use spherical poses

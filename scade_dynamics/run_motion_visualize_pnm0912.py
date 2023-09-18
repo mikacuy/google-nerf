@@ -879,7 +879,6 @@ def create_nerf2(args, scene_render_params):
         motion_model1.load_state_dict(ckpt['network_motion1_state_dict'])
         motion_model2.load_state_dict(ckpt['network_motion2_state_dict'])
 
-
     ##########################
     embedded_cam = torch.tensor((), device=device)
     render_kwargs_train = {
@@ -1332,7 +1331,7 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
     print("Loaded models.")
     
     ### To save outputs
-    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_pnm_mu" + str(args.pnm_mean) + "_std" + str(args.pnm_std))
+    result_dir = os.path.join(args.ckpt_dir, args.expname, "visu_pnm_mu" + str(args.pnm_mean) + "_std" + str(args.pnm_std)+ "_fw" + str(args.feat_dist_weight) + "_idxquery" + str(args.idx_query))
     os.makedirs(result_dir, exist_ok=True)
 
     # create camera embedding function
@@ -1369,6 +1368,9 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
 
     FEAT_SCALE = 1.0
 
+    # print(args.camera_indices)
+    # exit()
+
     #############################
     ##### Computing for STD #####
     #############################
@@ -1380,7 +1382,8 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       DATABASE1 = []
       DATABASE2 = []
 
-      for idx in range(0, len(i_train), skip_view):
+      # for idx in range(0, len(i_train), skip_view):
+      for idx in args.camera_indices:
         img_i = i_train[idx]      
 
         #### Downsample to get a smaller size
@@ -1503,7 +1506,8 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       ###### Constructing the Database ######
       #######################################
 
-      for idx in range(0, len(i_train), skip_view):
+      # for idx in range(0, len(i_train), skip_view):
+      for idx in args.camera_indices:
         img_i = i_train[idx]      
 
         #### Downsample to get a smaller size
@@ -1610,9 +1614,12 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       #########################
 
 
-      NUM_SAMPLES = 100
+      # NUM_SAMPLES = 100
+      NUM_SAMPLES = args.num_pnm_samples
 
+      #############################
       ## Plate point
+      # idx_to_take = 654
       # idx_to_take = 1000
 
       ### edge of the plate
@@ -1623,7 +1630,10 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       # idx_to_take = 436
 
       ##use this -- bread of the hotdog
-      idx_to_take = 654
+      # idx_to_take = 20
+
+      idx_to_take = args.idx_query
+      #############################
 
       retrieved_pts = []
       retrieved_color = []
@@ -1632,11 +1642,14 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       pc2 = PTS_COLOR_ONLY2[:, :3].detach().cpu().numpy()
       pc1 = pnm_points1.detach().cpu().numpy()
       colors1 = pnm_rgb_term1.detach().cpu().numpy()
-        
-      # # Finding a query on the hotdog
-      # idx_sorted = np.argsort(pc1[...,0])
-      # print(idx_sorted[-100:])
-      # exit()
+
+      if args.find_boundaries:
+        print("Finding idx for the query point to test")        
+        # Finding a query on the hotdog
+        idx_sorted = np.argsort(pc1[..., args.find_boundaries_axis])
+        print("Top 300 indices are")
+        print(idx_sorted[-300:])
+        exit()
       
       weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
 
@@ -1682,7 +1695,7 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       print(retrieved_pts.shape)
       print(retrieved_color.shape)
       
-      save_pc_knn_samples(pc1, colors1, idx_to_take, pc2, retrieved_pts, retrieved_color, fname + "_pnmsamples.png")
+      save_pc_knn_samples(pc1, colors1, idx_to_take, pc2, retrieved_pts, retrieved_color, fname + "__pnmsamples.png")
 
       print("Done.")
       exit()
@@ -1825,8 +1838,10 @@ def config_parser():
     ### For loading a pair of nerf models ####
     parser.add_argument('--load_pretrained', default= False, type=bool)
 
-    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_blender_withdepth_dino/",
-                        help='folder directory name for where the pretrained model that we want to load is')
+    # parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_blender_withdepth_dino/",
+    #                     help='folder directory name for where the pretrained model that we want to load is')
+    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_0915_blender_withdepth_dino_100/",
+                        help='folder directory name for where the pretrained model that we want to load is')    
     parser.add_argument("--pretrained_fol1", type=str, default="hotdog",
                         help='first nerf folder')
     parser.add_argument("--pretrained_fol2", type=str, default="hotdog_edited",
@@ -1845,7 +1860,7 @@ def config_parser():
                         # help='Frame index to train the nerf model.')   
     parser.add_argument(
         '--camera_indices',
-        default=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], type=list_of_ints,
+        default=[0,5,28,37], type=list_of_ints,
         help='camera indices in the rig to use',
     )     
     parser.add_argument("--frame_idx", type=list_of_ints, default=[0], 
@@ -1872,6 +1887,16 @@ def config_parser():
                         help='weight for the color term')
     parser.add_argument("--feat_dist_weight", type=float, default=1.0, 
                         help='weight for the feature term')
+
+    parser.add_argument("--idx_query", type=int, default=1000,
+                        help='idx of the query to visualize perturb and map samples')
+
+    parser.add_argument("--num_pnm_samples", type=int, default=100,
+                        help='number of perturb and map samples')
+
+    parser.add_argument('--find_boundaries', default= False, type=bool)
+    parser.add_argument('--find_boundaries_axis', default= 2, type=int)
+    
 
     return parser
 

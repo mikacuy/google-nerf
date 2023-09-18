@@ -1389,7 +1389,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       DATABASE1 = []
       DATABASE2 = []
 
-      for idx in range(0, len(i_train), skip_view):
+      # for idx in range(0, len(i_train), skip_view):
+      for idx in args.camera_indices:
         img_i = i_train[idx]      
 
         #### Downsample to get a smaller size
@@ -1641,7 +1642,8 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       ###### Constructing the Database ######
       #######################################
 
-      for idx in range(0, len(i_train), skip_view):
+      # for idx in range(0, len(i_train), skip_view):
+      for idx in args.camera_indices:
         img_i = i_train[idx]      
 
         #### Downsample to get a smaller size
@@ -1973,7 +1975,7 @@ def config_parser():
     ### For loading a pair of nerf models ####
     parser.add_argument('--load_pretrained', default= False, type=bool)
 
-    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_blender_withdepth_dino/",
+    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_0915_blender_withdepth_dino_100/",
                         help='folder directory name for where the pretrained model that we want to load is')
     parser.add_argument("--pretrained_fol1", type=str, default="hotdog",
                         help='first nerf folder')
@@ -1993,7 +1995,7 @@ def config_parser():
                         # help='Frame index to train the nerf model.')   
     parser.add_argument(
         '--camera_indices',
-        default=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], type=list_of_ints,
+        default=[0,5,28,37], type=list_of_ints,
         help='camera indices in the rig to use',
     )     
     parser.add_argument("--frame_idx", type=list_of_ints, default=[0], 
@@ -2113,7 +2115,7 @@ def run_nerf():
 
         scene_feature_dir = os.path.join(args.data_dir, args.feature_dir1)
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim)
+            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim, use_all_train=True)
 
         depth_hypothesis = None
 
@@ -2140,7 +2142,7 @@ def run_nerf():
 
         scene_feature_dir = os.path.join(args.data_dir, args.feature_dir2)
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim)
+            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim, use_all_train=True)
 
         depth_hypothesis = None
 
