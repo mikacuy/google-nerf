@@ -1579,14 +1579,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     visu_dir = os.path.join(args.ckpt_dir, args.expname, "training_visu")
     os.makedirs(visu_dir, exist_ok=True)
 
-
     #### Precompute samples, color and feature ####
     with torch.no_grad():
-      DATABASE1_PRECOMPUTE = {}
-      DATABASE2_PRECOMPUTE = {}
-
-      PTS_COLOR_ONLY1_PRECOMPUTE = {}
-      PTS_COLOR_ONLY2_PRECOMPUTE = {}
+      DATABASE1_PRECOMPUTE = []
+      DATABASE2_PRECOMPUTE = []
 
       # for idx in range(0, len(i_train), skip_view):
       for idx in args.camera_indices:
@@ -1658,11 +1654,33 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         curr_entries1 = torch.cat([pnm_points1, pnm_rgb_term1, pnm_feature_term1, pnm_feature_term1_input], -1)
         curr_entries2 = torch.cat([pnm_points2, pnm_rgb_term2, pnm_feature_term2, pnm_feature_term2_input], -1)
 
-        DATABASE1_PRECOMPUTE[img_i] = curr_entries1
-        DATABASE2_PRECOMPUTE[img_i] = curr_entries2
+        DATABASE1_PRECOMPUTE.append(curr_entries1)
+        DATABASE2_PRECOMPUTE.append(curr_entries2)
 
+    DATABASE1_PRECOMPUTE = torch.cat(DATABASE1_PRECOMPUTE, axis=0)
+    DATABASE2_PRECOMPUTE = torch.cat(DATABASE2_PRECOMPUTE, axis=0)
     ###############################################
 
+    ### Init dataloader for caching
+    zcache_dataloader1 = torch.utils.data.DataLoader(
+        dataset=torch.utils.data.TensorDataset(DATABASE1_PRECOMPUTE),
+        batch_size=1024,
+        num_workers=0,
+        shuffle=False)    
+    zcache_dataloader2 = torch.utils.data.DataLoader(
+        dataset=torch.utils.data.TensorDataset(DATABASE2_PRECOMPUTE),
+        batch_size=1024,
+        num_workers=0,
+        shuffle=False)
+
+    # print(DATABASE1_PRECOMPUTE.shape)
+    # print(DATABASE2_PRECOMPUTE.shape)
+    # print(len(zcache_dataloader1))
+    # print(len(zcache_dataloader2))
+    # exit() 
+
+    NN_1_to_2 = None
+    NN_2_to_1 = None
 
     ####################################
     ##### Training Motion Potential ####
@@ -1670,72 +1688,146 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     for i in trange(start, N_iters):
 
-      DATABASE1 = []
-      DATABASE2 = []
+      if i % args.recache_database == 0 or (NN_1_to_2 is None) or (NN_1_to_2 is None):
+        print("Recaching database ...")
+        with torch.no_grad():
+          #######################################
+          ###### Constructing the Database ######
+          #######################################
 
-      if args.visu:
-        POTENTIAL_ONLY1 = []
-        POTENTIAL_ONLY2 = []
-        PTS_COLOR_ONLY1 = []
-        PTS_COLOR_ONLY2 = []
-        NOISE_VECTOR1 = []
-        NOISE_VECTOR2 = []
+          DATABASE1 = []
+          DATABASE2 = []
 
-      #######################################
-      ###### Constructing the Database ######
-      #######################################
+          if args.visu:
+            POTENTIAL_ONLY1 = []
+            POTENTIAL_ONLY2 = []
+            PTS_COLOR_ONLY1 = []
+            PTS_COLOR_ONLY2 = []
+            NOISE_VECTOR1 = []
+            NOISE_VECTOR2 = []
+          
+          ### Frame 1
+          for j, data in enumerate(zcache_dataloader1):
+            pnm_points1, pnm_rgb_term1, pnm_feature_term1, pnm_feature_term1_input = torch.split(data[0], [3, 3, args.feat_dim, args.pcadim], dim=-1)
+            motion_query_func = render_kwargs_train["motion_network_query_fn"]
+            motion_model1 = render_kwargs_train["network_motion1"]
+            potentials1 = motion_query_func(pnm_points1 * args.xyz_potential_scale, pnm_feature_term1_input * args.dino_potential_scale, motion_model1)
 
-      # for idx in range(0, len(i_train), skip_view):
-      for idx in args.camera_indices:
-        img_i = i_train[idx]      
+            ### Add noise in database construction for randomness in neighborhood
+            ### Gaussian
+            eps1_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term1.shape[0], 1))
 
-        pnm_points1, pnm_rgb_term1, pnm_feature_term1, pnm_feature_term1_input = torch.split(DATABASE1_PRECOMPUTE[img_i], [3, 3, args.feat_dim, args.pcadim], dim=-1)
-        pnm_points2, pnm_rgb_term2, pnm_feature_term2, pnm_feature_term2_input = torch.split(DATABASE2_PRECOMPUTE[img_i], [3, 3, args.feat_dim, args.pcadim], dim=-1)
+            #### Construct database elements ####
+            weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
+            curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1, eps1_noise], -1)          
 
+            DATABASE1.append(curr_entries1)
 
-        motion_query_func = render_kwargs_train["motion_network_query_fn"]
-        motion_model1 = render_kwargs_train["network_motion1"]
-        potentials1 = motion_query_func(pnm_points1 * args.xyz_potential_scale, pnm_feature_term1_input * args.dino_potential_scale, motion_model1)
+            if args.visu:
+              POTENTIAL_ONLY1.append((potentials1))
+              PTS_COLOR_ONLY1.append(torch.cat([pnm_points1, pnm_rgb_term1], dim=-1))
+              NOISE_VECTOR1.append(eps1_noise)
 
-        motion_query_func = render_kwargs_train["motion_network_query_fn"]
-        motion_model2 = render_kwargs_train["network_motion2"]
-        potentials2 = motion_query_func(pnm_points2 * args.xyz_potential_scale, pnm_feature_term2_input * args.dino_potential_scale, motion_model2)
+          ### Frame 2
+          for j, data in enumerate(zcache_dataloader2):
+            pnm_points2, pnm_rgb_term2, pnm_feature_term2, pnm_feature_term2_input = torch.split(data[0], [3, 3, args.feat_dim, args.pcadim], dim=-1)
+            motion_query_func = render_kwargs_train["motion_network_query_fn"]
+            motion_model2 = render_kwargs_train["network_motion2"]
+            potentials2 = motion_query_func(pnm_points2 * args.xyz_potential_scale, pnm_feature_term2_input * args.dino_potential_scale, motion_model2)
 
-        ### Add noise in database construction for randomness in neighborhood
-        eps1_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term1.shape[0], 1))
-        eps2_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term2.shape[0], 1))
+            ### Add noise in database construction for randomness in neighborhood
+            ### Gaussian
+            eps2_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term2.shape[0], 1))
 
-        #### Construct database elements ####
-        weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
-        curr_entries1 = torch.cat([pnm_rgb_term1 * weight_rgb1 * args.color_dist_weight, pnm_feature_term1 * weight_features1 * args.feat_dist_weight, (potentials1 - pnm_points1) * weight_potentials1, eps1_noise], -1)
+            #### Construct database elements ####
+            weight_rgb2, weight_features2, weight_potentials2 = SCALE_FACTORS[1]
+            curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2 * args.color_dist_weight, pnm_feature_term2 * weight_features2 * args.feat_dist_weight, (potentials2 - pnm_points2) * weight_potentials2, eps2_noise], -1)
 
-        weight_rgb2, weight_features2, weight_potentials2 = SCALE_FACTORS[1]
-        curr_entries2 = torch.cat([pnm_rgb_term2 * weight_rgb2 * args.color_dist_weight, pnm_feature_term2 * weight_features2 * args.feat_dist_weight, (potentials2 - pnm_points2) * weight_potentials2, eps2_noise], -1)
+            DATABASE2.append(curr_entries2)
 
-        DATABASE1.append(curr_entries1)
-        DATABASE2.append(curr_entries2)
+            if args.visu:
+              POTENTIAL_ONLY2.append((potentials2))
+              PTS_COLOR_ONLY2.append(torch.cat([pnm_points2, pnm_rgb_term2], dim=-1))
+              NOISE_VECTOR2.append(eps2_noise)
 
-        if args.visu:
-          with torch.no_grad():
-            POTENTIAL_ONLY1.append((potentials1))
-            POTENTIAL_ONLY2.append((potentials2))
-            PTS_COLOR_ONLY1.append(torch.cat([pnm_points1, pnm_rgb_term1], dim=-1))
-            PTS_COLOR_ONLY2.append(torch.cat([pnm_points2, pnm_rgb_term2], dim=-1))
-            NOISE_VECTOR1.append(eps1_noise)
-            NOISE_VECTOR2.append(eps2_noise)
+          DATABASE1 = torch.cat(DATABASE1, 0)
+          DATABASE2 = torch.cat(DATABASE2, 0)
 
+          if args.visu:
+            POTENTIAL_ONLY1 = torch.cat(POTENTIAL_ONLY1, 0)
+            POTENTIAL_ONLY2 = torch.cat(POTENTIAL_ONLY2, 0)
+            PTS_COLOR_ONLY1 = torch.cat(PTS_COLOR_ONLY1, 0)
+            PTS_COLOR_ONLY2 = torch.cat(PTS_COLOR_ONLY2, 0)
+            NOISE_VECTOR1 = torch.cat(NOISE_VECTOR1, 0)
+            NOISE_VECTOR2 = torch.cat(NOISE_VECTOR2, 0)
+
+          print("Cached database:")
+          print(DATABASE1.shape)
+          print(DATABASE2.shape)
+          print()
+
+          NN_1_to_2 = torch.empty((DATABASE1_PRECOMPUTE.shape[0]), dtype=torch.int64)
+          NN_2_to_1 = torch.empty((DATABASE2_PRECOMPUTE.shape[0]), dtype=torch.int64)
+
+          ### Get nearest neighbor index
+          nn_dataloader1 = torch.utils.data.DataLoader(
+              dataset=torch.utils.data.TensorDataset(DATABASE1),
+              batch_size=1024,
+              num_workers=0,
+              shuffle=False)
+
+          prev = 0
+          for j, data in enumerate(nn_dataloader1):
+            selected_entries = data[0]
+            batch_size = selected_entries.shape[0]
+
+            ### Set noise to 0 for the query
+            selected_entries[..., -1] = 0.0
+
+            distances = torch.norm(selected_entries.unsqueeze(1) - DATABASE2.unsqueeze(0), p=2, dim=-1) 
+            _, min_indices = torch.min(distances, axis=-1)
+
+            NN_1_to_2[prev : prev + batch_size] = min_indices
+            prev = prev + batch_size
+          
+          # print("Nearest neighbor indices frame 1 to 2.")
+          # print(NN_1_to_2)
+          # print(NN_1_to_2.shape)
+
+          ### Other direction if two-way loss
+          if args.is_two_way:
+            nn_dataloader2 = torch.utils.data.DataLoader(
+                dataset=torch.utils.data.TensorDataset(DATABASE2),
+                batch_size=1024,
+                num_workers=0,
+                shuffle=False)
+
+            prev = 0
+            for j, data in enumerate(nn_dataloader2):
+              selected_entries = data[0]
+              batch_size = selected_entries.shape[0]
+
+              ### Set noise to 0 for the query
+              selected_entries[..., -1] = 0.0
+
+              distances = torch.norm(selected_entries.unsqueeze(1) - DATABASE1.unsqueeze(0), p=2, dim=-1) 
+              _, min_indices = torch.min(distances, axis=-1)
+
+              NN_2_to_1[prev : prev + batch_size] = min_indices
+              prev = prev + batch_size
+
+            # print("Nearest neighbor indices frame 2 to 1.")
+            # print(NN_2_to_1)            
+            # print(NN_2_to_1.shape)
+            
+            print("Done recaching.")
+            print("Nearest neighbor indices frame 1 to 2.")
+            print(NN_1_to_2)
+            print(NN_1_to_2.shape)
+            print("Nearest neighbor indices frame 2 to 1.")
+            print(NN_2_to_1)
+            print(NN_2_to_1.shape)         
         #####################################
-
-      DATABASE1 = torch.cat(DATABASE1, 0)
-      DATABASE2 = torch.cat(DATABASE2, 0)
-
-      if args.visu:
-        POTENTIAL_ONLY1 = torch.cat(POTENTIAL_ONLY1, 0)
-        POTENTIAL_ONLY2 = torch.cat(POTENTIAL_ONLY2, 0)
-        PTS_COLOR_ONLY1 = torch.cat(PTS_COLOR_ONLY1, 0)
-        PTS_COLOR_ONLY2 = torch.cat(PTS_COLOR_ONLY2, 0)
-        NOISE_VECTOR1 = torch.cat(NOISE_VECTOR1, 0)
-        NOISE_VECTOR2 = torch.cat(NOISE_VECTOR2, 0)
 
       #######################################
       ####### Sampling from Database ########
@@ -1747,30 +1839,54 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         coin_flip = np.random.randint(2, size=1).squeeze()
 
         if coin_flip % 2 == 0:
-          QUERY = DATABASE1
-          DATABASE = DATABASE2
+          QUERY_NN_IDX = NN_1_to_2
+          QUERY = DATABASE1_PRECOMPUTE
+          DATABASE = DATABASE2_PRECOMPUTE
 
-          if args.visu:
+          motion_query_func = render_kwargs_train["motion_network_query_fn"]
+          motion_model_q = render_kwargs_train["network_motion1"]
+          motion_model_db = render_kwargs_train["network_motion2"]
+
+          weight_rgb_query, weight_features_query, weight_potentials_query = SCALE_FACTORS[0]
+          weight_rgb_db, weight_features_db, weight_potentials_db = SCALE_FACTORS[1]
+
+          if args.visu and args.recache_database == 0:
             DATABASE_PTS_COLOR = PTS_COLOR_ONLY2
             DATABASE_NOISE = NOISE_VECTOR2
 
             QUERY_PTS_COLOR = PTS_COLOR_ONLY1
 
         else:
-          QUERY = DATABASE2
-          DATABASE = DATABASE1
+          QUERY_NN_IDX = NN_2_to_1
+          QUERY = DATABASE2_PRECOMPUTE
+          DATABASE = DATABASE1_PRECOMPUTE
 
-          if args.visu:
+          motion_query_func = render_kwargs_train["motion_network_query_fn"]
+          motion_model_q = render_kwargs_train["network_motion2"]
+          motion_model_db = render_kwargs_train["network_motion1"]
+
+          weight_rgb_query, weight_features_query, weight_potentials_query = SCALE_FACTORS[1]
+          weight_rgb_db, weight_features_db, weight_potentials_db = SCALE_FACTORS[0]
+
+          if args.visu and args.recache_database == 0:
             DATABASE_PTS_COLOR = PTS_COLOR_ONLY1
             DATABASE_NOISE = NOISE_VECTOR1
 
             QUERY_PTS_COLOR = PTS_COLOR_ONLY2
       
       else:
-          QUERY = DATABASE1
-          DATABASE = DATABASE2
+          QUERY_NN_IDX = NN_1_to_2
+          QUERY = DATABASE1_PRECOMPUTE
+          DATABASE = DATABASE2_PRECOMPUTE
 
-          if args.visu:
+          motion_query_func = render_kwargs_train["motion_network_query_fn"]
+          motion_model_q = render_kwargs_train["network_motion1"]
+          motion_model_db = render_kwargs_train["network_motion2"]
+
+          weight_rgb_query, weight_features_query, weight_potentials_query = SCALE_FACTORS[0]
+          weight_rgb_db, weight_features_db, weight_potentials_db = SCALE_FACTORS[1]
+
+          if args.visu and args.recache_database == 0:
             DATABASE_PTS_COLOR = PTS_COLOR_ONLY2
             DATABASE_NOISE = NOISE_VECTOR2
 
@@ -1778,28 +1894,66 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       ### Select random indices --> right now we only take indices from database 1
       indices = torch.randperm(QUERY.shape[0])[:NUM_Y_TO_SAMPLE]  
-      selected_entries = QUERY[indices]   
+      selected_nn_idx = QUERY_NN_IDX[indices]
 
-      ### Make noise 0 for the query vectors
-      selected_entries[..., -1] = 0.0
+      selected_entries = torch.gather(QUERY, 0, indices.unsqueeze(-1).repeat(1, 3 + 3 + args.feat_dim + args.pcadim)).squeeze()
+      selected_database_entries = torch.gather(DATABASE, 0, selected_nn_idx.unsqueeze(-1).repeat(1, 3 + 3 + args.feat_dim + args.pcadim)).squeeze()
 
-      ### Get argmin based on perturbed neighbors
-      distances = torch.norm(selected_entries.unsqueeze(1) - DATABASE.unsqueeze(0), p=2, dim=-1) ### (256x200k) dynamic --> (200k, 200k) dynamic
-      _, min_indices = torch.min(distances, axis=-1)
+      ######################################################
+      ### Compute updated energy given selected neighbor ###
+      ######################################################
 
-      ### Calculate loss without the noise term
-      selected_database_entries = torch.gather(DATABASE, 0, min_indices.unsqueeze(-1).repeat(1, 3 + args.feat_dim + 3 + 1)).squeeze()
-      distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
+      # print(selected_entries.shape)
+      # print(selected_database_entries.shape)
+      # print(DATABASE1_PRECOMPUTE.shape)
+      # print(DATABASE2_PRECOMPUTE.shape)
+      # exit()
 
+      pnm_points_query, pnm_rgb_term_query, pnm_feature_term_query, pnm_feature_term_query_input = torch.split(selected_entries, [3, 3, args.feat_dim, args.pcadim], dim=-1)
+      pnm_points_db, pnm_rgb_term_db, pnm_feature_term_db, pnm_feature_term_db_input = torch.split(selected_database_entries, [3, 3, args.feat_dim, args.pcadim], dim=-1)
+
+      potentials_query = motion_query_func(pnm_points_query * args.xyz_potential_scale, pnm_feature_term_query_input * args.dino_potential_scale, motion_model_q)      
+      potentials_db = motion_query_func(pnm_points_db * args.xyz_potential_scale, pnm_feature_term_db_input * args.dino_potential_scale, motion_model_db)
+
+      curr_entries_query = torch.cat([pnm_rgb_term_query * weight_rgb_query * args.color_dist_weight, pnm_feature_term_query * weight_features_query * args.feat_dist_weight, (potentials_query - pnm_points_query) * weight_potentials_query], -1)          
+      curr_entries_db = torch.cat([pnm_rgb_term_db * weight_rgb_db * args.color_dist_weight, pnm_feature_term_db * weight_features_db * args.feat_dist_weight, (potentials_db - pnm_points_db) * weight_potentials_db], -1)          
+
+      ### For loss computation
+      selected_entries = curr_entries_query
+      selected_database_entries = curr_entries_db
+      ######################################################
+
+      ##########################################################################
+      ### Naive version: Computing nearest neighbor all the time w/o caching ###
+      ##########################################################################
+      # ### Get argmin based on perturbed neighbors
+      # distances = torch.norm(selected_entries.unsqueeze(1) - DATABASE.unsqueeze(0), p=2, dim=-1) ### (256x200k) dynamic --> (200k, 200k) dynamic
+      # _, min_indices = torch.min(distances, axis=-1)
+
+      # ### Calculate loss without the noise term
+      # selected_database_entries = torch.gather(DATABASE, 0, min_indices.unsqueeze(-1).repeat(1, 3 + args.feat_dim + 3 + 1)).squeeze()
+      ##########################################################################
+
+      ### Not exactly right
+      # distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
+
+      ### Change to squared loss
+      distances_min = torch.sum((selected_entries[..., :-1] - selected_database_entries[..., :-1])**2, dim=-1)
 
       with torch.no_grad():
-      ### To log individual energy losses
-        curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1, _ = torch.split(selected_entries, [3, args.feat_dim, 3, 1], dim=-1)
-        curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2, _ = torch.split(selected_database_entries, [3, args.feat_dim, 3, 1], dim=-1)
+        ### To log individual energy losses
+        curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1 = torch.split(selected_entries, [3, args.feat_dim, 3], dim=-1)
+        curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2 = torch.split(selected_database_entries, [3, args.feat_dim, 3], dim=-1)
+        
+        ### Not exactly right
+        # rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
+        # feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
+        # pd_agreement_energy = torch.mean(torch.norm(curr_potentials_term1 - curr_potentials_term2, p=2, dim=-1))
 
-        rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
-        feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
-        pd_agreement_energy = torch.mean(torch.norm(curr_potentials_term1 - curr_potentials_term2, p=2, dim=-1))
+        ### Change to squared loss
+        rgb_energy = torch.mean(torch.sum((curr_pnm_rgb_term1 - curr_pnm_rgb_term2)**2, dim=-1))
+        feature_energy = torch.mean(torch.sum((curr_pnm_feature_term1 - curr_pnm_feature_term2)**2, dim=-1))
+        pd_agreement_energy = torch.mean(torch.sum((curr_potentials_term1 - curr_potentials_term2)**2, dim=-1))
 
       # Compute loss and optimize
       optimizer_motion.zero_grad()
@@ -1808,7 +1962,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       loss = torch.mean(distances_min)
 
       # Visu during training
-      if i % 200 == 2 and args.visu:
+      if args.recache_database == 0 and args.visu:
         fname = os.path.join(visu_dir, str(i).zfill(6))
 
         pc2 = DATABASE_PTS_COLOR[:, :3].detach().cpu().numpy()
@@ -2562,41 +2716,39 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
         colors2 = colors1
         save_pc_correspondences(pc1, pc2, colors1, colors2, fname + "_flow.png", save_views=args.save_video)
 
-        flowed_points = torch.from_numpy(pc2).to(is_object_ray1.device)
-        image_pixel_ids = torch.nonzero(is_object_ray1, as_tuple=True)
-        print(is_object_ray1.shape)
-        print(image_pixel_ids)
-        print()
-        print(pc1.shape)
-        print(pc2.shape)
-        print(poses[0][img_i][:3, :])
-        print(intrinsics[0][img_i])
+        # ### Attempt to project flow -- incomplete
+        # flowed_points = torch.from_numpy(pc2).to(is_object_ray1.device)
+        # image_pixel_ids = torch.nonzero(is_object_ray1, as_tuple=True)
+        # print(is_object_ray1.shape)
+        # print(image_pixel_ids)
+        # print()
+        # print(pc1.shape)
+        # print(pc2.shape)
+        # print(poses[0][img_i][:3, :])
+        # print(intrinsics[0][img_i])
 
-        # print(poses[0][img_i] @ pc2)
+        # # print(poses[0][img_i] @ pc2)
 
-        fx, fy, cx, cy = intrinsics[0][img_i].detach().cpu().numpy()
-        K = np.array([
-            [fx, 0, cx],
-            [0, fy, cy],
-            [0, 0, 1]
-        ])
-        K_torch = torch.from_numpy(K).to(flowed_points.device)
+        # fx, fy, cx, cy = intrinsics[0][img_i].detach().cpu().numpy()
+        # K = np.array([
+        #     [fx, 0, cx],
+        #     [0, fy, cy],
+        #     [0, 0, 1]
+        # ])
+        # K_torch = torch.from_numpy(K).to(flowed_points.device)
 
-        print(flowed_points.shape)
-        print(torch.ones_like(flowed_points[..., :1]).shape)
-        points_homogenous = torch.cat([flowed_points, torch.ones_like(flowed_points[..., :1])], axis=-1)
-        print(points_homogenous.shape)
-        print(K_torch.shape)
-        print(torch.inverse(poses[0][img_i]))
-        print(torch.inverse(poses[0][img_i])[:3, :])
-        points_projected = K_torch.bmm(torch.inverse(poses[0][img_i])[:3, :]).bmm(flowed_points.permute(0, 2, 1))
+        # print(flowed_points.shape)
+        # print(torch.ones_like(flowed_points[..., :1]).shape)
+        # points_homogenous = torch.cat([flowed_points, torch.ones_like(flowed_points[..., :1])], axis=-1)
+        # print(points_homogenous.shape)
+        # print(K_torch.shape)
+        # print(torch.inverse(poses[0][img_i]))
+        # print(torch.inverse(poses[0][img_i])[:3, :])
+        # points_projected = K_torch.bmm(torch.inverse(poses[0][img_i])[:3, :]).bmm(flowed_points.permute(0, 2, 1))
 
-        print(points_projected.shape) 
+        # print(points_projected.shape) 
 
-        exit()
-
-
-
+        # exit()
 
         if args.save_video:
         ### Make video ###
@@ -2837,6 +2989,10 @@ def config_parser():
     ### Enable visu in training
     parser.add_argument('--visu', default= False, type=bool)
     parser.add_argument('--save_video', default= False, type=bool)
+
+    ### For recaching database
+    parser.add_argument("--recache_database", type=int, default=5000,
+                        help='number of iterations to recompute and recache the database')
 
     return parser
 

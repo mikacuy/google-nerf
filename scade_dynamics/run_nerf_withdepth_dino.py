@@ -1011,6 +1011,11 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     near, far = scene_sample_params['near'], scene_sample_params['far']
     H, W = images.shape[1:3]
     i_train, i_test = i_split
+
+    ### If sparse view then train views are the selected camera indices
+    if args.sparse_view:
+      i_train = args.camera_indices
+
     i_val = i_test
     print('TRAIN views are', i_train)
     print('VAL views are', i_val)
@@ -1462,7 +1467,7 @@ def config_parser():
                         # help='Frame index to train the nerf model.')   
     parser.add_argument(
         '--camera_indices',
-        default=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], type=list_of_ints,
+        default=[0,7,14,21,28,35,42,49,56,63,70,77,84,91,98], type=list_of_ints,
         help='camera indices in the rig to use',
     )     
     parser.add_argument("--frame_idx", type=list_of_ints, default=[0], 
@@ -1475,6 +1480,8 @@ def config_parser():
 
     parser.add_argument("--downsample", type=int, default=4,
                         help='downsample images')
+
+    parser.add_argument('--sparse_view', default= False, type=bool)
 
     return parser
 
@@ -1533,7 +1540,8 @@ def run_nerf():
     elif args.dataset == "blender":
         scene_feature_dir = os.path.join(args.data_dir, args.feature_dir)
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-            video_poses, video_intrinsics, _, all_features, all_features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim)
+            video_poses, video_intrinsics, _, all_features, all_features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, \
+                                                                                  downsample=args.downsample, feat_dim = args.feat_dim, use_all_train= args.sparse_view)
 
         all_depth_hypothesis = None
 

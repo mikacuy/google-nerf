@@ -1475,10 +1475,9 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       print("STD for PCA features of dim" + str(args.pcadim))
       print(std_feature1)
       print(std_feature2)
-      exit()
 
-      weight_rgb1 = (1./std_rgb1).float()
-      weight_features1 = (1./std_feature1).float()
+      # weight_rgb1 = (1./std_rgb1).float()
+      # weight_features1 = (1./std_feature1).float()
 
 
     #############################
@@ -1860,7 +1859,6 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       save_pointcloud_samples(pc2, potential_color, os.path.join(result_dir, "000_database2_potential.png"), save_views=False)
       save_motion_vectors(pc2, color2, potentials2_, os.path.join(result_dir, "000_database2_potential_endpt.png"), is_vec=False)
       
-      exit()
 
 
       ### For each image, compute for flow and nearest neighbor
@@ -2270,7 +2268,7 @@ def run_nerf():
 
         scene_feature_dir = os.path.join(args.data_dir, args.feature_dir1)
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim)
+            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim, use_all_train=True)
 
         depth_hypothesis = None
 
@@ -2297,7 +2295,7 @@ def run_nerf():
 
         scene_feature_dir = os.path.join(args.data_dir, args.feature_dir2)
         images, depths, valid_depths, poses, H, W, intrinsics, near, far, i_split, \
-            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim)
+            video_poses, video_intrinsics, _, features, features_fnames  = load_scene_blender_depth_features(scene_data_dir, scene_feature_dir, downsample=args.downsample, feat_dim = args.feat_dim, use_all_train=True)
 
         depth_hypothesis = None
 

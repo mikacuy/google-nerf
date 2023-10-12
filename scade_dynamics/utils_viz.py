@@ -78,12 +78,19 @@ def save_pc_knn_samples(pc1, colors1, idx_chosen, pc2, knn_pts, knn_pts_color, f
   fig = plt.figure()
   ax = fig.add_subplot(projection='3d')
 
-  ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker=".", s=0.01, c="gray")
-  ax.scatter(pc1[idx_chosen, 0], pc1[idx_chosen, 1], pc1[idx_chosen, 2], marker=".", s=10.0, c=colors1[idx_chosen])
+  ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker=".", s=0.05, c="gray")
+  ax.scatter(pc1[idx_chosen, 0], pc1[idx_chosen, 1], pc1[idx_chosen, 2], marker=".", s=20.0, c=colors1[idx_chosen])
 
-  ax.set_xlim(-2,2)
-  ax.set_ylim(-6,2)
+  ### this coordinate is for chair
+  ax.set_xlim(-1.5,2.5)
+  ax.set_ylim(-5,4)
   ax.set_zlim(-2,1)
+  
+  ### this was for hotdog
+  # ax.set_xlim(-2,2)
+  # ax.set_ylim(-6,2)
+  # ax.set_zlim(-2,1)
+
   ax.set_xlabel('X Label')
   ax.set_ylabel('Y Label')
   ax.set_zlabel('Z Label')
@@ -93,6 +100,9 @@ def save_pc_knn_samples(pc1, colors1, idx_chosen, pc2, knn_pts, knn_pts_color, f
   ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker=".", s=0.005, c="gray")
   ax.scatter(knn_pts[:, 0], knn_pts[:, 1], knn_pts[:, 2], marker=".", s=8.0, c=knn_pts_color)
   
+  ### Used for the chair scene
+  ax.view_init(elev=40., azim=230.)
+
   plt.savefig(fname) 
 
 
@@ -150,7 +160,7 @@ def save_motion_vectors(pcs, colors, vecs, fname, is_vec=True):
 
   plt.savefig(fname)
 
-def save_pc_correspondences(pc1, pc2, colors1, colors2, fname, save_views=False):
+def save_pc_correspondences(pc1, pc2, colors1, colors2, fname, save_views=False, size=0.4):
   ### To visualize point clouds side by side
   translation = np.array([0.0, -4.0, 0.0])
 
@@ -158,7 +168,7 @@ def save_pc_correspondences(pc1, pc2, colors1, colors2, fname, save_views=False)
   fig = plt.figure()
   ax = fig.add_subplot(projection='3d')
 
-  ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker=".", s=0.4, c=colors1)
+  ax.scatter(pc1[:, 0], pc1[:, 1], pc1[:, 2], marker=".", s=size, c=colors1)
   ax.set_xlim(-2,2)
   ax.set_ylim(-6,2)
   ax.set_zlim(-2,1)
@@ -167,7 +177,7 @@ def save_pc_correspondences(pc1, pc2, colors1, colors2, fname, save_views=False)
   ax.set_zlabel('Z Label')
 
   pc2 = pc2 + translation
-  ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker=".", s=0.4, c=colors2)
+  ax.scatter(pc2[:, 0], pc2[:, 1], pc2[:, 2], marker=".", s=size, c=colors2)
 
   endpoint_1 = pc1
   endpoint_2 = pc2
@@ -243,3 +253,119 @@ def save_point_cloud(pcd, rgb, filename, binary=True):
                    'end_header' % r.shape[0]
         # ---- Save ply data to disk
         np.savetxt(filename, np.column_stack((x, y, z, r, g, b)), fmt="%d %d %d %d %d %d", header=ply_head, comments='')
+
+
+### For 2D optical flow
+def make_colorwheel():
+    """
+    Generates a color wheel for optical flow visualization as presented in:
+        Baker et al. "A Database and Evaluation Methodology for Optical Flow" (ICCV, 2007)
+        URL: http://vision.middlebury.edu/flow/flowEval-iccv07.pdf
+
+    Code follows the original C++ source code of Daniel Scharstein.
+    Code follows the the Matlab source code of Deqing Sun.
+
+    Returns:
+        np.ndarray: Color wheel
+    """
+
+    RY = 15
+    YG = 6
+    GC = 4
+    CB = 11
+    BM = 13
+    MR = 6
+
+    ncols = RY + YG + GC + CB + BM + MR
+    colorwheel = np.zeros((ncols, 3))
+    col = 0
+
+    # RY
+    colorwheel[0:RY, 0] = 255
+    colorwheel[0:RY, 1] = np.floor(255*np.arange(0,RY)/RY)
+    col = col+RY
+    # YG
+    colorwheel[col:col+YG, 0] = 255 - np.floor(255*np.arange(0,YG)/YG)
+    colorwheel[col:col+YG, 1] = 255
+    col = col+YG
+    # GC
+    colorwheel[col:col+GC, 1] = 255
+    colorwheel[col:col+GC, 2] = np.floor(255*np.arange(0,GC)/GC)
+    col = col+GC
+    # CB
+    colorwheel[col:col+CB, 1] = 255 - np.floor(255*np.arange(CB)/CB)
+    colorwheel[col:col+CB, 2] = 255
+    col = col+CB
+    # BM
+    colorwheel[col:col+BM, 2] = 255
+    colorwheel[col:col+BM, 0] = np.floor(255*np.arange(0,BM)/BM)
+    col = col+BM
+    # MR
+    colorwheel[col:col+MR, 2] = 255 - np.floor(255*np.arange(MR)/MR)
+    colorwheel[col:col+MR, 0] = 255
+    return colorwheel
+
+
+def flow_uv_to_colors(u, v, convert_to_bgr=False):
+    """
+    Applies the flow color wheel to (possibly clipped) flow components u and v.
+
+    According to the C++ source code of Daniel Scharstein
+    According to the Matlab source code of Deqing Sun
+
+    Args:
+        u (np.ndarray): Input horizontal flow of shape [H,W]
+        v (np.ndarray): Input vertical flow of shape [H,W]
+        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
+
+    Returns:
+        np.ndarray: Flow visualization image of shape [H,W,3]
+    """
+    flow_image = np.zeros((u.shape[0], u.shape[1], 3), np.uint8)
+    colorwheel = make_colorwheel()  # shape [55x3]
+    ncols = colorwheel.shape[0]
+    rad = np.sqrt(np.square(u) + np.square(v))
+    a = np.arctan2(-v, -u)/np.pi
+    fk = (a+1) / 2*(ncols-1)
+    k0 = np.floor(fk).astype(np.int32)
+    k1 = k0 + 1
+    k1[k1 == ncols] = 0
+    f = fk - k0
+    for i in range(colorwheel.shape[1]):
+        tmp = colorwheel[:,i]
+        col0 = tmp[k0] / 255.0
+        col1 = tmp[k1] / 255.0
+        col = (1-f)*col0 + f*col1
+        idx = (rad <= 1)
+        col[idx]  = 1 - rad[idx] * (1-col[idx])
+        col[~idx] = col[~idx] * 0.75   # out of range
+        # Note the 2-i => BGR instead of RGB
+        ch_idx = 2-i if convert_to_bgr else i
+        flow_image[:,:,ch_idx] = np.floor(255 * col)
+    return flow_image
+
+
+def flow_to_image(flow_uv, clip_flow=None, convert_to_bgr=False):
+    """
+    Expects a two dimensional flow image of shape.
+
+    Args:
+        flow_uv (np.ndarray): Flow UV image of shape [H,W,2]
+        clip_flow (float, optional): Clip maximum of flow values. Defaults to None.
+        convert_to_bgr (bool, optional): Convert output image to BGR. Defaults to False.
+
+    Returns:
+        np.ndarray: Flow visualization image of shape [H,W,3]
+    """
+    assert flow_uv.ndim == 3, 'input flow must have three dimensions'
+    assert flow_uv.shape[2] == 2, 'input flow must have shape [H,W,2]'
+    if clip_flow is not None:
+        flow_uv = np.clip(flow_uv, 0, clip_flow)
+    u = flow_uv[:,:,0]
+    v = flow_uv[:,:,1]
+    rad = np.sqrt(np.square(u) + np.square(v))
+    rad_max = np.max(rad)
+    epsilon = 1e-5
+    u = u / (rad_max + epsilon)
+    v = v / (rad_max + epsilon)
+    return flow_uv_to_colors(u, v, convert_to_bgr)

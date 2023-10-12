@@ -11,3 +11,4 @@ logs*
 *pyc
 *dump_*
 scade_dynamics/log_*
+*.mp4

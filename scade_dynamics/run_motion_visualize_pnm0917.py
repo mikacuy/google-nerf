@@ -1810,7 +1810,7 @@ def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, sce
       if args.find_boundaries:
         print("Finding idx for the query point to test")        
         # Finding a query on the hotdog
-        idx_sorted = np.argsort(pc1[..., args.find_boundaries_axis])
+        idx_sorted = np.argsort(args.flip_boundary * pc1[..., args.find_boundaries_axis])
         print("Top 300 indices are")
         print(idx_sorted[-300:])
         exit()
@@ -2064,6 +2064,7 @@ def config_parser():
 
     parser.add_argument('--find_boundaries', default= False, type=bool)
     parser.add_argument('--find_boundaries_axis', default= 2, type=int)
+    parser.add_argument('--flip_boundary', default= 1, type=int)
 
     parser.add_argument("--xyz_potential_scale", type=float, default=1.0, 
                         help='weight for xyz term in potential network')
