@@ -1789,17 +1789,30 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       ### Calculate loss without the noise term
       selected_database_entries = torch.gather(DATABASE, 0, min_indices.unsqueeze(-1).repeat(1, 3 + args.feat_dim + 3 + 1)).squeeze()
-      distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
+
+      if args.squared_distance:
+        ### Change to squared loss
+        distances_min = torch.sum((selected_entries[..., :-1] - selected_database_entries[..., :-1])**2, dim=-1)
+      else:
+        ### Not exactly right
+        distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
 
 
       with torch.no_grad():
       ### To log individual energy losses
         curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1, _ = torch.split(selected_entries, [3, args.feat_dim, 3, 1], dim=-1)
         curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2, _ = torch.split(selected_database_entries, [3, args.feat_dim, 3, 1], dim=-1)
-
-        rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
-        feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
-        pd_agreement_energy = torch.mean(torch.norm(curr_potentials_term1 - curr_potentials_term2, p=2, dim=-1))
+        
+        if args.squared_distance:
+          ### Change to squared loss
+          rgb_energy = torch.mean(torch.sum((curr_pnm_rgb_term1 - curr_pnm_rgb_term2)**2, dim=-1))
+          feature_energy = torch.mean(torch.sum((curr_pnm_feature_term1 - curr_pnm_feature_term2)**2, dim=-1))
+          pd_agreement_energy = torch.mean(torch.sum((curr_potentials_term1 - curr_potentials_term2)**2, dim=-1))
+        else:
+          ### Not exactly right
+          rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
+          feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
+          pd_agreement_energy = torch.mean(torch.norm(curr_potentials_term1 - curr_potentials_term2, p=2, dim=-1))
 
       # Compute loss and optimize
       optimizer_motion.zero_grad()
@@ -2837,6 +2850,8 @@ def config_parser():
     ### Enable visu in training
     parser.add_argument('--visu', default= False, type=bool)
     parser.add_argument('--save_video', default= False, type=bool)
+
+    parser.add_argument('--squared_distance', default= False, type=bool)
 
     return parser
 

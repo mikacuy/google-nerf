@@ -1850,7 +1850,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           weight_rgb_query, weight_features_query, weight_potentials_query = SCALE_FACTORS[0]
           weight_rgb_db, weight_features_db, weight_potentials_db = SCALE_FACTORS[1]
 
-          if args.visu and args.recache_database == 0:
+          if args.visu and i % args.recache_database == 0:
             DATABASE_PTS_COLOR = PTS_COLOR_ONLY2
             DATABASE_NOISE = NOISE_VECTOR2
 
@@ -1868,7 +1868,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           weight_rgb_query, weight_features_query, weight_potentials_query = SCALE_FACTORS[1]
           weight_rgb_db, weight_features_db, weight_potentials_db = SCALE_FACTORS[0]
 
-          if args.visu and args.recache_database == 0:
+          if args.visu and i % args.recache_database == 0:
             DATABASE_PTS_COLOR = PTS_COLOR_ONLY1
             DATABASE_NOISE = NOISE_VECTOR1
 
@@ -1886,7 +1886,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           weight_rgb_query, weight_features_query, weight_potentials_query = SCALE_FACTORS[0]
           weight_rgb_db, weight_features_db, weight_potentials_db = SCALE_FACTORS[1]
 
-          if args.visu and args.recache_database == 0:
+          if args.visu and i % args.recache_database == 0:
             DATABASE_PTS_COLOR = PTS_COLOR_ONLY2
             DATABASE_NOISE = NOISE_VECTOR2
 
@@ -1907,12 +1907,14 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       # print(selected_database_entries.shape)
       # print(DATABASE1_PRECOMPUTE.shape)
       # print(DATABASE2_PRECOMPUTE.shape)
+      # print(DATABASE1.shape)
+      # print(DATABASE2.shape)      
       # exit()
 
       pnm_points_query, pnm_rgb_term_query, pnm_feature_term_query, pnm_feature_term_query_input = torch.split(selected_entries, [3, 3, args.feat_dim, args.pcadim], dim=-1)
       pnm_points_db, pnm_rgb_term_db, pnm_feature_term_db, pnm_feature_term_db_input = torch.split(selected_database_entries, [3, 3, args.feat_dim, args.pcadim], dim=-1)
 
-      potentials_query = motion_query_func(pnm_points_query * args.xyz_potential_scale, pnm_feature_term_query_input * args.dino_potential_scale, motion_model_q)      
+      potentials_query =  motion_query_func(pnm_points_query * args.xyz_potential_scale, pnm_feature_term_query_input * args.dino_potential_scale, motion_model_q)      
       potentials_db = motion_query_func(pnm_points_db * args.xyz_potential_scale, pnm_feature_term_db_input * args.dino_potential_scale, motion_model_db)
 
       curr_entries_query = torch.cat([pnm_rgb_term_query * weight_rgb_query * args.color_dist_weight, pnm_feature_term_query * weight_features_query * args.feat_dist_weight, (potentials_query - pnm_points_query) * weight_potentials_query], -1)          
@@ -1934,26 +1936,28 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       # selected_database_entries = torch.gather(DATABASE, 0, min_indices.unsqueeze(-1).repeat(1, 3 + args.feat_dim + 3 + 1)).squeeze()
       ##########################################################################
 
-      ### Not exactly right
-      # distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
-
-      ### Change to squared loss
-      distances_min = torch.sum((selected_entries[..., :-1] - selected_database_entries[..., :-1])**2, dim=-1)
+      if args.squared_distance:
+        ### Change to squared loss
+        distances_min = torch.sum((selected_entries[..., :-1] - selected_database_entries[..., :-1])**2, dim=-1)
+      else:
+        ### Not exactly right
+        distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
 
       with torch.no_grad():
         ### To log individual energy losses
         curr_pnm_rgb_term1, curr_pnm_feature_term1, curr_potentials_term1 = torch.split(selected_entries, [3, args.feat_dim, 3], dim=-1)
         curr_pnm_rgb_term2, curr_pnm_feature_term2, curr_potentials_term2 = torch.split(selected_database_entries, [3, args.feat_dim, 3], dim=-1)
-        
-        ### Not exactly right
-        # rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
-        # feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
-        # pd_agreement_energy = torch.mean(torch.norm(curr_potentials_term1 - curr_potentials_term2, p=2, dim=-1))
 
-        ### Change to squared loss
-        rgb_energy = torch.mean(torch.sum((curr_pnm_rgb_term1 - curr_pnm_rgb_term2)**2, dim=-1))
-        feature_energy = torch.mean(torch.sum((curr_pnm_feature_term1 - curr_pnm_feature_term2)**2, dim=-1))
-        pd_agreement_energy = torch.mean(torch.sum((curr_potentials_term1 - curr_potentials_term2)**2, dim=-1))
+        if args.squared_distance:
+          ### Change to squared loss
+          rgb_energy = torch.mean(torch.sum((curr_pnm_rgb_term1 - curr_pnm_rgb_term2)**2, dim=-1))
+          feature_energy = torch.mean(torch.sum((curr_pnm_feature_term1 - curr_pnm_feature_term2)**2, dim=-1))
+          pd_agreement_energy = torch.mean(torch.sum((curr_potentials_term1 - curr_potentials_term2)**2, dim=-1))
+        else:
+          ### Not exactly right
+          rgb_energy = torch.mean(torch.norm(curr_pnm_rgb_term1 - curr_pnm_rgb_term2, p=2, dim=-1))
+          feature_energy = torch.mean(torch.norm(curr_pnm_feature_term1 - curr_pnm_feature_term2, p=2, dim=-1))
+          pd_agreement_energy = torch.mean(torch.norm(curr_potentials_term1 - curr_potentials_term2, p=2, dim=-1))
 
       # Compute loss and optimize
       optimizer_motion.zero_grad()
@@ -1962,7 +1966,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       loss = torch.mean(distances_min)
 
       # Visu during training
-      if args.recache_database == 0 and args.visu:
+      if i % args.recache_database == 0 and args.visu:
         fname = os.path.join(visu_dir, str(i).zfill(6))
 
         pc2 = DATABASE_PTS_COLOR[:, :3].detach().cpu().numpy()
@@ -1984,9 +1988,9 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         samples = selected_queries[:, :3].detach().cpu().numpy()
         samples_colors = selected_queries[:, 3:].detach().cpu().numpy()
         
-        selected_neighbors = torch.gather(DATABASE_PTS_COLOR, 0, min_indices.unsqueeze(-1).repeat(1, 6)).squeeze()
+        selected_neighbors = torch.gather(DATABASE_PTS_COLOR, 0, selected_nn_idx.unsqueeze(-1).repeat(1, 6)).squeeze()
         selected_neighbors = selected_neighbors[:, :3].detach().cpu().numpy()
-        selected_neighbors_noise = noise_color_scale[min_indices.detach().cpu().numpy()]
+        selected_neighbors_noise = noise_color_scale[selected_nn_idx.detach().cpu().numpy()]
         
         save_pc_correspondences_samples_iteration(pc1, pc2, colors1, noise_color_scale, samples, samples_colors, selected_neighbors, selected_neighbors_noise, fname + "_nn.png")
 
@@ -2026,10 +2030,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         ###########################
         ## Flow for the whole PC ##
         ###########################
-        db1_to_db2_nn_idx = knn_points(DATABASE1.unsqueeze(0), DATABASE2.unsqueeze(0), K=1).idx
+        db1_to_db2_nn_idx = knn_points(DATABASE1[..., :-1].unsqueeze(0), DATABASE2[..., :-1].unsqueeze(0), K=1).idx
         db1_to_db2_nn_idx = db1_to_db2_nn_idx[0]
 
-        db2_to_db1_nn_idx = knn_points(DATABASE2.unsqueeze(0), DATABASE1.unsqueeze(0), K=1).idx
+        db2_to_db1_nn_idx = knn_points(DATABASE2[..., :-1].unsqueeze(0), DATABASE1[..., :-1].unsqueeze(0), K=1).idx
         db2_to_db1_nn_idx = db2_to_db1_nn_idx[0]
 
         selected_database_entry_potential1 = torch.gather(POTENTIAL_ONLY2, 0, db1_to_db2_nn_idx.repeat(1,3)).squeeze()
@@ -2993,6 +2997,8 @@ def config_parser():
     ### For recaching database
     parser.add_argument("--recache_database", type=int, default=5000,
                         help='number of iterations to recompute and recache the database')
+    parser.add_argument('--squared_distance', default= False, type=bool)
+
 
     return parser
 
@@ -3006,7 +3012,9 @@ def run_nerf():
         if args.expname is None:
             args.expname = "{}_{}".format(datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S'), args.scene_id)
 
-        args.expname = args.expname + "_mu" + str(args.pnm_mean) + "_std" + str(args.pnm_std) + "_sxyz" + str(args.xyz_potential_scale) + "_sdino" + str(args.dino_potential_scale) + "_fw" + str(args.feat_dist_weight) + "_ispca" + str(args.is_dino_pca) + "_pcadim" + str(args.pcadim) + "_mlrate" + str(args.motion_lrate)
+        args.expname = args.expname + "_mu" + str(args.pnm_mean) + "_std" + str(args.pnm_std) + \
+                      "_sxyz" + str(args.xyz_potential_scale) + "_sdino" + str(args.dino_potential_scale) + "_fw" + str(args.feat_dist_weight) + \
+                      "_ispca" + str(args.is_dino_pca) + "_pcadim" + str(args.pcadim) + "_mlrate" + str(args.motion_lrate) + "_rcache" + str(args.recache_database)
         args_file = os.path.join(args.ckpt_dir, args.expname, 'args.json')
         os.makedirs(os.path.join(args.ckpt_dir, args.expname), exist_ok=True)
         with open(args_file, 'w') as af:

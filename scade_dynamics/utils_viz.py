@@ -61,7 +61,8 @@ def save_pc_correspondences_samples_iteration(pc1, pc2, colors1, noise, samples,
 
   ax.scatter(endpoint_2[:, 0], endpoint_2[:, 1], endpoint_2[:, 2], marker="x", s=1.0, c=m.to_rgba(selected_neighbors_noise))
 
-  skip = 15
+  # skip = 15
+  skip = 50
   for pt_idx in range(line_to_draw.shape[1]):
     if pt_idx % skip != 0 :
       continue  
