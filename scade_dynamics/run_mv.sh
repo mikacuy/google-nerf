@@ -1,0 +1,15 @@
+python run_motion_multi_frames.py \
+--task train --dataset blender --ckpt_dir log_multi-frames \
+--data_dir /home/zhengqili/filestore/Mika/google-nerf/scade_dynamics/data_multiframe_hotdog  \
+--scene_id1 hotdog_single_plate_detached \
+--scene_id2  hotdog_single_plate_detached_edited1 \
+--use_depth=1 --space_carving_weight 0.007 \
+--freeze_ss 0 --feat_dim 384 \
+--feature_dir1 hotdog_single_plate_detached_dino_features_small \
+--feature_dir2 hotdog_single_plate_detached_edited1_dino_features_small \
+--pretrained_fol1 hotdog_single_plate_detached \
+--pretrained_fol2 hotdog_single_plate_detached_edited1 \
+--downsample=4 --pnm_std 0.001 --pnm_mean 100.0 \
+--expname hotdogsplatepre_0edited1 --feat_dist_weight 25.0 --is_dino_pca 1 --pcadim 3 \
+--xyz_potential_scale 0.01 --motion_lrate 5e-6 --visu 1 --num_iterations 100000 --num_y_to_sample 1024 \
+--L 4 --video_length 5
