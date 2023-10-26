@@ -264,7 +264,12 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
 
     idx_to_take = range(0, len(poses), 3)
     # idx_to_take = range(0, len(poses), 10)
-    pred_feats_res = torch.empty(len(idx_to_take), H, W, args.feat_dim)
+
+    if not args.is_pca:
+      pred_feats_res = torch.empty(len(idx_to_take), H, W, args.feat_dim)
+    else:
+      pred_feats_res = torch.empty(len(idx_to_take), H, W, args.pca_dim)
+
 
     for n in range(len(idx_to_take)):
     # for img_idx in range(200):
@@ -300,8 +305,12 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
 
     ### Visualizing features
     pred_feats_res = pred_feats_res.detach().cpu().numpy()
-    pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
-    
+
+    if not args.is_pca:
+      pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
+    else:
+      pred_feats_res = pred_feats_res.reshape((-1, args.pca_dim))
+      
     ### This produces bad things because of the background --> this was not supervised
     # pca = PCA(n_components=4).fit(pred_feats_res)
 
@@ -309,11 +318,17 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     N = features.shape[0]
     gt_features = features.detach().cpu().numpy()
     gt_features = gt_features.reshape((-1, args.feat_dim))
-    pca = PCA(n_components=4).fit(gt_features)
+
+    if args.pca_dim >= 4 or (not args.is_pca):
+      pca = PCA(n_components=4).fit(gt_features)
+    else:
+      pca = PCA(n_components=3).fit(gt_features)
+    
     gt_pca_descriptors = pca.transform(gt_features)
     gt_pca_descriptors = gt_pca_descriptors.reshape((N, H, W, -1))
+
     comp_min = gt_pca_descriptors.min(axis=(0, 1, 2))[-3:]
-    comp_max = gt_pca_descriptors.max(axis=(0, 1, 2))[-3:]
+    comp_max = gt_pca_descriptors.max(axis=(0, 1, 2))[-3:]    
     #########################
 
     pred_pca_descriptors = pca.transform(pred_feats_res)
@@ -322,6 +337,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     for n in range(len(idx_to_take)):
       img_idx = idx_to_take[n]
       curr_feat = pred_pca_descriptors[n]
+      
       pred_features = curr_feat[:, :, -3:]
    
       pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
@@ -422,8 +438,12 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     target_depths_res = torch.empty(count, 1, H, W)
     target_valid_depths_res = torch.empty(count, 1, H, W, dtype=bool)
 
-    pred_feats_res = torch.empty(count, H, W, args.feat_dim)
-    gt_feats_res = torch.empty(count, H, W, args.feat_dim)
+    if not args.is_pca:
+      pred_feats_res = torch.empty(count, H, W, args.feat_dim)
+      gt_feats_res = torch.empty(count, H, W, args.feat_dim)
+    else:
+      pred_feats_res = torch.empty(count, H, W, args.pca_dim)
+      gt_feats_res = torch.empty(count, H, W, args.pca_dim)      
     
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
@@ -522,16 +542,29 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 metrics.update({"img_loss0" : img_loss0.item(), "psnr0" : psnr0.item(), "feature_loss_0": feature_loss_0.item()})
             mean_metrics.add(metrics)
     
-    ### PCA on dino features for visualization
-    pred_feats_res = pred_feats_res.detach().cpu().numpy()
-    pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
+    if not args.is_pca:
+      ### PCA on dino features for visualization
+      pred_feats_res = pred_feats_res.detach().cpu().numpy()
+      pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
 
-    gt_feats_res = gt_feats_res.detach().cpu().numpy()
-    gt_feats_res = gt_feats_res.reshape((-1, args.feat_dim))
+      gt_feats_res = gt_feats_res.detach().cpu().numpy()
+      gt_feats_res = gt_feats_res.reshape((-1, args.feat_dim))
+    else:
+      pred_feats_res = pred_feats_res.detach().cpu().numpy()
+      pred_feats_res = pred_feats_res.reshape((-1, args.pca_dim))
 
-    pca = PCA(n_components=4).fit(gt_feats_res)
-    pred_pca_descriptors = pca.transform(pred_feats_res)
-    gt_pca_descriptors = pca.transform(gt_feats_res)
+      gt_feats_res = gt_feats_res.detach().cpu().numpy()
+      gt_feats_res = gt_feats_res.reshape((-1, args.pca_dim))      
+
+    if args.pca_dim >= 4 or (not args.is_pca):
+      pca = PCA(n_components=4).fit(gt_feats_res)
+      pred_pca_descriptors = pca.transform(pred_feats_res)
+      gt_pca_descriptors = pca.transform(gt_feats_res)
+    
+    else:
+      pca = PCA(n_components=3).fit(gt_feats_res)
+      pred_pca_descriptors = pca.transform(pred_feats_res)
+      gt_pca_descriptors = pca.transform(gt_feats_res)
 
     pred_pca_descriptors = pred_pca_descriptors.reshape((count, H, W, -1))
     gt_pca_descriptors = gt_pca_descriptors.reshape((count, H, W, -1))
@@ -596,9 +629,14 @@ def create_nerf(args, scene_render_params):
     output_ch = 5 if args.N_importance > 0 else 4
     skips = [4]
 
-    model = NeRF_semantics(D=args.netdepth, W=args.netwidth,
-                     input_ch=input_ch, output_ch=output_ch, skips=skips,
-                     input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+    if not args.is_pca:
+      model = NeRF_semantics(D=args.netdepth, W=args.netwidth,
+                      input_ch=input_ch, output_ch=output_ch, skips=skips,
+                      input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+    else:
+      model = NeRF_semantics(D=args.netdepth, W=args.netwidth,
+                      input_ch=input_ch, output_ch=output_ch, skips=skips,
+                      input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.pca_dim)
 
     model = nn.DataParallel(model).to(device)
     grad_vars = list(model.parameters())
@@ -619,10 +657,16 @@ def create_nerf(args, scene_render_params):
 
     model_fine = None
     if args.N_importance > 0:
-        model_fine = NeRF_semantics(D=args.netdepth_fine, W=args.netwidth_fine,
-                          input_ch=input_ch, output_ch=output_ch, skips=skips,
-                          input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
-            
+
+        if not args.is_pca:
+          model_fine = NeRF_semantics(D=args.netdepth_fine, W=args.netwidth_fine,
+                            input_ch=input_ch, output_ch=output_ch, skips=skips,
+                            input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.feat_dim)
+        else:
+          model_fine = NeRF_semantics(D=args.netdepth_fine, W=args.netwidth_fine,
+                            input_ch=input_ch, output_ch=output_ch, skips=skips,
+                            input_ch_views=input_ch_views, input_ch_cam=args.input_ch_cam, use_viewdirs=args.use_viewdirs, semantic_dim = args.pca_dim)
+                            
         model_fine = nn.DataParallel(model_fine).to(device)
 
         for name, param in model_fine.named_parameters():
@@ -1115,6 +1159,21 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             ########################################
         ########################################        
 
+    ##################
+    if args.is_pca:
+      print("Computing PCA of DINO feature...")
+      print(features.shape)
+      N = features.shape[0]
+      gt_features = features.detach().cpu().numpy()
+
+      gt_features = gt_features.reshape((-1, args.feat_dim))
+      pca = PCA(n_components=args.pca_dim).fit(gt_features)
+      gt_pca_descriptors = pca.transform(gt_features)
+      features = gt_pca_descriptors.reshape((N, H, W, -1))
+      features = torch.from_numpy(features).to(images.device)
+      print(features.shape)
+    ##################
+
     for i in trange(start, N_iters):
 
         ### Scale the hypotheses by scale and shift
@@ -1482,6 +1541,11 @@ def config_parser():
                         help='downsample images')
 
     parser.add_argument('--sparse_view', default= False, type=bool)
+
+    ### To train pca-downsampled dino feature
+    parser.add_argument('--is_pca', default= False, type=bool)    
+    parser.add_argument("--pca_dim", type=int, default=4,
+                        help='pca_dim')
 
     return parser
 

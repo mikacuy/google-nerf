@@ -1657,8 +1657,15 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
         DATABASE1_PRECOMPUTE.append(curr_entries1)
         DATABASE2_PRECOMPUTE.append(curr_entries2)
 
+        # print(curr_entries1.shape)
+        # print(curr_entries2.shape)
+
     DATABASE1_PRECOMPUTE = torch.cat(DATABASE1_PRECOMPUTE, axis=0)
     DATABASE2_PRECOMPUTE = torch.cat(DATABASE2_PRECOMPUTE, axis=0)
+
+    print(DATABASE1_PRECOMPUTE.shape)
+    print(DATABASE2_PRECOMPUTE.shape)
+    print()
     ###############################################
 
     ### Init dataloader for caching
@@ -1689,7 +1696,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     for i in trange(start, N_iters):
 
       if i % args.recache_database == 0 or (NN_1_to_2 is None) or (NN_1_to_2 is None):
-        print("Recaching database ...")
+        # print("Recaching database ...")
         with torch.no_grad():
           #######################################
           ###### Constructing the Database ######
@@ -1761,10 +1768,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             NOISE_VECTOR1 = torch.cat(NOISE_VECTOR1, 0)
             NOISE_VECTOR2 = torch.cat(NOISE_VECTOR2, 0)
 
-          print("Cached database:")
-          print(DATABASE1.shape)
-          print(DATABASE2.shape)
-          print()
+          # print("Cached database:")
+          # print(DATABASE1.shape)
+          # print(DATABASE2.shape)
+          # print()
 
           NN_1_to_2 = torch.empty((DATABASE1_PRECOMPUTE.shape[0]), dtype=torch.int64)
           NN_2_to_1 = torch.empty((DATABASE2_PRECOMPUTE.shape[0]), dtype=torch.int64)
@@ -1787,12 +1794,21 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             distances = torch.norm(selected_entries.unsqueeze(1) - DATABASE2.unsqueeze(0), p=2, dim=-1) 
             _, min_indices = torch.min(distances, axis=-1)
 
+            # print(selected_entries)
+            # print(selected_entries.unsqueeze(1).shape)
+            # print(DATABASE2.unsqueeze(0).shape)
+            # print(distances.shape)
+            # print()
+
+
             NN_1_to_2[prev : prev + batch_size] = min_indices
             prev = prev + batch_size
           
           # print("Nearest neighbor indices frame 1 to 2.")
           # print(NN_1_to_2)
           # print(NN_1_to_2.shape)
+          # print(torch.max(NN_1_to_2))
+          # exit()
 
           ### Other direction if two-way loss
           if args.is_two_way:
@@ -1893,7 +1909,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             QUERY_PTS_COLOR = PTS_COLOR_ONLY1        
 
       ### Select random indices --> right now we only take indices from database 1
-      indices = torch.randperm(QUERY.shape[0])[:NUM_Y_TO_SAMPLE]  
+      indices = torch.randperm(QUERY.shape[0])[:NUM_Y_TO_SAMPLE]
       selected_nn_idx = QUERY_NN_IDX[indices]
 
       selected_entries = torch.gather(QUERY, 0, indices.unsqueeze(-1).repeat(1, 3 + 3 + args.feat_dim + args.pcadim)).squeeze()
@@ -1938,10 +1954,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       if args.squared_distance:
         ### Change to squared loss
-        distances_min = torch.sum((selected_entries[..., :-1] - selected_database_entries[..., :-1])**2, dim=-1)
+        distances_min = torch.sum((selected_entries - selected_database_entries)**2, dim=-1)
       else:
         ### Not exactly right
-        distances_min = torch.norm(selected_entries[..., :-1] - selected_database_entries[..., :-1], p=2, dim=-1)
+        distances_min = torch.norm(selected_entries - selected_database_entries, p=2, dim=-1)
 
       with torch.no_grad():
         ### To log individual energy losses
