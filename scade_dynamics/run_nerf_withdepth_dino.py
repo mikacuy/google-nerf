@@ -39,6 +39,7 @@ from natsort import natsorted
 from sklearn.decomposition import PCA
 import PIL.Image
 from PIL import Image
+import joblib 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
@@ -270,6 +271,19 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     else:
       pred_feats_res = torch.empty(len(idx_to_take), H, W, args.pca_dim)
 
+      print("Computing PCA of DINO feature...")
+      print(features.shape)
+      N = features.shape[0]
+      gt_features = features.detach().cpu().numpy()
+
+      gt_features = gt_features.reshape((-1, args.feat_dim))
+      pca = PCA(n_components=args.pca_dim).fit(gt_features)
+      gt_pca_descriptors = pca.transform(gt_features)
+      features = gt_pca_descriptors.reshape((N, H, W, -1))
+      features = torch.from_numpy(features).to(poses.device)
+      print(features.shape)
+    ##################
+
 
     for n in range(len(idx_to_take)):
     # for img_idx in range(200):
@@ -317,7 +331,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     ### For Visualization ###
     N = features.shape[0]
     gt_features = features.detach().cpu().numpy()
-    gt_features = gt_features.reshape((-1, args.feat_dim))
+    gt_features = gt_features.reshape((-1, features.shape[-1]))
 
     if args.pca_dim >= 4 or (not args.is_pca):
       pca = PCA(n_components=4).fit(gt_features)
@@ -444,7 +458,20 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     else:
       pred_feats_res = torch.empty(count, H, W, args.pca_dim)
       gt_feats_res = torch.empty(count, H, W, args.pca_dim)      
-    
+
+      print("Computing PCA of DINO feature...")
+      print(features.shape)
+      N = features.shape[0]
+      gt_features = features.detach().cpu().numpy()
+
+      gt_features = gt_features.reshape((-1, args.feat_dim))
+      pca = PCA(n_components=args.pca_dim).fit(gt_features)
+      gt_pca_descriptors = pca.transform(gt_features)
+      features = gt_pca_descriptors.reshape((N, H, W, -1))
+      features = torch.from_numpy(features).to(images.device)
+      print(features.shape)
+
+
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
     for n, img_idx in enumerate(img_i):
@@ -1165,13 +1192,30 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       print(features.shape)
       N = features.shape[0]
       gt_features = features.detach().cpu().numpy()
+      gt_features = gt_features.reshape((-1, args.feat_dim))      
 
-      gt_features = gt_features.reshape((-1, args.feat_dim))
-      pca = PCA(n_components=args.pca_dim).fit(gt_features)
-      gt_pca_descriptors = pca.transform(gt_features)
-      features = gt_pca_descriptors.reshape((N, H, W, -1))
-      features = torch.from_numpy(features).to(images.device)
-      print(features.shape)
+      ### If is ref frame, fit and save the model
+      if args.is_ref_frame:
+        pca = PCA(n_components=args.pca_dim).fit(gt_features)
+        gt_pca_descriptors = pca.transform(gt_features)
+        features = gt_pca_descriptors.reshape((N, H, W, -1))
+        features = torch.from_numpy(features).to(images.device)
+        print(features.shape)
+
+        fname = os.path.join(args.ckpt_dir, args.expname, "features_pca.joblib")
+        joblib.dump(pca, fname)
+        print("Saved pca model.")
+
+      ### Else load the model and fit
+      else:
+        fname = os.path.join(args.ckpt_dir, args.ref_expname, "features_pca.joblib")
+        pca = joblib.load(fname)
+        print("Loaded pca model from other frame.")
+
+        gt_pca_descriptors = pca.transform(gt_features)
+        features = gt_pca_descriptors.reshape((N, H, W, -1))
+        features = torch.from_numpy(features).to(images.device)
+        print(features.shape)
     ##################
 
     for i in trange(start, N_iters):
@@ -1546,6 +1590,11 @@ def config_parser():
     parser.add_argument('--is_pca', default= False, type=bool)    
     parser.add_argument("--pca_dim", type=int, default=4,
                         help='pca_dim')
+    
+    ### Ref frame for pca
+    parser.add_argument('--is_ref_frame', default= False, type=bool)    
+    parser.add_argument("--ref_expname", type=str, default="hotdog_singleframe_f2",
+                        help='reference frame for pca')
 
     return parser
 
