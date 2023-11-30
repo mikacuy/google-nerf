@@ -485,9 +485,9 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         print("Loaded pca model from other frame.")
 
       gt_pca_descriptors = pca.transform(gt_features)
-      features = gt_pca_descriptors.reshape((N, H, W, -1))
-      features = torch.from_numpy(features).to(images.device)
-      print(features.shape)
+      projected_features = gt_pca_descriptors.reshape((N, H, W, -1))
+      projected_features = torch.from_numpy(projected_features).to(images.device)
+      print(projected_features.shape)
 
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
@@ -500,12 +500,14 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
         intrinsic = intrinsics[img_idx, :]
 
         curr_features = features[img_idx]
+        curr_projected_features = projected_features[img_idx]
 
         if args.feat_dim == 768:
             curr_features = curr_features.permute(2, 0, 1).unsqueeze(0).float()
             curr_features = F.interpolate(curr_features, size=(H, W), mode='bilinear').squeeze().permute(1,2,0)
 
         curr_features = curr_features.to(device)
+        curr_projected_features = curr_projected_features.to(device)
 
         if args.input_ch_cam > 0:
             if embedcam_fn is None:
@@ -529,7 +531,10 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                   rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 16), c2w=pose, **render_kwargs_test)
 
             pred_features = extras["feature_map"]
-            feature_loss = torch.norm(pred_features - curr_features, p=1, dim=-1)
+            pred_feat_highdim = pred_features[:, :args.feat_dim]
+            pred_feat_lowdim = pred_features[:, args.feat_dim:]
+
+            feature_loss = torch.norm(pred_feat_highdim - curr_features, p=1, dim=-1) + torch.norm(pred_feat_lowdim - curr_projected_features, p=1, dim=-1)
 
             ## Only use foreground
             feature_loss = feature_loss * target_valid_depth
@@ -567,7 +572,7 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
             target_depths_res[n] = (target_depth[:, :, 0] / far).unsqueeze(0).cpu()
             target_valid_depths_res[n] = target_valid_depth.unsqueeze(0).cpu()
 
-            pred_feats_res[n] = pred_features.cpu()
+            pred_feats_res[n] = pred_feat_highdim.cpu()
             gt_feats_res[n] = curr_features.cpu()
 
             metrics = {"img_loss" : img_loss.item(), "psnr" : psnr.item(), "ssim" : ssim, "lpips" : lpips[0, 0, 0], 'feature_loss':feature_loss.item()}
@@ -578,7 +583,10 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 rgbs0_res[n] = torch.clamp(extras['rgb0'], 0, 1).permute(2, 0, 1).cpu()
 
                 pred_features = extras["feature_map_0"]
-                feature_loss_0 = torch.norm(pred_features - curr_features, p=1, dim=-1)
+                pred_feat_highdim_0 = pred_features_0[:, :args.feat_dim]
+                pred_feat_lowdim_0 = pred_features_0[:, args.feat_dim:]       
+
+                feature_loss_0 = torch.norm(pred_feat_highdim_0 - curr_features, p=1, dim=-1) + torch.norm(pred_feat_lowdim_0 - curr_projected_features, p=1, dim=-1)
                 ## Only use foreground
                 feature_loss_0 = feature_loss_0 * target_valid_depth
                 feature_loss_0 = torch.mean(feature_loss_0)                
