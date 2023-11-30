@@ -276,15 +276,21 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
       N = features.shape[0]
       gt_features = features.detach().cpu().numpy()
 
-      gt_features = gt_features.reshape((-1, args.feat_dim))
-      pca = PCA(n_components=args.pca_dim).fit(gt_features)
+      if args.is_ref_frame:
+        fname = os.path.join(args.ckpt_dir, args.expname, "features_pca.joblib")
+        pca = joblib.load(fname)
+        print("Loaded pca model from current frame.")
+      else:
+        fname = os.path.join(args.ckpt_dir, args.ref_expname, "features_pca.joblib")
+        pca = joblib.load(fname)
+        print("Loaded pca model from other frame.")
+
       gt_pca_descriptors = pca.transform(gt_features)
       features = gt_pca_descriptors.reshape((N, H, W, -1))
       features = torch.from_numpy(features).to(poses.device)
       print(features.shape)
     ##################
-
-
+ 
     for n in range(len(idx_to_take)):
     # for img_idx in range(200):
         img_idx = idx_to_take[n]
@@ -452,9 +458,10 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     target_depths_res = torch.empty(count, 1, H, W)
     target_valid_depths_res = torch.empty(count, 1, H, W, dtype=bool)
 
-    if not args.is_pca:
-      pred_feats_res = torch.empty(count, H, W, args.feat_dim)
-      gt_feats_res = torch.empty(count, H, W, args.feat_dim)
+    ### In training time the features are already projected
+    if not args.is_pca or features.shape[-1] == args.pca_dim:
+      pred_feats_res = torch.empty(count, H, W, features.shape[-1])
+      gt_feats_res = torch.empty(count, H, W, features.shape[-1])
     else:
       pred_feats_res = torch.empty(count, H, W, args.pca_dim)
       gt_feats_res = torch.empty(count, H, W, args.pca_dim)      
@@ -463,14 +470,24 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
       print(features.shape)
       N = features.shape[0]
       gt_features = features.detach().cpu().numpy()
+      gt_features = gt_features.reshape((-1, args.feat_dim))      
 
-      gt_features = gt_features.reshape((-1, args.feat_dim))
-      pca = PCA(n_components=args.pca_dim).fit(gt_features)
+      ### If is ref frame, fit and save the model
+      if args.is_ref_frame:
+        fname = os.path.join(args.ckpt_dir, args.expname, "features_pca.joblib")
+        pca = joblib.load(fname)
+        print("Loaded pca model from current frame.")
+
+      ### Else load the model and fit
+      else:
+        fname = os.path.join(args.ckpt_dir, args.ref_expname, "features_pca.joblib")
+        pca = joblib.load(fname)
+        print("Loaded pca model from other frame.")
+
       gt_pca_descriptors = pca.transform(gt_features)
       features = gt_pca_descriptors.reshape((N, H, W, -1))
       features = torch.from_numpy(features).to(images.device)
       print(features.shape)
-
 
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
