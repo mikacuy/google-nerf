@@ -2578,7 +2578,7 @@ def config_parser():
     ### For loading a pair of nerf models ####
     parser.add_argument('--load_pretrained', default= False, type=bool)
 
-    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_nerf_1129_hotdog_multiframe_pcadim4_test/",
+    parser.add_argument("--pretrained_dir", type=str, default="/home/mikacuy/coord-mvs/google-nerf/scade_dynamics/log_nerf_1129_hotdog_multiframe_pcadim4/",
                         help='folder directory name for where the pretrained model that we want to load is')
     parser.add_argument("--pretrained_fol1", type=str, default="hotdog_singleframe_f1",
                         help='first nerf folder')
