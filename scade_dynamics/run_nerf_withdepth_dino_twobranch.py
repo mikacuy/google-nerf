@@ -458,36 +458,39 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
     target_depths_res = torch.empty(count, 1, H, W)
     target_valid_depths_res = torch.empty(count, 1, H, W, dtype=bool)
 
+    # print("In render image metrics...")
+    # print(features.shape)
+
     ### In training time the features are already projected
-    if not args.is_pca or features.shape[-1] == args.pca_dim:
-      pred_feats_res = torch.empty(count, H, W, features.shape[-1])
-      gt_feats_res = torch.empty(count, H, W, features.shape[-1])
+    pred_feats_res = torch.empty(count, H, W, features.shape[-1])
+    gt_feats_res = torch.empty(count, H, W, features.shape[-1])  
+
+    print("Computing PCA of DINO feature...")
+    print(features.shape)
+    N = features.shape[0]
+    gt_features = features.detach().cpu().numpy()
+    gt_features = gt_features.reshape((-1, args.feat_dim))      
+
+    ### If is ref frame, fit and save the model
+    if args.is_ref_frame:
+      fname = os.path.join(args.ckpt_dir, args.expname, "features_pca.joblib")
+      pca = joblib.load(fname)
+      print("Loaded pca model from current frame.")
+
+    ### Else load the model and fit
     else:
-      pred_feats_res = torch.empty(count, H, W, args.pca_dim)
-      gt_feats_res = torch.empty(count, H, W, args.pca_dim)      
+      fname = os.path.join(args.ckpt_dir, args.ref_expname, "features_pca.joblib")
+      pca = joblib.load(fname)
+      print("Loaded pca model from other frame.")
 
-      print("Computing PCA of DINO feature...")
-      print(features.shape)
-      N = features.shape[0]
-      gt_features = features.detach().cpu().numpy()
-      gt_features = gt_features.reshape((-1, args.feat_dim))      
+    gt_pca_descriptors = pca.transform(gt_features)
+    projected_features = gt_pca_descriptors.reshape((N, H, W, -1))
+    projected_features = torch.from_numpy(projected_features).to(images.device)
+    print(projected_features.shape)
 
-      ### If is ref frame, fit and save the model
-      if args.is_ref_frame:
-        fname = os.path.join(args.ckpt_dir, args.expname, "features_pca.joblib")
-        pca = joblib.load(fname)
-        print("Loaded pca model from current frame.")
-
-      ### Else load the model and fit
-      else:
-        fname = os.path.join(args.ckpt_dir, args.ref_expname, "features_pca.joblib")
-        pca = joblib.load(fname)
-        print("Loaded pca model from other frame.")
-
-      gt_pca_descriptors = pca.transform(gt_features)
-      projected_features = gt_pca_descriptors.reshape((N, H, W, -1))
-      projected_features = torch.from_numpy(projected_features).to(images.device)
-      print(projected_features.shape)
+    # print(features.shape)
+    # print(projected_features.shape)
+    # print()
 
     mean_metrics = MeanTracker()
     mean_depth_metrics = MeanTracker() # track separately since they are not always available
@@ -531,8 +534,14 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                   rgb, _, _, extras = render(H, W, intrinsic, chunk=(args.chunk // 16), c2w=pose, **render_kwargs_test)
 
             pred_features = extras["feature_map"]
-            pred_feat_highdim = pred_features[:, :args.feat_dim]
-            pred_feat_lowdim = pred_features[:, args.feat_dim:]
+            pred_feat_highdim = pred_features[..., :args.feat_dim]
+            pred_feat_lowdim = pred_features[..., args.feat_dim:]
+
+            # print(pred_feat_highdim.shape)
+            # print(pred_feat_lowdim.shape)
+            # print(curr_features.shape)
+            # print(curr_projected_features.shape)
+            # exit()
 
             feature_loss = torch.norm(pred_feat_highdim - curr_features, p=1, dim=-1) + torch.norm(pred_feat_lowdim - curr_projected_features, p=1, dim=-1)
 
@@ -582,9 +591,9 @@ def render_images_with_metrics(count, indices, images, depths, valid_depths, pos
                 depths0_res[n] = (extras['depth0'] / far).unsqueeze(0).cpu()
                 rgbs0_res[n] = torch.clamp(extras['rgb0'], 0, 1).permute(2, 0, 1).cpu()
 
-                pred_features = extras["feature_map_0"]
-                pred_feat_highdim_0 = pred_features_0[:, :args.feat_dim]
-                pred_feat_lowdim_0 = pred_features_0[:, args.feat_dim:]       
+                pred_features_0 = extras["feature_map_0"]
+                pred_feat_highdim_0 = pred_features_0[..., :args.feat_dim]
+                pred_feat_lowdim_0 = pred_features_0[..., args.feat_dim:]       
 
                 feature_loss_0 = torch.norm(pred_feat_highdim_0 - curr_features, p=1, dim=-1) + torch.norm(pred_feat_lowdim_0 - curr_projected_features, p=1, dim=-1)
                 ## Only use foreground
@@ -1542,7 +1551,7 @@ def config_parser():
     # data options
     parser.add_argument("--scene_id", type=str, default="walking_dvd",
                         help='scene identifier')
-    parser.add_argument("--data_dir", type=str, default="/home/mikacuy/Desktop/coord-mvs/",
+    parser.add_argument("--data_dir", type=str, default="/orion/u/junru/google-nerf/scade_dynamics/datasets/data_multiframe_hotdog",
                         help='directory containing the scenes')
 
     ### Train json file --> experimenting making views sparser

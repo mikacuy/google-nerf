@@ -709,9 +709,6 @@ def complete_depth(images, depths, valid_depths, input_h, input_w, model_path, i
         depths_out[large_std_mask] = 0.
         print("Masked out {:.1f} percent of completed depth with standard deviation greater {:.2f}".format( \
             100. * (1. - valid_depths_out.sum() / valid_depths_out.numel()), invalidate_large_std_threshold))
-
-    print(depths_out)
-    exit()
     
     return depths_out, valid_depths_out
 
