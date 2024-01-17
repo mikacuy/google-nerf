@@ -9,3 +9,40 @@ python run_nerf_withdepth.py train --dataset blender --ckpt_dir log_blender_with
 
 python run_nerf_withdepth.py train --dataset blender --ckpt_dir log_blender_withdepth --expname hotdog_edited \
 --data_dir /home/mikacuy/Desktop/coord-mvs/hotdog_data_v1/ --scene_id hotdog_single_shadowfix_edited --use_depth=1 --space_carving_weight 0.007 --freeze_ss 0
+
+
+### Extract dino on the new scenes
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_and_hotdog/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_and_hotdog_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_and_hotdog_edited/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_and_hotdog_edited_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_and_hotdog_edited2/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_and_hotdog_edited2_dino_features_small
+
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate_edited/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate_edited_dino_features_small
+
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate_edited2/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate_edited2_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate_edited3/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/chair_hotdog_plate_edited3_dino_features_small
+
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited1/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited1_dino_features_small
+
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited2/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited2_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited3/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited3_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited4/ --save_dir /home/mikacuy/coord-mvs/demo_scenes_v1/hotdog_single_plate_detached_edited4_dino_features_small
+
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f1/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f1_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f2/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f2_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f3/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f3_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f4/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f4_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f5/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f5_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f6/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f6_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f7/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f7_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f8/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f8_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f9/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f9_dino_features_small
+python extract_and_visualize.py --model dino_vits8 --load_size 400 --root_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f10/ --save_dir /home/mikacuy/coord-mvs/data_multiframe_hotdog/hotdog_single_plate_detached_f10_dino_features_small
+
+
+python run_nerf_withdepth_dino.py train --dataset blender --ckpt_dir log_0915_blender_withdepth_dino_100 --expname hotdog_single_plate_detached_edit
+ed4 --data_dir /home/mikacuy/coord-mvs/demo_scenes_v1/ --scene_id hotdog_single_plate_detached_edited4 --use_depth=1 --space_carving_weight 0.007 --freeze_ss 0 --feat_dim 384 --feature_dir hotdog_single_plate_detached_ed
+ited4_dino_features_small --downsample 4
+
+

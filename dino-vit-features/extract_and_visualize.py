@@ -30,7 +30,7 @@ def pca(image_paths, load_size: int = 224, layer: int = 11, facet: str = 'key', 
     """
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # device = 'cpu'
+    #device = 'cpu'
 
     extractor = ViTExtractor(model_type, stride, device=device)
     descriptors_list = []
@@ -62,7 +62,6 @@ def pca(image_paths, load_size: int = 224, layer: int = 11, facet: str = 'key', 
         descriptors = np.concatenate(descriptors_list, axis=2)[0, 0]
         
         print(descriptors.shape)
-        exit()
 
         pca = PCA(n_components=n_components).fit(descriptors)
         pca_descriptors = pca.transform(descriptors)

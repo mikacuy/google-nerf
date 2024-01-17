@@ -315,35 +315,137 @@ class NeRF_semantics(nn.Module):
 
         return outputs    
 
-    def load_weights_from_keras(self, weights):
-        assert self.use_viewdirs, "Not implemented if use_viewdirs=False"
+class NeRF_semantics_twobranch(nn.Module):
+    def __init__(self, D=8, W=256, input_ch=3, input_ch_views=3, input_ch_cam=0, output_ch=4, skips=[4], use_viewdirs=False, semantics_highdim = 384, semantics_lowdim = 4):
+        """ 
+        """
+        super(NeRF_semantics_twobranch, self).__init__()
+        self.D = D
+        self.W = W
+        self.input_ch = input_ch
+        self.input_ch_views = input_ch_views
+        self.input_ch_cam = input_ch_cam
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
         
-        # Load pts_linears
-        for i in range(self.D):
-            idx_pts_linears = 2 * i
-            self.pts_linears[i].weight.data = torch.from_numpy(np.transpose(weights[idx_pts_linears]))    
-            self.pts_linears[i].bias.data = torch.from_numpy(np.transpose(weights[idx_pts_linears+1]))
+        self.pts_linears = nn.ModuleList(
+            [DenseLayer(input_ch, W, activation="relu")] + [DenseLayer(W, W, activation="relu") if i not in self.skips else DenseLayer(W + input_ch, W, activation="relu") for i in range(D-1)])
         
-        # Load feature_linear
-        idx_feature_linear = 2 * self.D
-        self.feature_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_feature_linear]))
-        self.feature_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_feature_linear+1]))
+        ### Implementation according to the official code release (https://github.com/bmild/nerf/blob/master/run_nerf_helpers.py#L104-L105)
+        self.views_linears = nn.ModuleList([DenseLayer(input_ch_views + input_ch_cam + W, W//2, activation="relu")])
 
-        # Load views_linears
-        idx_views_linears = 2 * self.D + 2
-        self.views_linears[0].weight.data = torch.from_numpy(np.transpose(weights[idx_views_linears]))
-        self.views_linears[0].bias.data = torch.from_numpy(np.transpose(weights[idx_views_linears+1]))
+        ### Implementation according to the paper
+        # self.views_linears = nn.ModuleList(
+        #     [nn.Linear(input_ch_views + W, W//2)] + [nn.Linear(W//2, W//2) for i in range(D//2)])
+        
+        if use_viewdirs:
+            self.feature_linear = DenseLayer(W, W, activation="linear")
+            self.alpha_linear = DenseLayer(W, 1, activation="linear")
+            self.rgb_linear = DenseLayer(W//2, 3, activation="linear")
+            
+            if semantics_highdim < 512:
+                self.semantic_highdim_linear = nn.Sequential(DenseLayer(W, W*2, activation="relu"), DenseLayer(W*2, semantics_highdim, activation="linear"))
+            
+            ## Make larger model
+            else:
+                self.semantic_highdim_linear = nn.Sequential(DenseLayer(W, W*4, activation="relu"), DenseLayer(W*4, semantics_highdim, activation="linear"))
 
-        # Load rgb_linear
-        idx_rbg_linear = 2 * self.D + 4
-        self.rgb_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear]))
-        self.rgb_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_rbg_linear+1]))
+            self.semantic_lowdim_linear = nn.Sequential(DenseLayer(W, W*4, activation="relu"), DenseLayer(W*4, semantics_lowdim, activation="linear"))
 
-        # Load alpha_linear
-        idx_alpha_linear = 2 * self.D + 6
-        self.alpha_linear.weight.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear]))
-        self.alpha_linear.bias.data = torch.from_numpy(np.transpose(weights[idx_alpha_linear+1]))
+        else:
+            self.output_linear = DenseLayer(W, output_ch, activation="linear")
 
+    def forward(self, x):
+        input_pts, input_views = torch.split(x, [self.input_ch, self.input_ch_views + self.input_ch_cam], dim=-1)
+        h = input_pts
+        for i, l in enumerate(self.pts_linears):
+            h = self.pts_linears[i](h)
+            h = F.relu(h)
+            if i in self.skips:
+                h = torch.cat([input_pts, h], -1)
+
+        if self.use_viewdirs:
+            alpha = self.alpha_linear(h)
+
+            sem_highdim_features = self.semantic_highdim_linear(h)
+            sem_lowdim_features = self.semantic_lowdim_linear(h)
+
+            feature = self.feature_linear(h)
+            h = torch.cat([feature, input_views], -1)
+        
+            for i, l in enumerate(self.views_linears):
+                h = self.views_linears[i](h)
+                h = F.relu(h)
+
+            rgb = self.rgb_linear(h)
+            outputs = torch.cat([rgb, F.softplus(alpha, beta=10), sem_highdim_features, sem_lowdim_features], -1)
+        else:
+            sem_highdim_features = self.semantic_highdim_linear(h)
+            sem_lowdim_features = self.semantic_lowdim_linear(h)
+
+            outputs = self.output_linear(h)
+            outputs = torch.cat([outputs[..., :3], F.softplus(outputs[..., 3:], beta=10), sem_highdim_features, sem_lowdim_features], -1)
+        
+
+        return outputs 
+
+class MotionPotential(nn.Module):
+    def __init__(self, input_ch=3, input_ch_feature=384, output_ch=3, skips=[4], no_bias=False):
+        """ 
+        """
+        super(MotionPotential, self).__init__()
+        self.input_ch = input_ch
+        self.input_ch_feature = input_ch_feature
+        
+        self.motion_mlp = nn.ModuleList(
+            [DenseLayer(input_ch + input_ch_feature, 512, activation="relu")] + \
+            [DenseLayer(512, 128, activation="relu")] 
+            )
+        
+        if not no_bias:
+          self.output_linear = DenseLayer(128, output_ch, activation="linear")
+        else:
+          self.output_linear = DenseLayer(128, output_ch, activation="linear", bias=False)
+
+    def forward(self, x):
+        input_pts, input_features = torch.split(x, [self.input_ch, self.input_ch_feature], dim=-1)
+
+        h = x
+        for i, l in enumerate(self.motion_mlp):
+            h = self.motion_mlp[i](h)
+            h = F.relu(h)
+            
+        potential = self.output_linear(h)
+
+        return potential    
+
+class MotionPotential_nopos(nn.Module):
+    def __init__(self, input_ch=3, input_ch_feature=384, output_ch=3):
+        """ 
+        """
+        super(MotionPotential_nopos, self).__init__()
+        self.input_ch = input_ch
+        self.input_ch_feature = input_ch_feature
+        
+        self.motion_mlp = nn.ModuleList(
+            [DenseLayer(input_ch_feature, 512, activation="relu")] + \
+            [DenseLayer(512, 128, activation="relu")] 
+            )
+        
+        self.output_linear = DenseLayer(128, output_ch, activation="linear")
+
+    def forward(self, x):
+        input_pts, input_features = torch.split(x, [self.input_ch, self.input_ch_feature], dim=-1)
+
+        ### Only use features
+        h = input_features
+        for i, l in enumerate(self.motion_mlp):
+            h = self.motion_mlp[i](h)
+            h = F.relu(h)
+            
+        potential = self.output_linear(h)
+
+        return potential  
 
 def select_coordinates(coords, N_rand):
     coords = torch.reshape(coords, [-1,2])  # (H * W, 2)

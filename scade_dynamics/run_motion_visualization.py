@@ -73,12 +73,12 @@ def run_motion_potential(inputs, features, fn, bb_center, bb_scale, netchunk=102
     outputs = torch.reshape(outputs_flat, list(inputs.shape[:-1]) + [outputs_flat.shape[-1]])
     return outputs
 
-def batchify_rays(rays_flat, chunk=1024*32, use_viewdirs=False, **kwargs):
+def batchify_rays(rays_flat, chunk=1024*32, use_viewdirs=False, for_motion=False, **kwargs):
     """Render rays in smaller minibatches to avoid OOM.
     """
     all_ret = {}
     for i in range(0, rays_flat.shape[0], chunk):
-        ret = render_rays(rays_flat[i:i+chunk], use_viewdirs, **kwargs)
+        ret = render_rays(rays_flat[i:i+chunk], use_viewdirs, for_motion=for_motion, **kwargs)
         for k in ret:
             if k not in all_ret:
                 all_ret[k] = []
@@ -163,6 +163,87 @@ def render(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
     ret_list = [all_ret[k] for k in k_extract]
     ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
+
+
+#### To get database ####
+def get_database(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
+                  near=0., far=1., with_5_9=False, use_viewdirs=False, c2w_staticcam=None, 
+                  rays_depth=None, **kwargs):
+    """Render rays
+    Args:
+      H: int. Height of image in pixels.
+      W: int. Width of image in pixels.
+      focal: float. Focal length of pinhole camera.
+      chunk: int. Maximum number of rays to process simultaneously. Used to
+        control maximum memory usage. Does not affect final results.
+      rays: array of shape [2, batch_size, 3]. Ray origin and direction for
+        each example in batch.
+      c2w: array of shape [3, 4]. Camera-to-world transformation matrix.
+      ndc: bool. If True, represent ray origin, direction in NDC coordinates.
+      near: float or array of shape [batch_size]. Nearest distance for a ray.
+      far: float or array of shape [batch_size]. Farthest distance for a ray.
+      with_5_9: render with aspect ratio 5.33:9 (one third of 16:9)
+      use_viewdirs: bool. If True, use viewing direction of a point in space in model.
+      c2w_staticcam: array of shape [3, 4]. If not None, use this transformation matrix for 
+       camera while using other c2w argument for viewing directions.
+    Returns:
+      rgb_map: [batch_size, 3]. Predicted RGB values for rays.
+      disp_map: [batch_size]. Disparity map. Inverse of depth.
+      acc_map: [batch_size]. Accumulated opacity (alpha) along a ray.
+      extras: dict with everything returned by render_rays().
+    """
+    if c2w is not None:
+        # special case to render full image
+        rays_o, rays_d = get_rays(H, W, intrinsic, c2w)
+        if with_5_9:
+            W_before = W
+            W = int(H / 9. * 16. / 3.)
+            if W % 2 != 0:
+                W = W - 1
+            start = (W_before - W) // 2
+            rays_o = rays_o[:, start:start + W, :]
+            rays_d = rays_d[:, start:start + W, :]
+    elif rays.shape[0] == 2:
+        # use provided ray batch
+        rays_o, rays_d = rays
+    else:
+        rays_o, rays_d, rays_depth = rays
+    
+    if use_viewdirs:
+        # provide ray directions as input
+        viewdirs = rays_d
+        if c2w_staticcam is not None:
+            # special case to visualize effect of viewdirs
+            rays_o, rays_d = get_rays(H, W, intrinsic, c2w_staticcam)
+        viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True)
+        viewdirs = torch.reshape(viewdirs, [-1,3]).float()
+
+    sh = rays_d.shape # [..., 3]
+
+    # Create ray batch
+    rays_o = torch.reshape(rays_o, [-1,3]).float()
+    rays_d = torch.reshape(rays_d, [-1,3]).float()
+
+    near, far = near * torch.ones_like(rays_d[...,:1]), far * torch.ones_like(rays_d[...,:1])
+    rays = torch.cat([rays_o, rays_d, near, far], -1)
+    if use_viewdirs:
+        rays = torch.cat([rays, viewdirs], -1)
+    if rays_depth is not None:
+        rays_depth = torch.reshape(rays_depth, [-1,3]).float()
+        rays = torch.cat([rays, rays_depth], -1)
+
+    # Render and reshape
+    all_ret = batchify_rays(rays, chunk, use_viewdirs, for_motion=True, **kwargs)
+    for k in all_ret:
+        k_sh = list(sh[:-1]) + list(all_ret[k].shape[1:])
+        all_ret[k] = torch.reshape(all_ret[k], k_sh)
+
+    k_extract = ['pnm_rgb_term', 'pnm_feature_term', 'pnm_points']
+    ret_list = [all_ret[k] for k in k_extract]
+    # ret_dict = {k : all_ret[k] for k in all_ret if k not in k_extract}
+    # return ret_list + [ret_dict]
+    return ret_list
+
 
 def render_hyp(H, W, intrinsic, chunk=1024*32, rays=None, c2w=None, ndc=True,
                   near=0., far=1., with_5_9=False, use_viewdirs=False, c2w_staticcam=None, 
@@ -530,6 +611,8 @@ def create_nerf(args, scene_render_params):
 
       #### Motion Potential model ####
       motion_model = MotionPotential(input_ch=3, input_ch_feature=args.feat_dim, output_ch=3)
+      motion_model = nn.DataParallel(motion_model).to(device)
+
       for name, param in motion_model.named_parameters():
           motion_vars.append(param)
 
@@ -678,7 +761,8 @@ def render_rays(ray_batch,
                 all_far=None,
                 idx = 0,
                 network_motion = None,
-                motion_network_query_fn = None):
+                motion_network_query_fn = None,
+                for_motion=False):
     """Volumetric rendering.
     Args:
       ray_batch: array of shape [batch_size, ...]. All information necessary
@@ -708,6 +792,7 @@ def render_rays(ray_batch,
       z_std: [num_rays]. Standard deviation of distances along ray for each
         sample.
     """
+
     N_rays = ray_batch.shape[0]
     rays_o, rays_d = ray_batch[:,0:3], ray_batch[:,3:6] # [N_rays, 3] each
     viewdirs = None
@@ -742,7 +827,7 @@ def render_rays(ray_batch,
     
     raw = network_query_fn[idx](pts, viewdirs, embedded_cam, network_fn[idx])
     rgb_map, disp_map, acc_map, weights, depth_map, feature_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
- 
+
     ### Try without coarse and fine network, but just one network and use additional samples from the distribution of the nerf
     if N_importance == 0:
 
@@ -806,6 +891,7 @@ def render_rays(ray_batch,
 
         run_fn = network_fn[idx] if network_fine[idx] is None else network_fine[idx]
 
+
         raw = network_query_fn[idx](pts, viewdirs, embedded_cam, run_fn)
 
         rgb_map, disp_map, acc_map, weights, depth_map, feature_map = raw2outputs(raw, z_vals, rays_d, raw_noise_std, pytest=pytest)
@@ -821,7 +907,13 @@ def render_rays(ray_batch,
         pred_depth_hyp = z_samples
 
         ### Get features for these samples --> detach it from the compute graph
-        z_vals_importance, _ = torch.sort(pred_depth_hyp.detach(), -1)
+        num_samples_for_database = 1
+        if not is_joint:
+            z_vals_importance, u = sample_pdf_return_u(z_vals_mid, weights[...,1:-1], num_samples_for_database, det=(perturb==0.), pytest=pytest, load_u=cached_u)
+        else:
+            z_vals_importance, u = sample_pdf_joint_return_u(z_vals_mid, weights[...,1:-1], num_samples_for_database, det=(perturb==0.), pytest=pytest, load_u=cached_u)
+
+        z_vals_importance, _ = torch.sort(z_vals_importance.detach(), -1)
         pnm_pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals_importance[...,:,None] # [N_rays, N_samples + N_importance, 3]
         raw_importance = network_query_fn[idx](pnm_pts, viewdirs, embedded_cam, run_fn)
 
@@ -829,27 +921,31 @@ def render_rays(ray_batch,
         pnm_rgb_term = torch.sigmoid(raw_importance[...,:3])
         pnm_feature_term = raw_importance[...,4:]
 
+    if not for_motion:
+      ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights, 'pred_hyp' : pred_depth_hyp,\
+      'u':u, 'feature_map': feature_map, 'pnm_rgb_term': pnm_rgb_term, 'pnm_feature_term': pnm_feature_term, 'pnm_points': pnm_pts}
+      if retraw:
+          ret['raw'] = raw
+      if N_importance > 0:
+          ret['rgb0'] = rgb_map_0
+          ret['disp0'] = disp_map_0
+          ret['acc0'] = acc_map_0
+          ret['depth0'] = depth_map_0
+          ret['z_vals0'] = z_vals_0
+          ret['weights0'] = weights_0
+          ret['feature_map_0'] = feature_map_0
+          ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
+          # ret['pred_hyp'] = pred_depth_hyp
 
-    ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'depth_map' : depth_map, 'z_vals' : z_vals, 'weights' : weights, 'pred_hyp' : pred_depth_hyp,\
-    'u':u, 'feature_map': feature_map, 'pnm_rgb_term': pnm_rgb_term, 'pnm_feature_term': pnm_feature_term, 'pnm_points': pnm_pts}
-    if retraw:
-        ret['raw'] = raw
-    if N_importance > 0:
-        ret['rgb0'] = rgb_map_0
-        ret['disp0'] = disp_map_0
-        ret['acc0'] = acc_map_0
-        ret['depth0'] = depth_map_0
-        ret['z_vals0'] = z_vals_0
-        ret['weights0'] = weights_0
-        ret['feature_map_0'] = feature_map_0
-        ret['z_std'] = torch.std(z_samples, dim=-1, unbiased=False)  # [N_rays]
-        # ret['pred_hyp'] = pred_depth_hyp
-
-    for k in ret:
-        if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
-            print(f"! [Numerical Error] {k} contains nan or inf.")
+      for k in ret:
+          if (torch.isnan(ret[k]).any() or torch.isinf(ret[k]).any()) and DEBUG:
+              print(f"! [Numerical Error] {k} contains nan or inf.")
+    
+    else:
+      ret = {'pnm_rgb_term': pnm_rgb_term, 'pnm_feature_term': pnm_feature_term, 'pnm_points': pnm_pts}
 
     return ret
+
 
 def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, poses, intrinsics, args):
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W), indexing='ij'), -1)  # (H, W, 2)
@@ -994,220 +1090,281 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
     init_learning_rate = args.lrate
     old_learning_rate = init_learning_rate     
+    ALL_DATABASE = None
 
-    for i in trange(start, N_iters):
+    # it_recache = 1000
+    it_recache = 1
+    skip_view = 20
+    H_database = int(H/4)
+    W_database = int(H/4) 
 
-        all_batch_rays = []
-        all_target_h = []
-        all_space_carving_mask = []
-        all_rgbs = []
-        all_extras = []
-        all_target_feat = []
+    #### Precompute STD ####
+    print("Computing STD for scaling of dimensions")
 
-        ### Do this for each time step
-        # for j in range(len(args.frame_idx)):
-        ### Hardcoded to 2 timesteps
-        for j in range(2):
-          ### Select camera index
-          img_i = np.random.choice(i_train)
+    SCALE_FACTORS = []
 
-          curr_features = features[j]
+    with torch.no_grad():
 
-          if args.feat_dim == 768:
-            curr_features = curr_features.permute(2, 0, 1).unsqueeze(0).float()
-            curr_features = F.interpolate(curr_features, size=(H, W), mode='bilinear').squeeze().permute(1,2,0)
+      for j in range(2):
+        CURR_DATABASE = []
 
-          curr_features = curr_features.to(device)
+        for idx in range(1, len(i_train), skip_view):
+          img_i = i_train[idx]
 
-          if use_depth:
-              curr_scale = DEPTH_SCALES[j, img_i]
-              curr_shift = DEPTH_SHIFTS[j, img_i]
+          pnm_rgb_term, pnm_feature_term, pnm_points = get_database(H_database, W_database, intrinsics[j][img_i], chunk=(args.chunk // 4), c2w=poses[j][img_i], **render_kwargs_train)
 
-              ## Scale and shift
-              if args.dataset != "blender":
-                batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images[j], depths[j], valid_depths[j], poses[j], \
-                    intrinsics[j], all_depth_hypothesis[j], args, None, None)
-              else:
-                batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images[j], depths[j], valid_depths[j], poses[j], \
-                    intrinsics[j], gt_depths_train[j], curr_features, args, None, None, gt_valid_depths_train[j])          
+          #### Downsample to get a smaller size
+          curr_valid_depth = valid_depths[j][img_i]
+          curr_valid_depth = curr_valid_depth.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0).float()
+          curr_valid_depth = F.interpolate(curr_valid_depth, size=(H_database, W_database), mode='nearest').squeeze().bool()
 
-              target_h = target_h*curr_scale + curr_shift
+          is_object_ray = curr_valid_depth 
+          pnm_rgb_term = pnm_rgb_term[is_object_ray].reshape(-1, 3)
+          pnm_feature_term = pnm_feature_term[is_object_ray].reshape(-1, args.feat_dim)
+          pnm_points = pnm_points[is_object_ray].reshape(-1, 3)
 
-          else:
-              batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images[j], depths[j], valid_depths[j], poses[j], \
-                  intrinsics[j], args)            
+          motion_query_func = render_kwargs_train["motion_network_query_fn"][j]
+          motion_model = render_kwargs_train["network_motion"][j]
+          potentials = motion_query_func(pnm_points, pnm_feature_term, motion_model)
 
-          if args.input_ch_cam > 0:
-              render_kwargs_train['embedded_cam'] = embedcam_fn[img_i]
+          curr_entries = torch.cat([pnm_rgb_term, pnm_feature_term, potentials - pnm_points], -1)
+          # print(curr_entries.shape)
+          CURR_DATABASE.append(curr_entries)
 
-          render_kwargs_train["cached_u"] = None
+        CURR_DATABASE = torch.cat(CURR_DATABASE, 0)
 
-          rgb, _, _, extras = render_hyp(H, W, None, chunk=args.chunk, rays=batch_rays, verbose=i < 10, retraw=True,  is_joint=args.is_joint, near=all_near[j], far=all_far[j], idx=j, **render_kwargs_train)
+        ### Compute for std
+        curr_pnm_rgb_term, curr_pnm_feature_term, curr_potentials_term = torch.split(CURR_DATABASE, [3, args.feat_dim,3], dim=-1)
 
-          all_batch_rays.append(batch_rays)
-          all_target_h.append(target_h)
-          all_rgbs.append(rgb)
-          all_extras.append(extras)
-          all_target_feat.append(target_feat)
+        # print(curr_pnm_rgb_term.shape)
+        # print(curr_pnm_feature_term.shape)
+        # print(curr_potentials_term.shape)
 
-          #### Current motion model, getting the energies
-          with torch.no_grad():
-            pnm_rgb_term = extras["pnm_rgb_term"]
-            pnm_feature_term = extras["pnm_feature_term"]
-            pnm_points = extras["pnm_points"]
+        std_rgb = torch.std(curr_pnm_rgb_term, dim=0)
+        std_feature = torch.std(curr_pnm_feature_term, dim=0)
+        std_potentials = torch.std(curr_potentials_term, dim=0)
 
-            print("Computing for energies...")
-            print(pnm_rgb_term.shape)
-            print(pnm_feature_term.shape)
-            print(pnm_points.shape)
-            exit()
+        # print(std_rgb.shape)
+        # print(std_feature.shape)
+        # print(std_potentials.shape)
+
+        std_rgb = torch.sum(std_rgb)
+        std_feature = torch.sum(std_feature)
+        std_potentials = torch.sum(std_potentials)
+
+        # print(std_rgb)
+        # print(std_feature)
+        # print(std_potentials)
+
+        # weight_rgb = (3/std_rgb).float()
+        # weight_features = (args.feat_dim/std_feature).float()
+        # weight_potentials = (3/std_potentials).float()
+
+        weight_rgb = (1./std_rgb).float()
+        weight_features = (1./std_feature).float()
+        weight_potentials = (1./std_potentials).float()
+
+        # print("Weights")
+        # print(weight_rgb)
+        # print(weight_features)
+        # print(weight_potentials)
+        # print()
+
+        # std_rgb = torch.sum(torch.std(curr_pnm_rgb_term * weight_rgb, dim=0))
+        # std_feature = torch.sum(torch.std(curr_pnm_feature_term * weight_features, dim=0))
+        # std_potentials = torch.sum(torch.std(curr_potentials_term * weight_potentials, dim=0))
+
+        SCALE_FACTORS.append([weight_rgb, weight_features, weight_potentials])
+
+        # print(std_rgb)
+        # print(std_feature)
+        # print(std_potentials)
+        # exit()
+    ########################
+
+    with torch.autograd.set_detect_anomaly(True):
+      for i in trange(start, N_iters):
+
+        ### Define database to cache ###
+        if i % it_recache == 0 or ALL_DATABASE is None:
+          # print("Recaching database.")
+          ALL_DATABASE = []
+
+          for j in range(2):
+            CURR_DATABASE = []
+
+            for idx in range(1, len(i_train), skip_view):
+              img_i = i_train[idx]
+
+              with torch.no_grad():
+                pnm_rgb_term, pnm_feature_term, pnm_points = get_database(H_database, W_database, intrinsics[j][img_i], chunk=(args.chunk // 4), c2w=poses[j][img_i], **render_kwargs_train)
+
+              #### Downsample to get a smaller size
+              # print(valid_depths[j][img_i].shape)
+              curr_valid_depth = valid_depths[j][img_i]
+              curr_valid_depth = curr_valid_depth.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0).float()
+              # print(curr_valid_depth.shape)
+
+              curr_valid_depth = F.interpolate(curr_valid_depth, size=(H_database, W_database), mode='nearest').squeeze().bool()
+              # print(curr_valid_depth.shape)
+              # print(pnm_rgb_term.shape)
+              # exit()
+
+              is_object_ray = curr_valid_depth 
+              pnm_rgb_term = pnm_rgb_term[is_object_ray].reshape(-1, 3)
+              pnm_feature_term = pnm_feature_term[is_object_ray].reshape(-1, args.feat_dim)
+              pnm_points = pnm_points[is_object_ray].reshape(-1, 3)
+
+              motion_query_func = render_kwargs_train["motion_network_query_fn"][j]
+              motion_model = render_kwargs_train["network_motion"][j]
+              potentials = motion_query_func(pnm_points, pnm_feature_term, motion_model)
+
+              # print(valid_depths[j][img_i].shape)
+              # print(torch.sum(valid_depths[j][img_i]))
+              # print(pnm_rgb_term.shape)
+              # print(pnm_feature_term.shape)
+              # print(pnm_points.shape)
+              # print(potentials.shape)
+              # exit()
+
+              ### Mika -- remember to add gumbel noise term later....
+              weight_rgb, weight_features, weight_potentials = SCALE_FACTORS[j]
+              curr_entries = torch.cat([pnm_rgb_term * weight_rgb, pnm_feature_term * weight_features, (potentials - pnm_points) * weight_potentials], -1)
+              # print(curr_entries.shape)
+              # print("Weights")
+              # print(weight_rgb)
+              # print(weight_features)
+              # print(weight_potentials)
+              # print()              
+              CURR_DATABASE.append(curr_entries)
+
+            CURR_DATABASE = torch.cat(CURR_DATABASE, 0)
+            # print("N entries for frame " + str(j))
+            # print(CURR_DATABASE.shape)
+            # print()
+
+            ALL_DATABASE.append(CURR_DATABASE)
+          ############################################################################################
+
+        #### Sample and optimize nearest neighbor
+        # num_y_to_sample = 256
+        # num_y_to_sample = 512
+        num_y_to_sample = 1024
+
+        ### Select random indices 
+        # print(ALL_DATABASE[0].shape[0])
         
-        all_batch_rays = torch.stack(all_batch_rays)
-        all_target_h = torch.stack(all_target_h)
-        all_rgbs = torch.stack(all_rgbs)
-        all_target_feat = torch.stack(all_target_feat)
+        indices = torch.randperm(ALL_DATABASE[0].shape[0])[:num_y_to_sample]  
+        selected_entries = ALL_DATABASE[0][indices]   
+        # print(selected_entries.shape)
 
-        all_pred_hyp = torch.stack(e["pred_hyp"] for e in all_extras)
-        all_pred_feat = torch.stack(e["feature_map"] for e in all_extras)
-
-        print(all_batch_rays.shape)
-        print(all_target_h.shape)
-        print(all_rgbs.shape)
-        print(all_target_feat.shape)
-        exit()
-
+        ### Get argmin
+        distances = torch.norm(selected_entries.unsqueeze(1) - ALL_DATABASE[1].unsqueeze(0), p=2, dim=-1) ### (256x200k) dynamic --> (200k, 200k) dynamic
+        distances_min = torch.min(distances, axis=-1)[0]
+        # print(distances.shape)
+        # print(distances_min.shape)
+        
         # compute loss and optimize
-        optimizer.zero_grad()
+        optimizer_motion.zero_grad()
 
-        if use_depth:
-            # target_d = target_d.squeeze(-1)
-            optimizer_ss.zero_grad()
+        ## Energy loss on the three terms
+        loss = torch.mean(distances_min)
+
+        # print(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
+        # start_time = time.time()
         
-        img_loss = img2mse(rgb, target_s)
-        psnr = mse2psnr(img_loss)
+        # if i % it_recache == -1 and i != start:
+        #   loss.backward()
         
-        loss = img_loss
-
-        if use_depth and (args.space_carving_weight>0. and i>args.warm_start_nerf):
-            space_carving_loss = compute_space_carving_loss(extras["pred_hyp"], target_h, is_joint=args.is_joint, norm_p=args.norm_p, threshold=args.space_carving_threshold, mask=space_carving_mask)
-            
-            loss = loss + args.space_carving_weight * space_carving_loss
-        else:
-            space_carving_loss = torch.mean(torch.zeros([rgb.shape[0]]).to(rgb.device))
-
-        if 'rgb0' in extras:
-            img_loss0 = img2mse(extras['rgb0'], target_s)
-            psnr0 = mse2psnr(img_loss0)
-            loss = loss + img_loss0
-
+        # else:
+        #   loss.backward(retain_graph=True)
+        
         loss.backward()
 
-        ### Update learning rate
-        learning_rate = get_learning_rate(init_learning_rate, i, args.decay_step, args.decay_rate, staircase=True)
-        if old_learning_rate != learning_rate:
-            update_learning_rate(optimizer, learning_rate)
-            old_learning_rate = learning_rate
+        # print("Single backward call took:")
+        # print(time.time() - start_time)
+        # exit()
 
-        optimizer.step()
+        # ### Update learning rate
+        # learning_rate = get_learning_rate(init_learning_rate, i, args.decay_step, args.decay_rate, staircase=True)
+        # if old_learning_rate != learning_rate:
+        #     update_learning_rate(optimizer_motion, learning_rate)
+        #     old_learning_rate = learning_rate
 
-        ### Don't optimize scale shift for the last 100k epochs, check whether the appearance will crisp
-        if use_depth and i < args.freeze_ss:
-            optimizer_ss.step()
+        optimizer_motion.step()
 
-        # ### Update camera embeddings
-        # if args.input_ch_cam > 0 and args.opt_ch_cam:
-        #     optimizer_latent.step() 
-
-        # write logs
+        # write logs ---> need to fix this as it is now a list
         if i%args.i_weights==0:
             path = os.path.join(args.ckpt_dir, args.expname, '{:06d}.tar'.format(i))
             save_dict = {
                 'global_step': global_step,
-                'network_fn_state_dict': render_kwargs_train['network_fn'].state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),}
-            if render_kwargs_train['network_fine'] is not None:
-                save_dict['network_fine_state_dict'] = render_kwargs_train['network_fine'].state_dict()
-
-            if args.input_ch_cam > 0:
-                save_dict['embedded_cam'] = embedcam_fn
-
-            if use_depth:
-                save_dict['depth_shifts'] = DEPTH_SHIFTS
-                save_dict['depth_scales'] = DEPTH_SCALES
+                'optimizer_state_dict': optimizer_motion.state_dict()}
+            for j in range(2):
+              save_dict["network_fn_" + str(j) +"_state_dict"] = render_kwargs_train['network_fn'][j].state_dict()
+              if render_kwargs_train['network_fine'] is not None:
+                save_dict["network_fine_" + str(j) +"_state_dict"] = render_kwargs_train['network_fine'][j].state_dict()
+              save_dict["network_motion_" + str(j) +"_state_dict"] = render_kwargs_train['network_motion'][j].state_dict()
 
             torch.save(save_dict, path)
-            print('Saved checkpoints at', path)
+            # print('Saved checkpoints at', path)
+            # exit()
         
         if i%args.i_print==0:
-            tb.add_scalars('mse', {'train': img_loss.item()}, i)
+            tb.add_scalars('motion_loss', {'train': loss.item()}, i)
 
-            if args.space_carving_weight > 0.:
-                tb.add_scalars('space_carving_loss', {'train': space_carving_loss.item()}, i)
-
-            tb.add_scalars('psnr', {'train': psnr.item()}, i)
-            if 'rgb0' in extras:
-                tb.add_scalars('mse0', {'train': img_loss0.item()}, i)
-                tb.add_scalars('psnr0', {'train': psnr0.item()}, i)
-
-            if use_depth:
-                scale_mean = torch.mean(DEPTH_SCALES[i_train])
-                shift_mean = torch.mean(DEPTH_SHIFTS[i_train])
-                tb.add_scalars('depth_scale_mean', {'train': scale_mean.item()}, i)
-                tb.add_scalars('depth_shift_mean', {'train': shift_mean.item()}, i) 
-
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}  MSE: {img_loss.item()} Space carving: {space_carving_loss.item()}")
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
             
-        if i%args.i_img==0:
-            # visualize 2 train images
-            _, images_train = render_images_with_metrics(2, i_train, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, embedcam_fn=embedcam_fn)
-            tb.add_image('train_image',  torch.cat((
-                torchvision.utils.make_grid(images_train["rgbs"], nrow=1), \
-                torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
-                torchvision.utils.make_grid(images_train["depths"], nrow=1), \
-                torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
-            # compute validation metrics and visualize 8 validation images
-            mean_metrics_val, images_val = render_images_with_metrics(2, i_val, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-            tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
-            tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
-            tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
-            tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
-            if mean_metrics_val.has("depth_rmse"):
-                tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
-            if 'rgbs0' in images_val:
-                tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
-                tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
-            if 'rgbs0' in images_val:
-                tb.add_image('val_image',  torch.cat((
-                    torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
-            else:
-                tb.add_image('val_image',  torch.cat((
-                    torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["depths"], nrow=1), \
-                    torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+        # if i%args.i_img==0:
+        #     # visualize 2 train images
+        #     _, images_train = render_images_with_metrics(2, i_train, images, depths, valid_depths, \
+        #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test, embedcam_fn=embedcam_fn)
+        #     tb.add_image('train_image',  torch.cat((
+        #         torchvision.utils.make_grid(images_train["rgbs"], nrow=1), \
+        #         torchvision.utils.make_grid(images_train["target_rgbs"], nrow=1), \
+        #         torchvision.utils.make_grid(images_train["depths"], nrow=1), \
+        #         torchvision.utils.make_grid(images_train["target_depths"], nrow=1)), 2), i)
+        #     # compute validation metrics and visualize 8 validation images
+        #     mean_metrics_val, images_val = render_images_with_metrics(2, i_val, images, depths, valid_depths, \
+        #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
+        #     tb.add_scalars('mse', {'val': mean_metrics_val.get("img_loss")}, i)
+        #     tb.add_scalars('psnr', {'val': mean_metrics_val.get("psnr")}, i)
+        #     tb.add_scalar('ssim', mean_metrics_val.get("ssim"), i)
+        #     tb.add_scalar('lpips', mean_metrics_val.get("lpips"), i)
+        #     if mean_metrics_val.has("depth_rmse"):
+        #         tb.add_scalar('depth_rmse', mean_metrics_val.get("depth_rmse"), i)
+        #     if 'rgbs0' in images_val:
+        #         tb.add_scalars('mse0', {'val': mean_metrics_val.get("img_loss0")}, i)
+        #         tb.add_scalars('psnr0', {'val': mean_metrics_val.get("psnr0")}, i)
+        #     if 'rgbs0' in images_val:
+        #         tb.add_image('val_image',  torch.cat((
+        #             torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["rgbs0"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["depths0"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
+        #     else:
+        #         tb.add_image('val_image',  torch.cat((
+        #             torchvision.utils.make_grid(images_val["rgbs"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["target_rgbs"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["depths"], nrow=1), \
+        #             torchvision.utils.make_grid(images_val["target_depths"], nrow=1)), 2), i)
 
-        # test at the last iteration
-        if (i + 1) == N_iters:
-            torch.cuda.empty_cache()
-            images = torch.Tensor(test_images).to(device)
-            # depths = torch.Tensor(test_depths).to(device)
-            # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
-            depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
-            valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
+        # # test at the last iteration
+        # if (i + 1) == N_iters:
+        #     torch.cuda.empty_cache()
+        #     images = torch.Tensor(test_images).to(device)
+        #     # depths = torch.Tensor(test_depths).to(device)
+        #     # valid_depths = torch.Tensor(test_valid_depths).bool().to(device)
+        #     depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2], 1)).to(device)
+        #     valid_depths = torch.zeros((images.shape[0], images.shape[1], images.shape[2]), dtype=bool).to(device)
             
-            poses = torch.Tensor(test_poses).to(device)
-            intrinsics = torch.Tensor(test_intrinsics).to(device)
-            mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
-                poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
-            write_images_with_metrics(images_test, mean_metrics_test, far, args)
-            tb.flush()
+        #     poses = torch.Tensor(test_poses).to(device)
+        #     intrinsics = torch.Tensor(test_intrinsics).to(device)
+        #     mean_metrics_test, images_test = render_images_with_metrics(None, i_test, images, depths, valid_depths, \
+        #         poses, H, W, intrinsics, lpips_alex, args, render_kwargs_test)
+        #     write_images_with_metrics(images_test, mean_metrics_test, far, args)
+        #     tb.flush()
 
         global_step += 1
 
@@ -1220,9 +1377,9 @@ def config_parser():
     parser.add_argument('task', type=str, help='one out of: "train", "test", "test_with_opt", "video"')
     parser.add_argument('--config', is_config_file=True, 
                         help='config file path')
-    parser.add_argument("--expname", type=str, default="test", 
+    parser.add_argument("--expname", type=str, default="hotdog_v1", 
                         help='specify the experiment, required for "test" and "video", optional for "train"')
-    parser.add_argument("--dataset", type=str, default="llff", 
+    parser.add_argument("--dataset", type=str, default="blender", 
                         help='dataset used -- selects which dataloader"')
 
     # training options
@@ -1239,7 +1396,7 @@ def config_parser():
 
 
     ### Learning rate updates
-    parser.add_argument('--num_iterations', type=int, default=500000, help='Number of epochs')
+    parser.add_argument('--num_iterations', type=int, default=20000, help='Number of epochs')
     parser.add_argument("--lrate", type=float, default=5e-4, 
                         help='learning rate')
     parser.add_argument('--decay_step', type=int, default=400000, help='Decay step for lr decay [default: 200000]')
@@ -1280,13 +1437,13 @@ def config_parser():
                         help='sampling linearly in disparity rather than depth')
 
     # logging/saving options
-    parser.add_argument("--i_print",   type=int, default=100, 
+    parser.add_argument("--i_print",   type=int, default=10, 
                         help='frequency of console printout and metric logging')
-    parser.add_argument("--i_img",     type=int, default=10000,
+    parser.add_argument("--i_img",     type=int, default=1000,
                         help='frequency of tensorboard image logging')
-    parser.add_argument("--i_weights", type=int, default=100000,
+    parser.add_argument("--i_weights", type=int, default=1000,
                         help='frequency of weight ckpt saving')
-    parser.add_argument("--ckpt_dir", type=str, default="log_test_pair",
+    parser.add_argument("--ckpt_dir", type=str, default="log_motion_pair",
                         help='checkpoint directory')
 
     # data options
