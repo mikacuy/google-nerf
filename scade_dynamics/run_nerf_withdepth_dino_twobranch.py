@@ -378,7 +378,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_dir, img), extension=".png") for img in imgs],
+                    [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
 
@@ -389,7 +389,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_depth_colored_dir, img), extension=".png") for img in imgs],
+                    [imageio.imread(os.path.join(video_depth_colored_dir, img)) for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
 
@@ -400,7 +400,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_highfeat_dir, img), extension=".png") for img in imgs],
+                    [imageio.imread(os.path.join(video_highfeat_dir, img)) for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
 
@@ -411,7 +411,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_lowfeat_dir, img), extension=".png") for img in imgs],
+                    [imageio.imread(os.path.join(video_lowfeat_dir, img)) for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")    
 
