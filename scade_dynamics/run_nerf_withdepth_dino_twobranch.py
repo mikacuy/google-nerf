@@ -33,7 +33,8 @@ from data import create_random_subsets, load_llff_data_multicam_withdepth, conve
 from train_utils import MeanTracker, update_learning_rate, get_learning_rate
 from metric import compute_rmse
 
-import imageio
+# import imageio
+import imageio.v2 as imageio
 from natsort import natsorted 
 
 from sklearn.decomposition import PCA
@@ -245,7 +246,8 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     video_dir = os.path.join(args.ckpt_dir, args.expname, 'video_' + filename)
     video_depth_dir = os.path.join(args.ckpt_dir, args.expname, 'video_depth_' + filename)
     video_depth_colored_dir = os.path.join(args.ckpt_dir, args.expname, 'video_depth_colored_' + filename)
-    video_feat_dir = os.path.join(args.ckpt_dir, args.expname, 'video_feat_' + filename)
+    video_highfeat_dir = os.path.join(args.ckpt_dir, args.expname, 'video_highfeat_' + filename)
+    video_lowfeat_dir = os.path.join(args.ckpt_dir, args.expname, 'video_lowfeat_' + filename)
 
     if os.path.exists(video_dir):
         shutil.rmtree(video_dir)
@@ -253,12 +255,15 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
         shutil.rmtree(video_depth_dir)
     if os.path.exists(video_depth_colored_dir):
         shutil.rmtree(video_depth_colored_dir)        
-    if os.path.exists(video_feat_dir):
-        shutil.rmtree(video_feat_dir)   
+    if os.path.exists(video_highfeat_dir):
+        shutil.rmtree(video_highfeat_dir)   
+    if os.path.exists(video_lowfeat_dir):
+        shutil.rmtree(video_lowfeat_dir)           
     os.makedirs(video_dir, exist_ok=True)
     os.makedirs(video_depth_dir, exist_ok=True)
     os.makedirs(video_depth_colored_dir, exist_ok=True)
-    os.makedirs(video_feat_dir, exist_ok=True)
+    os.makedirs(video_highfeat_dir, exist_ok=True)
+    os.makedirs(video_lowfeat_dir, exist_ok=True)
 
     depth_scale = render_kwargs_test["far"]
     max_depth_in_video = 0
@@ -266,29 +271,28 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     idx_to_take = range(0, len(poses), 3)
     # idx_to_take = range(0, len(poses), 10)
 
-    if not args.is_pca:
-      pred_feats_res = torch.empty(len(idx_to_take), H, W, args.feat_dim)
+    pred_highfeats_res = torch.empty(len(idx_to_take), H, W, args.feat_dim)
+    pred_lowfeats_res = torch.empty(len(idx_to_take), H, W, args.pca_dim)
+
+    print("Computing PCA of DINO feature...")
+    print(features.shape)
+    N = features.shape[0]
+    gt_features = features.detach().cpu().numpy()
+    gt_features = gt_features.reshape((-1, args.feat_dim))  
+
+    if args.is_ref_frame:
+      fname = os.path.join(args.ckpt_dir, args.expname, "features_pca.joblib")
+      pca = joblib.load(fname)
+      print("Loaded pca model from current frame.")
     else:
-      pred_feats_res = torch.empty(len(idx_to_take), H, W, args.pca_dim)
+      fname = os.path.join(args.ckpt_dir, args.ref_expname, "features_pca.joblib")
+      pca = joblib.load(fname)
+      print("Loaded pca model from other frame.")
 
-      print("Computing PCA of DINO feature...")
-      print(features.shape)
-      N = features.shape[0]
-      gt_features = features.detach().cpu().numpy()
-
-      if args.is_ref_frame:
-        fname = os.path.join(args.ckpt_dir, args.expname, "features_pca.joblib")
-        pca = joblib.load(fname)
-        print("Loaded pca model from current frame.")
-      else:
-        fname = os.path.join(args.ckpt_dir, args.ref_expname, "features_pca.joblib")
-        pca = joblib.load(fname)
-        print("Loaded pca model from other frame.")
-
-      gt_pca_descriptors = pca.transform(gt_features)
-      features = gt_pca_descriptors.reshape((N, H, W, -1))
-      features = torch.from_numpy(features).to(poses.device)
-      print(features.shape)
+    gt_pca_descriptors = pca.transform(gt_features)
+    features = gt_pca_descriptors.reshape((N, H, W, -1))
+    features = torch.from_numpy(features).to(poses.device)
+    print(features.shape)
     ##################
  
     for n in range(len(idx_to_take)):
@@ -305,7 +309,11 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
             video_frame = cv2.cvtColor(rgb_cpu_numpy_8b, cv2.COLOR_RGB2BGR)
 
             pred_features = extras["feature_map"]
-            pred_feats_res[n] = pred_features.cpu()
+            pred_feat_highdim = pred_features[..., :args.feat_dim]
+            pred_feat_lowdim = pred_features[..., args.feat_dim:]
+
+            pred_highfeats_res[n] = pred_feat_highdim.cpu()
+            pred_lowfeats_res[n] = pred_feat_lowdim.cpu()
 
             max_depth_in_video = max(max_depth_in_video, extras['depth_map'].max())
             depth_colored_frame = cv2.applyColorMap(to8b((extras['depth_map'] / depth_scale).cpu().numpy()), cv2.COLORMAP_TURBO)
@@ -324,34 +332,22 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
             cv2.imwrite(os.path.join(video_depth_colored_dir, str(img_idx) + '.png'), depth_colored_frame)
 
     ### Visualizing features
-    pred_feats_res = pred_feats_res.detach().cpu().numpy()
+    pred_highfeats_res = pred_highfeats_res.detach().cpu().numpy()
+    pred_highfeats_res = pred_highfeats_res.reshape((-1, args.feat_dim))
 
-    if not args.is_pca:
-      pred_feats_res = pred_feats_res.reshape((-1, args.feat_dim))
-    else:
-      pred_feats_res = pred_feats_res.reshape((-1, args.pca_dim))
+    pred_lowfeats_res = pred_lowfeats_res.detach().cpu().numpy()
+    pred_lowfeats_res = pred_lowfeats_res.reshape((-1, args.pca_dim))
       
     ### This produces bad things because of the background --> this was not supervised
     # pca = PCA(n_components=4).fit(pred_feats_res)
 
     ### For Visualization ###
-    N = features.shape[0]
-    gt_features = features.detach().cpu().numpy()
-    gt_features = gt_features.reshape((-1, features.shape[-1]))
-
-    if args.pca_dim >= 4 or (not args.is_pca):
-      pca = PCA(n_components=4).fit(gt_features)
-    else:
-      pca = PCA(n_components=3).fit(gt_features)
-    
-    gt_pca_descriptors = pca.transform(gt_features)
     gt_pca_descriptors = gt_pca_descriptors.reshape((N, H, W, -1))
-
     comp_min = gt_pca_descriptors.min(axis=(0, 1, 2))[-3:]
     comp_max = gt_pca_descriptors.max(axis=(0, 1, 2))[-3:]    
     #########################
 
-    pred_pca_descriptors = pca.transform(pred_feats_res)
+    pred_pca_descriptors = pca.transform(pred_highfeats_res)
     pred_pca_descriptors = pred_pca_descriptors.reshape((len(idx_to_take), H, W, -1))
 
     for n in range(len(idx_to_take)):
@@ -362,7 +358,19 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
    
       pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
       pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
-      pred_features_pil.save(os.path.join(video_feat_dir, str(img_idx) + '.png'))
+      pred_features_pil.save(os.path.join(video_highfeat_dir, str(img_idx) + '.png'))
+
+    pred_pca_descriptors = pred_lowfeats_res.reshape((len(idx_to_take), H, W, -1))
+    for n in range(len(idx_to_take)):
+      img_idx = idx_to_take[n]
+      curr_feat = pred_pca_descriptors[n]
+      
+      pred_features = curr_feat[:, :, -3:]
+   
+      pred_features_img = (pred_features - comp_min) / (comp_max - comp_min)
+      pred_features_pil = Image.fromarray((pred_features_img * 255).astype(np.uint8))
+      pred_features_pil.save(os.path.join(video_lowfeat_dir, str(img_idx) + '.png'))
+
 
     video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
     imgs = os.listdir(video_dir)
@@ -370,7 +378,7 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_dir, img)) for img in imgs],
+                    [imageio.imread(os.path.join(video_dir, img), extension=".png") for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
 
@@ -381,20 +389,31 @@ def render_video(poses, H, W, intrinsics, filename, args, render_kwargs_test, fp
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_depth_colored_dir, img)) for img in imgs],
+                    [imageio.imread(os.path.join(video_depth_colored_dir, img), extension=".png") for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
 
-    ## feature
-    video_file = os.path.join(args.ckpt_dir, args.expname, filename + '_feature.mp4')
-    imgs = os.listdir(video_feat_dir)
+    ## feature highdim
+    video_file = os.path.join(args.ckpt_dir, args.expname, filename + '_featurehighdim.mp4')
+    imgs = os.listdir(video_highfeat_dir)
     imgs = natsorted(imgs)
     print(len(imgs))
 
     imageio.mimsave(video_file,
-                    [imageio.imread(os.path.join(video_feat_dir, img)) for img in imgs],
+                    [imageio.imread(os.path.join(video_highfeat_dir, img), extension=".png") for img in imgs],
                     fps=10, macro_block_size=1)
     print("Done with " + video_file + ".")
+
+    ## feature highdim
+    video_file = os.path.join(args.ckpt_dir, args.expname, filename + '_featurelowdim.mp4')
+    imgs = os.listdir(video_lowfeat_dir)
+    imgs = natsorted(imgs)
+    print(len(imgs))
+
+    imageio.mimsave(video_file,
+                    [imageio.imread(os.path.join(video_lowfeat_dir, img), extension=".png") for img in imgs],
+                    fps=10, macro_block_size=1)
+    print("Done with " + video_file + ".")    
 
     # video_file = os.path.join(args.ckpt_dir, args.expname, filename + '.mp4')
     # subprocess.call(["ffmpeg", "-y", "-framerate", str(fps), "-i", os.path.join(video_dir, "%d.jpg"), "-c:v", "libx264", "-profile:v", "high", "-crf", str(fps), video_file])
