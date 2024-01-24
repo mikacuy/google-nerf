@@ -1133,7 +1133,7 @@ def get_ray_batch_from_one_image(H, W, i_train, images, depths, valid_depths, po
     batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     return batch_rays, target_s, target_d, target_vd, img_i
 
-def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, curr_features, args, space_carving_idx=None, cached_u=None, gt_valid_depths=None):
+def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, valid_depths, poses, intrinsics, all_hypothesis, curr_features, curr_projected_features, args, space_carving_idx=None, cached_u=None, gt_valid_depths=None):
     coords = torch.stack(torch.meshgrid(torch.linspace(0, H-1, H), torch.linspace(0, W-1, W), indexing='ij'), -1)  # (H, W, 2)
     # img_i = np.random.choice(i_train)
     
@@ -1153,6 +1153,7 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
     target_d = target_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1) or (N_rand, 2)
     target_vd = target_valid_depth[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 1)
     target_feat = curr_features[select_coords[:, 0], select_coords[:, 1]] 
+    target_feat_projected = curr_projected_features[select_coords[:, 0], select_coords[:, 1]] 
     target_h = target_hypothesis[:, select_coords[:, 0], select_coords[:, 1]]
 
     if space_carving_idx is not None:
@@ -1180,7 +1181,7 @@ def get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images, depths, val
 
     batch_rays = torch.stack([rays_o, rays_d], 0)  # (2, N_rand, 3)
     
-    return batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat
+    return batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat, target_feat_projected
 
 
 def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis, is_init_scales=False, \
@@ -1453,6 +1454,19 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     
     visu_dir = os.path.join(args.ckpt_dir, args.expname, "training_visu")
     os.makedirs(visu_dir, exist_ok=True)
+    
+    #### Projected features ####
+    print("Computing PCA of DINO feature...")
+    print(features.shape)
+    N = features.shape[0]
+    gt_features = features.detach().cpu().numpy()
+    gt_features = gt_features.reshape((-1, args.feat_dim))      
+
+    gt_pca_descriptors = pca.transform(gt_features)
+    projected_features = gt_pca_descriptors.reshape((N, H, W, -1))
+    projected_features = torch.from_numpy(projected_features).to(images.device)
+    print(projected_features.shape)
+    print(features.shape)
 
 
     ####################################
@@ -1783,6 +1797,87 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       ## Energy loss on the three terms
       loss = torch.mean(distances_min)
+      
+      # Standard NeRF photometric loss
+      #############################################################################################################################################
+      ### for NeRF1
+      img_i = np.random.choice(i_train)
+
+      curr_features = features[0][img_i]
+      curr_projected_features = projected_features[0][img_i]
+
+      if args.feat_dim == 768:
+          curr_features = curr_features.permute(2, 0, 1).unsqueeze(0).float()
+          curr_features = F.interpolate(curr_features, size=(H, W), mode='bilinear').squeeze().permute(1,2,0)
+
+      curr_features = curr_features.to(device)
+      curr_projected_features = curr_projected_features.to(device)
+
+      if use_depth:
+          if args.dataset != "blender":
+            ## Scale and shift
+            batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images[0], depths[0], valid_depths[0], poses[0], \
+                intrinsics[0], all_depth_hypothesis[0], args, None, None)
+          else:
+            batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat, target_feat_projected = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images[0], depths[0], valid_depths[0], poses[0], \
+                intrinsics[0], gt_depths_train[0], curr_features, curr_projected_features, args, None, None, gt_valid_depths_train[0])
+
+      else:
+          batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images[0], depths[0], valid_depths[0], poses[0], \
+              intrinsics[0], args)            
+
+      if args.input_ch_cam > 0:
+          render_kwargs_train['embedded_cam'] = embedcam_fn[img_i]
+
+      render_kwargs_train["cached_u"] = None
+
+      rgb, _, _, _ = render_hyp(H, W, None, chunk=(args.chunk // 8), rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, with_5_9=False, idx=0, for_motion=True, **render_kwargs_train)
+      
+      img_loss_1 = img2mse(rgb, target_s)
+      psnr_1 = mse2psnr(img_loss_1)
+      
+      loss += img_loss_1
+    
+      ### for NeRF2
+      img_i = np.random.choice(i_train)
+
+      curr_features = features[1][img_i]
+      curr_projected_features = projected_features[1][img_i]
+
+      if args.feat_dim == 768:
+          curr_features = curr_features.permute(2, 0, 1).unsqueeze(0).float()
+          curr_features = F.interpolate(curr_features, size=(H, W), mode='bilinear').squeeze().permute(1,2,0)
+
+      curr_features = curr_features.to(device)
+      curr_projected_features = curr_projected_features.to(device)
+
+      if use_depth:
+          if args.dataset != "blender":
+            ## Scale and shift
+            batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images[1], depths[1], valid_depths[1], poses[1], \
+                intrinsics[1], all_depth_hypothesis[1], args, None, None)
+          else:
+            batch_rays, target_s, target_d, target_vd, img_i, target_h, space_carving_mask, curr_cached_u, target_feat, target_feat_projected = get_ray_batch_from_one_image_hypothesis_idx(H, W, img_i, images[1], depths[1], valid_depths[1], poses[1], \
+                intrinsics[1], gt_depths_train[1], curr_features, curr_projected_features, args, None, None, gt_valid_depths_train[1])
+
+      else:
+          batch_rays, target_s, target_d, target_vd, img_i = get_ray_batch_from_one_image(H, W, i_train, images[1], depths[1], valid_depths[1], poses[1], \
+              intrinsics[1], args)            
+
+      if args.input_ch_cam > 0:
+          render_kwargs_train['embedded_cam'] = embedcam_fn[img_i]
+
+      render_kwargs_train["cached_u"] = None
+
+      rgb, _, _, _ = render_hyp(H, W, None, chunk=(args.chunk // 8), rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, with_5_9=False, idx=1, for_motion=True, **render_kwargs_train)
+      
+      
+      img_loss_2 = img2mse(rgb, target_s)
+      psnr_2 = mse2psnr(img_loss_2)
+      
+      loss += img_loss_2
+      
+      #############################################################################################################################################
 
       ###############################################
       loss.backward()
@@ -1815,8 +1910,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           tb.add_scalars('pd_agreement_term', {'train': pd_agreement_energy.item()}, i)
           tb.add_scalars('rgb_term', {'train': rgb_energy.item()}, i)
           tb.add_scalars('feature_term', {'train': feature_energy.item()}, i)
+          tb.add_scalars('photometric_loss_1', {'train': img_loss_1.item()}, i)
+          tb.add_scalars('photometric_loss_2', {'train': img_loss_2.item()}, i)
           # tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
-          print(f"[TRAIN] Iter: {i} Loss: {loss.item()} | PD_agreement_term: {pd_agreement_energy.item()}| RGB_term: {rgb_energy.item()} | Feature_term: {feature_energy.item()}")
+          print(f"[TRAIN] Iter: {i} Loss: {loss.item():.4f} | PD_agreement_term: {pd_agreement_energy.item():.4f}| RGB_term: {rgb_energy.item():.4f} | Feature_term: {feature_energy.item():.4f} | photomettic_loss_1: {img_loss_1.item():.4f} | photomettic_loss_2: {img_loss_2.item():.4f} | pnsr_1: {psnr_1.item():.2f} | pnsr_2: {psnr_2.item():.2f} ")
 
       global_step += 1
 
@@ -2696,6 +2793,8 @@ def config_parser():
                         help='reference frame for pca')    
     parser.add_argument("--pcadim", type=int, default=3,
                         help='pcadim')
+    parser.add_argument("--pca_model_path", type=str, 
+                        default="outputs/log_blender_withdepth_dino_twobranch_f2/hotdog_single_plate_detached_f2/features_pca.joblib")
 
 
     return parser
