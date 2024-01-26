@@ -46,6 +46,9 @@ from pytorch3d.ops.knn import knn_gather, knn_points
 
 from scipy.spatial.transform import Rotation as R
 
+import wandb
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
 
@@ -1800,6 +1803,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
       
       # Standard NeRF photometric loss
       #############################################################################################################################################
+      # with torch.no_grad():
       ### for NeRF1
       img_i = np.random.choice(i_train)
 
@@ -1913,8 +1917,18 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
           tb.add_scalars('photometric_loss_1', {'train': img_loss_1.item()}, i)
           tb.add_scalars('photometric_loss_2', {'train': img_loss_2.item()}, i)
           # tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}")
-          print(f"[TRAIN] Iter: {i} Loss: {loss.item():.4f} | PD_agreement_term: {pd_agreement_energy.item():.4f}| RGB_term: {rgb_energy.item():.4f} | Feature_term: {feature_energy.item():.4f} | photomettic_loss_1: {img_loss_1.item():.4f} | photomettic_loss_2: {img_loss_2.item():.4f} | pnsr_1: {psnr_1.item():.2f} | pnsr_2: {psnr_2.item():.2f} ")
-
+          print(f"[TRAIN] Iter: {i} Loss: {loss.item():.4f} | PD_agreement_term: {pd_agreement_energy.item():.4f}| RGB_term: {rgb_energy.item():.4f} | Feature_term: {feature_energy.item():.4f} | photomettic_loss_1: {img_loss_1.item():.4f} | photomettic_loss_2: {img_loss_2.item():.4f} | psnr_1: {psnr_1.item():.2f} | psnr_2: {psnr_2.item():.2f} ")
+      
+      wandb.log({"train/global_step": global_step,
+                 "train/iter": i,
+                 "train/PD_agreement_term": pd_agreement_energy.item(),
+                 "train/RGB_term": rgb_energy.item(),
+                 "train/Feature_term": feature_energy.item(),
+                 "train/photomettic_loss_1": img_loss_1.item(),
+                 "train/photomettic_loss_2": img_loss_2.item(),
+                 "train/psnr_1": psnr_1.item(),
+                 "train/psnr_2": psnr_2.item()})
+      
       global_step += 1
 
 def viz_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, scene_sample_params, lpips_alex, gt_depths, gt_valid_depths, all_depth_hypothesis, is_init_scales=False, \
@@ -2803,6 +2817,11 @@ def run_nerf():
     
     parser = config_parser()
     args = parser.parse_args()
+    
+    wandb.init(project="Motion-NeRF",
+               name=args.expname,
+               config=args
+               )
 
 
     if args.task == "train":
