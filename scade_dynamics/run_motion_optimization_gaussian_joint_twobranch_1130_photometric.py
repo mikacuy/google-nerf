@@ -1113,7 +1113,7 @@ def render_rays(ray_batch,
     
     else:
       ret = {'rgb_map' : rgb_map, 'disp_map' : disp_map, 'acc_map' : acc_map, 'pnm_rgb_term': pnm_rgb_term, 'pnm_feature_term': pnm_feature_term, 'pnm_points': pnm_pts, \
-      "rgb_map_pnm": rgb_map_pnm, "pnm_weights": weights_pnm, 'pnm_viewdir': viewdirs}
+      "rgb_map_pnm": rgb_map_pnm, "pnm_weights": weights_pnm, 'pnm_viewdir': viewdirs, 'feature_map': feature_map}
 
     return ret
 
@@ -1461,12 +1461,12 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
     #### Projected features ####
     print("Computing PCA of DINO feature...")
     print(features.shape)
-    N = features.shape[0]
+    N = features.shape[1]
     gt_features = features.detach().cpu().numpy()
     gt_features = gt_features.reshape((-1, args.feat_dim))      
 
     gt_pca_descriptors = pca.transform(gt_features)
-    projected_features = gt_pca_descriptors.reshape((N, H, W, -1))
+    projected_features = gt_pca_descriptors.reshape((2, N, H, W, -1))
     projected_features = torch.from_numpy(projected_features).to(images.device)
     print(projected_features.shape)
     print(features.shape)
@@ -1835,12 +1835,30 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       render_kwargs_train["cached_u"] = None
 
-      rgb, _, _, _ = render_hyp(H, W, None, chunk=(args.chunk // 8), rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, with_5_9=False, idx=0, for_motion=True, **render_kwargs_train)
+      rgb, _, _, extras = render_hyp(H, W, None, chunk=(args.chunk // 8), rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, with_5_9=False, idx=0, for_motion=True, **render_kwargs_train)
       
+      pred_features = extras["feature_map"]
+
+      pred_feat_highdim = pred_features[:, :args.feat_dim]
+      pred_feat_lowdim = pred_features[:, args.feat_dim:]
+        
       img_loss_1 = img2mse(rgb, target_s)
       psnr_1 = mse2psnr(img_loss_1)
       
-      loss += img_loss_1
+      loss += args.photometric_weight * img_loss_1
+      
+      if args.feature_weight > 0. :
+        feature_loss_1 = torch.norm(pred_feat_highdim - target_feat, p=1, dim=-1) + torch.norm(pred_feat_lowdim - target_feat_projected, p=1, dim=-1)
+
+        ## Only use foreground
+        feature_loss_1 = feature_loss_1 * space_carving_mask
+
+        feature_loss_1 = torch.mean(feature_loss_1)
+        loss = loss + args.feature_weight * feature_loss_1
+
+      else:
+        feature_loss_1 = torch.mean(torch.zeros([rgb.shape[0]]).to(rgb.device))
+    
     
       ### for NeRF2
       img_i = np.random.choice(i_train)
@@ -1873,13 +1891,29 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
       render_kwargs_train["cached_u"] = None
 
-      rgb, _, _, _ = render_hyp(H, W, None, chunk=(args.chunk // 8), rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, with_5_9=False, idx=1, for_motion=True, **render_kwargs_train)
+      rgb, _, _, extras = render_hyp(H, W, None, chunk=(args.chunk // 8), rays=batch_rays, verbose=i < 10, retraw=True, is_joint=args.is_joint, with_5_9=False, idx=1, for_motion=True, **render_kwargs_train)
       
+      pred_features = extras["feature_map"]
+
+      pred_feat_highdim = pred_features[:, :args.feat_dim]
+      pred_feat_lowdim = pred_features[:, args.feat_dim:]
       
       img_loss_2 = img2mse(rgb, target_s)
       psnr_2 = mse2psnr(img_loss_2)
       
-      loss += img_loss_2
+      loss += args.photometric_weight * img_loss_2
+      
+      if args.feature_weight > 0. :
+        feature_loss_2 = torch.norm(pred_feat_highdim - target_feat, p=1, dim=-1) + torch.norm(pred_feat_lowdim - target_feat_projected, p=1, dim=-1)
+
+        ## Only use foreground
+        feature_loss_2 = feature_loss_2 * space_carving_mask
+
+        feature_loss_2 = torch.mean(feature_loss_2)
+        loss = loss + args.feature_weight * feature_loss_2
+
+      else:
+        feature_loss_2 = torch.mean(torch.zeros([rgb.shape[0]]).to(rgb.device))
       
       #############################################################################################################################################
 
@@ -1927,7 +1961,9 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
                  "train/photomettic_loss_1": img_loss_1.item(),
                  "train/photomettic_loss_2": img_loss_2.item(),
                  "train/psnr_1": psnr_1.item(),
-                 "train/psnr_2": psnr_2.item()})
+                 "train/psnr_2": psnr_2.item(),
+                 "train/feature_render_loss_1": feature_loss_1.item(),
+                 "train/feature_render_loss_2": feature_loss_2.item()})
       
       global_step += 1
 
@@ -2698,6 +2734,9 @@ def config_parser():
                         help='weight for feature')
     parser.add_argument("--seman_lrate", type=float, default=5e-4, 
                         help='learning rate')
+    
+    parser.add_argument("--photometric_weight", type=float, default=1, 
+                        help='weight for photometric loss')
 
     parser.add_argument('--scaleshift_lr', default= 0.00001, type=float)
     parser.add_argument('--scale_init', default= 1.0, type=float)
