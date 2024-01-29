@@ -1556,8 +1556,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             potentials1 = motion_query_func(pnm_points1 * args.xyz_potential_scale, pnm_feature_term1_input * args.dino_potential_scale, motion_model1)
 
             ### Add noise in database construction for randomness in neighborhood
-            ### Gaussian
-            eps1_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term1.shape[0], 1))
+            ### Gumbel
+            # eps1_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term1.shape[0], 1))
+            eps1_noise = torch.distributions.gumbel.Gumbel(torch.zeros(pnm_rgb_term1.shape[0], 1), torch.ones(pnm_rgb_term1.shape[0], 1)).sample()
+            eps1_noise = torch.sqrt(eps1_noise + torch.min(eps1_noise))
 
             #### Construct database elements ####
             weight_rgb1, weight_features1, weight_potentials1 = SCALE_FACTORS[0]
@@ -1580,8 +1582,10 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
             potentials2 = motion_query_func(pnm_points2 * args.xyz_potential_scale, pnm_feature_term2_input * args.dino_potential_scale, motion_model2)
 
             ### Add noise in database construction for randomness in neighborhood
-            ### Gaussian
-            eps2_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term2.shape[0], 1))
+            ### Gumbel
+            # eps2_noise = torch.normal(args.pnm_mean, args.pnm_std, size=(pnm_rgb_term2.shape[0], 1))
+            eps2_noise = torch.distributions.gumbel.Gumbel(torch.zeros(pnm_rgb_term2.shape[0], 1), torch.ones(pnm_rgb_term2.shape[0], 1)).sample()
+            eps2_noise = torch.sqrt(eps2_noise + torch.min(eps2_noise))
 
             #### Construct database elements ####
             weight_rgb2, weight_features2, weight_potentials2 = SCALE_FACTORS[1]
