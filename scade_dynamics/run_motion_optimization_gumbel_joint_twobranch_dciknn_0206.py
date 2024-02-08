@@ -50,6 +50,8 @@ from scipy.spatial.transform import Rotation as R
 
 import wandb
 
+from dciknn_cuda import DCI
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEBUG = False
@@ -1628,6 +1630,7 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
           prev = 0
           
+          a = datetime.datetime.now()
           for j, data in enumerate(nn_dataloader1):
             selected_entries = data[0]
             batch_size = selected_entries.shape[0]
@@ -1640,6 +1643,45 @@ def train_nerf(images, depths, valid_depths, poses, intrinsics, i_split, args, s
 
             NN_1_to_2[prev : prev + batch_size] = min_indices
             prev = prev + batch_size
+          
+          b = datetime.datetime.now()
+          print(f'Brute Force Time: {b-a}')
+          
+          
+          peak_memory_usage = torch.cuda.max_memory_allocated()
+          print(f"Peak GPU memory usage: {peak_memory_usage / 1024**3:.2f} GB")
+          
+          dim = CURR_DATABASE2.shape[1]
+          
+          block_size = 100
+          thread_size = 10
+          num_comp_indices = 2
+          num_simp_indices = 10
+          num_outer_iterations = 5000
+          
+          num_neighbours = 1
+          
+          data = CURR_DATABASE1.detach().clone().to(0)
+          query = CURR_DATABASE2.detach().clone().to(0)
+          a = datetime.datetime.now()
+          dci_db = DCI(dim, num_comp_indices, num_simp_indices, block_size, thread_size, device=0)
+
+          dci_db.add(data)
+          # Query
+          indices, dists = dci_db.query(query, num_neighbours, num_outer_iterations)
+          
+          print("Nearest Indices:", indices)
+          print("Indices Distances:", dists)
+          dci_db.clear()
+          b = datetime.datetime.now()
+          print(f'DCIKNN Time: {b-a}')
+          
+          
+          peak_memory_usage = torch.cuda.max_memory_allocated()
+          print(f"Peak GPU memory usage: {peak_memory_usage / 1024**3:.2f} GB")
+          
+          
+          exit()
 
           ### Other direction if two-way loss
           if args.is_two_way:
