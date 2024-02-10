@@ -1,0 +1,44 @@
+-----------------------------------------------
+Brute Force Time (GPU): 0.720192s
+Peak GPU memory usage: 15.02 GB
+batch_size=784, num_workers=0
+-----------------------------------------------
+Brute Force Time (CPU): 18.728345s
+Peak CPU memory usage: 15.27 GB
+batch_size=784, num_workers=0
+-----------------------------------------------
+DCIKNN Time: 165.146772s
+Peak GPU memory usage: 0.03 GB
+block_size=100, thread_size=10, num_comp_indices=2, num_simp_indices=10, num_outer_iterations=5000
+-----------------------------------------------
+DCIKNN Time: 46.571708s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=10, num_comp_indices=2, num_simp_indices=10, num_outer_iterations=5000
+-----------------------------------------------
+DCIKNN Time: 170.012334s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=1, num_comp_indices=2, num_simp_indices=10, num_outer_iterations=5000
+-----------------------------------------------
+DCIKNN Time: 771.010749s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=100, num_comp_indices=2, num_simp_indices=10, num_outer_iterations=5000
+-----------------------------------------------
+DCIKNN Time: 98.767374s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=1, num_comp_indices=1, num_simp_indices=10, num_outer_iterations=5000
+-----------------------------------------------
+DCIKNN Time: 32.840368s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=10, num_comp_indices=1, num_simp_indices=10, num_outer_iterations=5000
+-----------------------------------------------
+DCIKNN Time: 6.223435s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=10, num_comp_indices=1, num_simp_indices=1, num_outer_iterations=5000
+-----------------------------------------------
+DCIKNN Time: 5.903663s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=10, num_comp_indices=1, num_simp_indices=1, num_outer_iterations=500
+-----------------------------------------------
+DCIKNN Time: 5.932728s
+Peak GPU memory usage: 0.03 GB
+block_size=10, thread_size=10, num_comp_indices=1, num_simp_indices=1, num_outer_iterations=50
